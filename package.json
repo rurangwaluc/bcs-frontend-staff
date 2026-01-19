@@ -1,9 +1,5 @@
 {
-<<<<<<< HEAD
-  "name": "frontend-admin",
-=======
   "name": "frontend-staff",
->>>>>>> 340607d (Update project - 16/01/2026)
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -25,12 +21,8 @@
     "autoprefixer": "^10.4.23",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
-<<<<<<< HEAD
-    "tailwindcss": "^4",
-=======
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
->>>>>>> 340607d (Update project - 16/01/2026)
     "typescript": "^5"
   }
 }

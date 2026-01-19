@@ -7,27 +7,25 @@ import { apiFetch } from "../../lib/api";
 import { getMe } from "../../lib/auth";
 import { useRouter } from "next/navigation";
 
-/**
- * If any endpoint differs, change ONLY here.
- *
- * ✅ Safe default:
- * - We GET /sales then filter client-side by status = AWAITING_PAYMENT_RECORD
- * - We POST payment to /payments (common pattern)
- *
- * If your backend uses a different route, just change:
- *   PAYMENTS_CREATE: "/your-route"
- */
 const ENDPOINTS = {
   SALES_LIST: "/sales",
-  PAYMENTS_CREATE: "/payments", // POST { saleId, amount, method, note? }
-  PAYMENTS_TODAY: "/payments/today" // optional; if 404, UI will ignore
+  RECORD_PAYMENT: "/payments",
+  CASH_TODAY: "/cash/today",
 };
 
-const PAYMENT_METHODS = [
-  { value: "CASH", label: "Cash" },
-  { value: "MOMO", label: "Mobile Money" },
-  { value: "BANK", label: "Bank Transfer" }
-];
+function money(n) {
+  const x = Number(n || 0);
+  return x.toLocaleString();
+}
+
+function fmt(v) {
+  if (!v) return "-";
+  try {
+    return new Date(v).toLocaleString();
+  } catch {
+    return String(v);
+  }
+}
 
 export default function CashierPage() {
   const router = useRouter();
@@ -35,25 +33,22 @@ export default function CashierPage() {
   const [me, setMe] = useState(null);
   const [msg, setMsg] = useState("");
 
-  const [tab, setTab] = useState("awaiting"); // awaiting | record | today
+  const [tab, setTab] = useState("awaiting"); // awaiting | today
 
-  // Sales
   const [sales, setSales] = useState([]);
-  const [salesLoading, setSalesLoading] = useState(false);
-  const [salesQ, setSalesQ] = useState("");
+  const [loadingSales, setLoadingSales] = useState(false);
 
-  // Record payment form
+  const [cashToday, setCashToday] = useState(null);
+  const [loadingCash, setLoadingCash] = useState(false);
+
+  // record payment form
   const [saleId, setSaleId] = useState("");
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("CASH");
   const [note, setNote] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  // Today (optional)
-  const [today, setToday] = useState(null);
-  const [todayLoading, setTodayLoading] = useState(false);
-
-  // ---------- Auth + hard redirect ----------
+  // ---------------- ROLE GUARD ----------------
   useEffect(() => {
     let alive = true;
 
@@ -62,15 +57,18 @@ export default function CashierPage() {
         const data = await getMe();
         if (!alive) return;
 
-        const user = data.user;
+        const user = data?.user || null;
         setMe(user);
 
-        if (user?.role && user.role !== "cashier") {
+        if (!user?.role) return router.replace("/login");
+
+        if (user.role !== "cashier") {
           const map = {
-            seller: "/seller",
-            store_keeper: "/store-keeper",
+            owner: "/owner",
+            admin: "/admin",
             manager: "/manager",
-            admin: "/admin"
+            store_keeper: "/store-keeper",
+            seller: "/seller",
           };
           router.replace(map[user.role] || "/");
         }
@@ -86,121 +84,112 @@ export default function CashierPage() {
     };
   }, [router]);
 
-  const isAuthorized = me && me.role === "cashier";
+  const isAuthorized = !!me && me.role === "cashier";
 
-  // ---------- Loaders ----------
+  // ---------------- LOADERS ----------------
   const loadSales = useCallback(async () => {
-    setSalesLoading(true);
+    setLoadingSales(true);
     setMsg("");
     try {
       const data = await apiFetch(ENDPOINTS.SALES_LIST, { method: "GET" });
-      setSales(data.sales || data.items || data.rows || []);
+      const items = data?.sales ?? data?.items ?? data?.rows ?? [];
+      setSales(Array.isArray(items) ? items : []);
     } catch (e) {
-      setMsg(e?.data?.error || e.message);
+      setMsg(e?.data?.error || e.message || "Failed to load sales");
     } finally {
-      setSalesLoading(false);
+      setLoadingSales(false);
     }
   }, []);
 
-  const loadToday = useCallback(async () => {
-    setTodayLoading(true);
+  const loadCashToday = useCallback(async () => {
+    setLoadingCash(true);
     setMsg("");
     try {
-      const data = await apiFetch(ENDPOINTS.PAYMENTS_TODAY, { method: "GET" });
-      setToday(data);
-    } catch {
-      // optional endpoint — ignore if missing
-      setToday(null);
+      const data = await apiFetch(ENDPOINTS.CASH_TODAY, { method: "GET" });
+      setCashToday(data?.summary ?? data ?? null);
+    } catch (e) {
+      // Not fatal if you haven’t implemented it fully
+      setCashToday(null);
     } finally {
-      setTodayLoading(false);
+      setLoadingCash(false);
     }
   }, []);
 
-  // Load tab data
   useEffect(() => {
     if (!isAuthorized) return;
+    loadSales();
+    loadCashToday();
+  }, [isAuthorized, loadSales, loadCashToday]);
 
-    async function run() {
-      if (tab === "awaiting" || tab === "record") await loadSales();
-      if (tab === "today") await loadToday();
-    }
+  // ---------------- FILTERS ----------------
+  const awaiting = useMemo(() => {
+    return (sales || []).filter((s) => String(s.status) === "AWAITING_PAYMENT_RECORD");
+  }, [sales]);
 
-    run();
-  }, [tab, isAuthorized, loadSales, loadToday]);
+  const paidToday = useMemo(() => {
+    // Phase 1 logic: show completed sales created today OR recently completed.
+    // If backend has payment timestamps, we can improve later.
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = now.getMonth();
+    const dd = now.getDate();
 
-  // ---------- Derived ----------
-  const awaitingSales = useMemo(() => {
-      console.log("SALES FROM API:", sales);
+    return (sales || []).filter((s) => {
+      if (String(s.status) !== "COMPLETED") return false;
+      if (!s.createdAt) return true;
 
-    const list = sales || [];
-      const awaiting = list.filter(
-  (s) => String(s.status || "").toUpperCase() === "DRAFT"
-);
-
-
-
-
-    const qq = (salesQ || "").trim().toLowerCase();
-    if (!qq) return awaiting;
-
-    return awaiting.filter((s) => {
-      const id = String(s.id || "");
-      const cname = String(s.customerName || "").toLowerCase();
-      const cphone = String(s.customerPhone || "").toLowerCase();
-      return id.includes(qq) || cname.includes(qq) || cphone.includes(qq);
+      try {
+        const d = new Date(s.createdAt);
+        return d.getFullYear() === yyyy && d.getMonth() === mm && d.getDate() === dd;
+      } catch {
+        return true;
+      }
     });
-  }, [sales, salesQ]);
+  }, [sales]);
 
-  function pickSaleForPayment(s) {
-    const id = s?.id ? String(s.id) : "";
-    const total = s?.totalAmount ?? s?.total ?? "";
-
-    setSaleId(id);
-    setAmount(total === "" || total === null || total === undefined ? "" : String(total));
-    setMethod("CASH");
-    setNote("");
-    setTab("record");
-    setMsg("");
-  }
-
-  async function submitPayment(e) {
+  // ---------------- ACTION ----------------
+  async function recordPayment(e) {
     e.preventDefault();
     setMsg("");
+    setSubmitting(true);
 
-    const idNum = Number(saleId);
-    const amtNum = Number(amount);
+    const sid = Number(saleId);
+    const amt = Number(amount);
 
-    if (!idNum) return setMsg("Enter a valid Sale ID.");
-    if (!Number.isFinite(amtNum) || amtNum <= 0) return setMsg("Enter a valid amount > 0.");
+    if (!sid) {
+      setSubmitting(false);
+      return setMsg("Pick a sale first.");
+    }
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setSubmitting(false);
+      return setMsg("Amount must be a positive number.");
+    }
 
-    setSaving(true);
     try {
-      const payload = {
-      saleId: idNum,
-      amount: amtNum,
-      method,
-      note: note || ""
-    };
-
-
-      await apiFetch(ENDPOINTS.PAYMENTS_CREATE, {
+      await apiFetch(ENDPOINTS.RECORD_PAYMENT, {
         method: "POST",
-        body: payload
+        body: {
+          saleId: sid,
+          amount: amt,
+          method: String(method || "CASH"),
+          note: note ? String(note) : "",
+        },
       });
 
-      setMsg(`✅ Payment recorded for Sale #${idNum}`);
+      setMsg("✅ Payment recorded");
       setSaleId("");
       setAmount("");
       setMethod("CASH");
       setNote("");
 
-      // reload list so sale disappears if backend updated status to COMPLETED
+      // reload lists so the sale moves to "Paid Today"
       await loadSales();
-      setTab("awaiting");
+      await loadCashToday();
+      setTab("today");
     } catch (e2) {
-      setMsg(e2?.data?.error || e2.message);
+      setMsg(e2?.data?.error || e2.message || "Payment failed");
     } finally {
-      setSaving(false);
+      setSubmitting(false);
     }
   }
 
@@ -208,12 +197,11 @@ export default function CashierPage() {
     return <div className="p-6 text-sm text-gray-600">Redirecting...</div>;
   }
 
+  const list = tab === "awaiting" ? awaiting : paidToday;
+
   return (
     <div>
-      <RoleBar
-        title="Cashier"
-        subtitle={`User: ${me.email} • Location: ${me.locationId}`}
-      />
+      <RoleBar title="Cashier" subtitle={`User: ${me.email} • Location: ${me.locationId}`} />
 
       <div className="max-w-6xl mx-auto p-6">
         {msg ? (
@@ -226,47 +214,50 @@ export default function CashierPage() {
           </div>
         ) : null}
 
-        {/* Tabs */}
-        <div className="mt-6 flex gap-2 text-sm flex-wrap">
-          <TabButton active={tab === "awaiting"} onClick={() => setTab("awaiting")}>
-            Awaiting Payments
-          </TabButton>
-          <TabButton active={tab === "record"} onClick={() => setTab("record")}>
-            Record Payment
-          </TabButton>
-          <TabButton active={tab === "today"} onClick={() => setTab("today")}>
-            Today (optional)
-          </TabButton>
+        {/* Summary */}
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card label="Awaiting payment" value={awaiting.length} />
+          <Card label="Completed (today view)" value={paidToday.length} />
+          <Card
+            label="Cash today"
+            value={loadingCash ? "..." : money(cashToday?.total ?? cashToday?.totalAmount ?? 0)}
+            sub={loadingCash ? "" : `${cashToday?.count ?? cashToday?.paymentsCount ?? 0} payment(s)`}
+          />
         </div>
 
-        {/* Awaiting Payments */}
-        {tab === "awaiting" ? (
-          <div className="mt-4 bg-white rounded-xl shadow overflow-hidden">
-            <div className="p-4 border-b flex items-center justify-between gap-3">
-              <div>
-                <div className="font-semibold">Sales awaiting payment record</div>
-                <div className="text-xs text-gray-500 mt-1">
-                  These are sales marked by seller as <b>AWAITING_PAYMENT_RECORD</b>.
-                </div>
-              </div>
+        {/* Tabs */}
+        <div className="mt-6 flex gap-2 flex-wrap text-sm">
+          <Tab active={tab === "awaiting"} onClick={() => setTab("awaiting")}>
+            Awaiting Payment
+          </Tab>
+          <Tab active={tab === "today"} onClick={() => setTab("today")}>
+            Paid Today
+          </Tab>
 
-              <div className="flex gap-2 items-center">
-                <input
-                  className="border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Search by id/customer"
-                  value={salesQ}
-                  onChange={(e) => setSalesQ(e.target.value)}
-                />
-                <button
-                  onClick={loadSales}
-                  className="px-4 py-2 rounded-lg bg-black text-white text-sm"
-                >
-                  Refresh
-                </button>
+          <button
+            onClick={() => {
+              loadSales();
+              loadCashToday();
+            }}
+            className="ml-auto px-4 py-2 rounded-lg bg-black text-white"
+          >
+            Refresh
+          </button>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Left: list */}
+          <div className="bg-white rounded-xl shadow overflow-hidden">
+            <div className="p-4 border-b">
+              <div className="font-semibold">
+                {tab === "awaiting" ? "Sales awaiting payment" : "Completed sales (today view)"}
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                After payment, the sale moves from “Awaiting Payment” to “Paid Today”.
               </div>
             </div>
 
-            {salesLoading ? (
+            {loadingSales ? (
               <div className="p-4 text-sm text-gray-600">Loading...</div>
             ) : (
               <div className="overflow-x-auto">
@@ -276,34 +267,43 @@ export default function CashierPage() {
                       <th className="text-left p-3">ID</th>
                       <th className="text-left p-3">Customer</th>
                       <th className="text-right p-3">Total</th>
-                      <th className="text-left p-3">Created</th>
-                      <th className="text-right p-3">Action</th>
+                      <th className="text-left p-3">Status</th>
+                      <th className="text-left p-3">Time</th>
+                      <th className="text-right p-3">Select</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {awaitingSales.map((s) => (
+                    {list.map((s) => (
                       <tr key={s.id} className="border-t">
                         <td className="p-3 font-medium">{s.id}</td>
                         <td className="p-3">
-                          <div className="font-medium">{s.customerName || "-"}</div>
+                          {(s.customerName || "").trim() ? s.customerName : "-"}
                           <div className="text-xs text-gray-500">{s.customerPhone || ""}</div>
                         </td>
-                        <td className="p-3 text-right">{s.totalAmount ?? s.total ?? "-"}</td>
+                        <td className="p-3 text-right">{money(s.totalAmount)}</td>
+                        <td className="p-3">{s.status}</td>
                         <td className="p-3">{fmt(s.createdAt)}</td>
                         <td className="p-3 text-right">
                           <button
-                            onClick={() => pickSaleForPayment(s)}
-                            className="px-3 py-1.5 rounded-lg bg-black text-white text-xs"
+                            disabled={tab !== "awaiting"}
+                            onClick={() => {
+                              setSaleId(String(s.id));
+                              setAmount(String(s.totalAmount || ""));
+                            }}
+                            className={
+                              "px-3 py-1.5 rounded-lg text-xs border " +
+                              (tab === "awaiting" ? "hover:bg-gray-50" : "bg-gray-100 text-gray-400 cursor-not-allowed")
+                            }
                           >
-                            Record
+                            Use
                           </button>
                         </td>
                       </tr>
                     ))}
-                    {awaitingSales.length === 0 ? (
+                    {list.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="p-4 text-sm text-gray-600">
-                          No sales awaiting payment record.
+                        <td colSpan={6} className="p-4 text-sm text-gray-600">
+                          No items here.
                         </td>
                       </tr>
                     ) : null}
@@ -312,172 +312,68 @@ export default function CashierPage() {
               </div>
             )}
           </div>
-        ) : null}
 
-        {/* Record Payment */}
-        {/* Record Payment */}
-{tab === "record" ? (
-  <div className="mt-4 space-y-4">
-
-    {/* Sales list */}
-    <div className="bg-white rounded-xl shadow overflow-hidden">
-      <div className="p-4 border-b font-semibold">
-        Pick sale to record payment
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600">
-            <tr>
-                  <th className="p-3 text-left">ID</th>
-                  <th className="p-3 text-left">Customer</th>
-                  {/* <th className="p-3 text-left">Phone Number</th> */}
-                  <th className="p-3 text-left">Status</th>
-                  <th className="p-3 text-right">Total</th>
-                  <th className="p-3 text-right">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {awaitingSales.map((s) => (
-              <tr key={s.id} className="border-t">
-              <td className="p-3 font-medium">{s.id}</td>
-
-              {/* Customer */}
-              <td className="p-3">
-                <div className="font-medium">
-                  {s.customerName ?? s.customer?.name ?? "-"}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {s.customerPhone ?? s.customer?.phone ?? ""}
-                </div>
-              </td>
-
-              {/* Status */}
-              <td className="p-3">
-                <span className="px-2 py-1 rounded text-xs bg-gray-100">
-                  {s.status}
-                </span>
-              </td>
-
-              {/* Total */}
-              <td className="p-3 text-right">
-                {s.totalAmount ?? s.total ?? "-"}
-              </td>
-
-              {/* Action */}
-              <td className="p-3 text-right">
-                <button
-                  onClick={() => pickSaleForPayment(s)}
-                  className="px-3 py-1.5 rounded bg-black text-white text-xs"
-                >
-                  Pick
-                </button>
-              </td>
-            </tr>
-
-
-            ))}
-            {awaitingSales.length === 0 ? (
-              <tr>
-                <td colSpan={3} className="p-4 text-sm text-gray-600">
-                  No sales awaiting payment.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    {/* Payment form */}
-    <div className="bg-white rounded-xl shadow p-4">
-      <div className="font-semibold">Record Payment</div>
-
-      <form onSubmit={submitPayment} className="mt-4 grid gap-3 max-w-xl">
-        <div>
-          <label className="block text-sm font-medium">Sale ID</label>
-          <input
-            className="mt-1 w-full border rounded-lg px-3 py-2"
-            value={saleId}
-            onChange={(e) => setSaleId(e.target.value)}
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium">Amount</label>
-          <input
-            className="mt-1 w-full border rounded-lg px-3 py-2"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium">Method</label>
-          <select
-            className="mt-1 w-full border rounded-lg px-3 py-2"
-            value={method}
-            onChange={(e) => setMethod(e.target.value)}
-          >
-            {PAYMENT_METHODS.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium">Note</label>
-          <input
-            className="mt-1 w-full border rounded-lg px-3 py-2"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </div>
-
-        <button
-          className="w-fit px-4 py-2 rounded-lg bg-black text-white text-sm"
-        >
-          Save Payment
-        </button>
-      </form>
-    </div>
-
-  </div>
-) : null}
-
-
-        {/* Today (optional) */}
-        {tab === "today" ? (
-          <div className="mt-4 bg-white rounded-xl shadow p-4">
-            <div className="font-semibold">Today</div>
+          {/* Right: record payment */}
+          <div className="bg-white rounded-xl shadow p-4">
+            <div className="font-semibold">Record payment</div>
             <div className="text-xs text-gray-500 mt-1">
-              This tab works only if your backend has <code>/payments/today</code>.
+              Only for sales in status <b>AWAITING_PAYMENT_RECORD</b>.
             </div>
 
-            {todayLoading ? (
-              <div className="p-4 text-sm text-gray-600">Loading...</div>
-            ) : today ? (
-              <div className="mt-4 text-sm">
-                <div className="p-3 rounded-lg bg-gray-50">
-                  <div><b>Count:</b> {today.count ?? today.paymentsToday?.count ?? "-"}</div>
-                  <div><b>Total:</b> {today.total ?? today.paymentsToday?.total ?? "-"}</div>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-4 text-sm text-gray-600">
-                Not available (endpoint missing). You can ignore this tab.
-              </div>
-            )}
+            <form onSubmit={recordPayment} className="mt-4 grid gap-3">
+              <input
+                className="border rounded-lg px-3 py-2"
+                placeholder="Sale ID (pick from left list)"
+                value={saleId}
+                onChange={(e) => setSaleId(e.target.value)}
+              />
+              <input
+                className="border rounded-lg px-3 py-2"
+                placeholder="Amount"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+
+              <select
+                className="border rounded-lg px-3 py-2"
+                value={method}
+                onChange={(e) => setMethod(e.target.value)}
+              >
+                <option value="CASH">CASH</option>
+                <option value="MOMO">MOMO</option>
+                <option value="CARD">CARD</option>
+                <option value="BANK">BANK</option>
+              </select>
+
+              <input
+                className="border rounded-lg px-3 py-2"
+                placeholder="Note (optional)"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+              />
+
+              <button
+                disabled={submitting}
+                className={
+                  "w-fit px-4 py-2 rounded-lg text-white " +
+                  (submitting ? "bg-gray-400 cursor-not-allowed" : "bg-black")
+                }
+              >
+                {submitting ? "Saving..." : "Record payment"}
+              </button>
+            </form>
+
+            <div className="mt-4 text-xs text-gray-500">
+              If you want a “refund” feature, we add that in Phase 2 (manager-only).
+            </div>
           </div>
-        ) : null}
+        </div>
       </div>
     </div>
   );
 }
 
-function TabButton({ active, onClick, children }) {
+function Tab({ active, onClick, children }) {
   return (
     <button
       onClick={onClick}
@@ -491,11 +387,12 @@ function TabButton({ active, onClick, children }) {
   );
 }
 
-function fmt(v) {
-  if (!v) return "-";
-  try {
-    return new Date(v).toLocaleString();
-  } catch {
-    return String(v);
-  }
+function Card({ label, value, sub }) {
+  return (
+    <div className="bg-white rounded-xl shadow p-4">
+      <div className="text-sm text-gray-500">{label}</div>
+      <div className="text-2xl font-semibold mt-1">{value}</div>
+      {sub ? <div className="text-sm text-gray-600 mt-1">{sub}</div> : null}
+    </div>
+  );
 }
