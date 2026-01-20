@@ -7,25 +7,22 @@ import { apiFetch } from "../../lib/api";
 import { getMe } from "../../lib/auth";
 import { useRouter } from "next/navigation";
 
+/**
+ * Backend-aligned endpoints (change ONLY here if needed)
+ */
 const ENDPOINTS = {
   SALES_LIST: "/sales",
-  RECORD_PAYMENT: "/payments",
-  CASH_TODAY: "/cash/today",
+  PAYMENT_RECORD: "/payments", // POST
+  PAYMENTS_LIST: "/payments", // GET (should be PAYMENT_VIEW)
+  PAYMENTS_SUMMARY: "/payments/summary", // GET (should be PAYMENT_VIEW)
 };
 
-function money(n) {
-  const x = Number(n || 0);
-  return x.toLocaleString();
-}
-
-function fmt(v) {
-  if (!v) return "-";
-  try {
-    return new Date(v).toLocaleString();
-  } catch {
-    return String(v);
-  }
-}
+const METHODS = [
+  { value: "CASH", label: "Cash" },
+  { value: "MOMO", label: "Mobile Money" },
+  { value: "CARD", label: "Card" },
+  { value: "BANK", label: "Bank" },
+];
 
 export default function CashierPage() {
   const router = useRouter();
@@ -33,20 +30,32 @@ export default function CashierPage() {
   const [me, setMe] = useState(null);
   const [msg, setMsg] = useState("");
 
-  const [tab, setTab] = useState("awaiting"); // awaiting | today
+  const [tab, setTab] = useState("record"); // record | payments
 
+  // Sales awaiting payment record
   const [sales, setSales] = useState([]);
-  const [loadingSales, setLoadingSales] = useState(false);
+  const [salesLoading, setSalesLoading] = useState(false);
+  const [salesQ, setSalesQ] = useState("");
+  const [selectedSale, setSelectedSale] = useState(null);
 
-  const [cashToday, setCashToday] = useState(null);
-  const [loadingCash, setLoadingCash] = useState(false);
-
-  // record payment form
-  const [saleId, setSaleId] = useState("");
+  // Payment form
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("CASH");
   const [note, setNote] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+
+  // Payments list + summary (read-only)
+  const [payments, setPayments] = useState([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [payQ, setPayQ] = useState("");
+
+  const [summary, setSummary] = useState({
+    today: { count: 0, total: 0 },
+    allTime: { count: 0, total: 0 },
+  });
+  const [summaryLoading, setSummaryLoading] = useState(false);
+
+  // Permission / availability flags
+  const [canReadPayments, setCanReadPayments] = useState(true); // if forbidden, flip false
 
   // ---------------- ROLE GUARD ----------------
   useEffect(() => {
@@ -64,11 +73,11 @@ export default function CashierPage() {
 
         if (user.role !== "cashier") {
           const map = {
-            owner: "/owner",
-            admin: "/admin",
-            manager: "/manager",
-            store_keeper: "/store-keeper",
             seller: "/seller",
+            store_keeper: "/store-keeper",
+            manager: "/manager",
+            admin: "/admin",
+            owner: "/owner",
           };
           router.replace(map[user.role] || "/");
         }
@@ -88,108 +97,182 @@ export default function CashierPage() {
 
   // ---------------- LOADERS ----------------
   const loadSales = useCallback(async () => {
-    setLoadingSales(true);
-    setMsg("");
+    setSalesLoading(true);
     try {
       const data = await apiFetch(ENDPOINTS.SALES_LIST, { method: "GET" });
-      const items = data?.sales ?? data?.items ?? data?.rows ?? [];
-      setSales(Array.isArray(items) ? items : []);
+      const list = Array.isArray(data?.sales)
+        ? data.sales
+        : data?.items || data?.rows || [];
+      setSales(Array.isArray(list) ? list : []);
     } catch (e) {
       setMsg(e?.data?.error || e.message || "Failed to load sales");
+      setSales([]);
     } finally {
-      setLoadingSales(false);
+      setSalesLoading(false);
     }
   }, []);
 
-  const loadCashToday = useCallback(async () => {
-    setLoadingCash(true);
-    setMsg("");
+  const loadPayments = useCallback(async () => {
+    setPaymentsLoading(true);
     try {
-      const data = await apiFetch(ENDPOINTS.CASH_TODAY, { method: "GET" });
-      setCashToday(data?.summary ?? data ?? null);
+      const data = await apiFetch(ENDPOINTS.PAYMENTS_LIST, { method: "GET" });
+      const list = Array.isArray(data?.payments)
+        ? data.payments
+        : data?.items || data?.rows || [];
+      setPayments(Array.isArray(list) ? list : []);
+      setCanReadPayments(true);
     } catch (e) {
-      // Not fatal if you haven’t implemented it fully
-      setCashToday(null);
+      const errText = e?.data?.error || e?.message || "Failed to load payments";
+
+      // If forbidden => cashier lacks PAYMENT_VIEW; do NOT spam red errors
+      if (String(errText).toLowerCase().includes("forbidden")) {
+        setCanReadPayments(false);
+        setPayments([]);
+        return;
+      }
+
+      setMsg(errText);
+      setPayments([]);
     } finally {
-      setLoadingCash(false);
+      setPaymentsLoading(false);
     }
   }, []);
 
+  const loadSummary = useCallback(async () => {
+    setSummaryLoading(true);
+    try {
+      const data = await apiFetch(ENDPOINTS.PAYMENTS_SUMMARY, {
+        method: "GET",
+      });
+      const s = data?.summary || {};
+      setSummary({
+        today: {
+          count: Number(s?.today?.count || 0),
+          total: Number(s?.today?.total || 0),
+        },
+        allTime: {
+          count: Number(s?.allTime?.count || 0),
+          total: Number(s?.allTime?.total || 0),
+        },
+      });
+      setCanReadPayments(true);
+    } catch (e) {
+      const errText =
+        e?.data?.error || e?.message || "Failed to load payments summary";
+
+      if (String(errText).toLowerCase().includes("forbidden")) {
+        setCanReadPayments(false);
+        // keep summary as zeros but don’t scream
+        return;
+      }
+
+      setMsg(errText);
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, []);
+
+  // Load initial data after login + on tab switch
   useEffect(() => {
     if (!isAuthorized) return;
+
+    // Always refresh awaiting sales count + summary
     loadSales();
-    loadCashToday();
-  }, [isAuthorized, loadSales, loadCashToday]);
+    loadSummary();
+
+    if (tab === "payments") {
+      loadPayments();
+      loadSummary();
+    }
+  }, [isAuthorized, tab, loadSales, loadPayments, loadSummary]);
 
   // ---------------- FILTERS ----------------
-  const awaiting = useMemo(() => {
-    return (sales || []).filter((s) => String(s.status) === "AWAITING_PAYMENT_RECORD");
+  const awaitingSales = useMemo(() => {
+    return (Array.isArray(sales) ? sales : []).filter(
+      (s) =>
+        String(s?.status || "").toUpperCase() === "AWAITING_PAYMENT_RECORD",
+    );
   }, [sales]);
 
-  const paidToday = useMemo(() => {
-    // Phase 1 logic: show completed sales created today OR recently completed.
-    // If backend has payment timestamps, we can improve later.
-    const now = new Date();
-    const yyyy = now.getFullYear();
-    const mm = now.getMonth();
-    const dd = now.getDate();
+  const filteredAwaitingSales = useMemo(() => {
+    const qq = String(salesQ || "")
+      .trim()
+      .toLowerCase();
+    if (!qq) return awaitingSales;
 
-    return (sales || []).filter((s) => {
-      if (String(s.status) !== "COMPLETED") return false;
-      if (!s.createdAt) return true;
-
-      try {
-        const d = new Date(s.createdAt);
-        return d.getFullYear() === yyyy && d.getMonth() === mm && d.getDate() === dd;
-      } catch {
-        return true;
-      }
+    return awaitingSales.filter((s) => {
+      const id = String(s.id || "");
+      const name = String(s.customerName || "").toLowerCase();
+      const phone = String(s.customerPhone || "").toLowerCase();
+      const total = String(s.totalAmount ?? s.total ?? "");
+      return (
+        id.includes(qq) ||
+        name.includes(qq) ||
+        phone.includes(qq) ||
+        total.includes(qq)
+      );
     });
-  }, [sales]);
+  }, [awaitingSales, salesQ]);
 
-  // ---------------- ACTION ----------------
+  const filteredPayments = useMemo(() => {
+    const qq = String(payQ || "")
+      .trim()
+      .toLowerCase();
+    const list = Array.isArray(payments) ? payments : [];
+    if (!qq) return list;
+
+    return list.filter((p) => {
+      const id = String(p.id || "");
+      const saleId = String(p.saleId || p.sale_id || "");
+      const method = String(p.method || "").toLowerCase();
+      const amount = String(p.amount ?? "");
+      return (
+        id.includes(qq) ||
+        saleId.includes(qq) ||
+        method.includes(qq) ||
+        amount.includes(qq)
+      );
+    });
+  }, [payments, payQ]);
+
+  // ---------------- ACTION: RECORD PAYMENT ----------------
   async function recordPayment(e) {
     e.preventDefault();
     setMsg("");
-    setSubmitting(true);
 
-    const sid = Number(saleId);
-    const amt = Number(amount);
+    if (!selectedSale?.id) return setMsg("Select a sale first.");
 
-    if (!sid) {
-      setSubmitting(false);
-      return setMsg("Pick a sale first.");
-    }
-    if (!Number.isFinite(amt) || amt <= 0) {
-      setSubmitting(false);
-      return setMsg("Amount must be a positive number.");
-    }
+    const n = Number(amount);
+    if (!Number.isFinite(n) || n <= 0) return setMsg("Enter a valid amount.");
+
+    const payload = {
+      saleId: Number(selectedSale.id),
+      amount: n,
+      method,
+      note: note ? String(note).slice(0, 200) : undefined,
+    };
 
     try {
-      await apiFetch(ENDPOINTS.RECORD_PAYMENT, {
+      await apiFetch(ENDPOINTS.PAYMENT_RECORD, {
         method: "POST",
-        body: {
-          saleId: sid,
-          amount: amt,
-          method: String(method || "CASH"),
-          note: note ? String(note) : "",
-        },
+        body: payload,
       });
 
-      setMsg("✅ Payment recorded");
-      setSaleId("");
+      setMsg(`✅ Payment recorded for sale #${selectedSale.id}`);
+
+      setSelectedSale(null);
       setAmount("");
       setMethod("CASH");
       setNote("");
 
-      // reload lists so the sale moves to "Paid Today"
+      // refresh lists
       await loadSales();
-      await loadCashToday();
-      setTab("today");
+      await loadSummary();
+
+      // Only reload list if we can read it (or if policy fixed later, it will auto work)
+      if (tab === "payments") await loadPayments();
     } catch (e2) {
-      setMsg(e2?.data?.error || e2.message || "Payment failed");
-    } finally {
-      setSubmitting(false);
+      setMsg(e2?.data?.error || e2.message || "Record payment failed");
     }
   }
 
@@ -197,67 +280,281 @@ export default function CashierPage() {
     return <div className="p-6 text-sm text-gray-600">Redirecting...</div>;
   }
 
-  const list = tab === "awaiting" ? awaiting : paidToday;
-
   return (
     <div>
-      <RoleBar title="Cashier" subtitle={`User: ${me.email} • Location: ${me.locationId}`} />
+      <RoleBar
+        title="Cashier"
+        subtitle={`User: ${me.email} • Location: ${me.locationId}`}
+      />
 
       <div className="max-w-6xl mx-auto p-6">
         {msg ? (
           <div className="mt-4 text-sm">
             {msg.startsWith("✅") ? (
-              <div className="p-3 rounded-lg bg-green-50 text-green-800">{msg}</div>
+              <div className="p-3 rounded-lg bg-green-50 text-green-800">
+                {msg}
+              </div>
             ) : (
               <div className="p-3 rounded-lg bg-red-50 text-red-700">{msg}</div>
             )}
           </div>
         ) : null}
 
-        {/* Summary */}
+        {!canReadPayments ? (
+          <div className="mt-4 text-sm p-3 rounded-lg bg-yellow-50 text-yellow-900">
+            ⚠️ Payments read is disabled for cashier (Forbidden). Fix backend by
+            adding a read permission like <b>PAYMENT_VIEW</b> for cashier and
+            use it on GET /payments and GET /payments/summary.
+          </div>
+        ) : null}
+
+        {/* KPI cards */}
         <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card label="Awaiting payment" value={awaiting.length} />
-          <Card label="Completed (today view)" value={paidToday.length} />
           <Card
-            label="Cash today"
-            value={loadingCash ? "..." : money(cashToday?.total ?? cashToday?.totalAmount ?? 0)}
-            sub={loadingCash ? "" : `${cashToday?.count ?? cashToday?.paymentsCount ?? 0} payment(s)`}
+            label="Paid today"
+            value={
+              summaryLoading
+                ? "…"
+                : canReadPayments
+                  ? String(summary.today.count)
+                  : "—"
+            }
+            sub={`Total: ${money(canReadPayments ? summary.today.total : 0)}`}
+          />
+          <Card
+            label="Payments (all time)"
+            value={
+              summaryLoading
+                ? "…"
+                : canReadPayments
+                  ? String(summary.allTime.count)
+                  : "—"
+            }
+            sub={`Total: ${money(canReadPayments ? summary.allTime.total : 0)}`}
+          />
+          <Card
+            label="Awaiting payment record"
+            value={salesLoading ? "…" : String(awaitingSales.length)}
+            sub="Sales marked AWAITING_PAYMENT_RECORD"
           />
         </div>
 
         {/* Tabs */}
-        <div className="mt-6 flex gap-2 flex-wrap text-sm">
-          <Tab active={tab === "awaiting"} onClick={() => setTab("awaiting")}>
-            Awaiting Payment
-          </Tab>
-          <Tab active={tab === "today"} onClick={() => setTab("today")}>
-            Paid Today
-          </Tab>
-
-          <button
-            onClick={() => {
-              loadSales();
-              loadCashToday();
-            }}
-            className="ml-auto px-4 py-2 rounded-lg bg-black text-white"
+        <div className="mt-6 flex gap-2 text-sm flex-wrap">
+          <TabButton active={tab === "record"} onClick={() => setTab("record")}>
+            Record payment
+          </TabButton>
+          <TabButton
+            active={tab === "payments"}
+            onClick={() => setTab("payments")}
           >
-            Refresh
-          </button>
+            Payments list
+          </TabButton>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Left: list */}
-          <div className="bg-white rounded-xl shadow overflow-hidden">
-            <div className="p-4 border-b">
-              <div className="font-semibold">
-                {tab === "awaiting" ? "Sales awaiting payment" : "Completed sales (today view)"}
+        {/* Record tab */}
+        {tab === "record" ? (
+          <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Left: awaiting list */}
+            <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="p-4 border-b flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-semibold">Awaiting payment record</div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Pick a sale then record the payment. After recording, it
+                    disappears because status changes.
+                  </div>
+                </div>
+
+                <button
+                  onClick={loadSales}
+                  className="px-4 py-2 rounded-lg bg-black text-white text-sm"
+                >
+                  Refresh
+                </button>
               </div>
+
+              <div className="p-3 border-b">
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  placeholder="Search by id/name/phone/total"
+                  value={salesQ}
+                  onChange={(e) => setSalesQ(e.target.value)}
+                />
+              </div>
+
+              {salesLoading ? (
+                <div className="p-4 text-sm text-gray-600">Loading...</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        <th className="text-left p-3">ID</th>
+                        <th className="text-right p-3">Total</th>
+                        <th className="text-left p-3">Customer</th>
+                        <th className="text-right p-3">Open</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAwaitingSales.map((s) => (
+                        <tr key={s.id} className="border-t">
+                          <td className="p-3 font-medium">{s.id}</td>
+                          <td className="p-3 text-right">
+                            {money(s.totalAmount ?? s.total ?? 0)}
+                          </td>
+                          <td className="p-3">
+                            <div className="font-medium">
+                              {s.customerName || "-"}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {s.customerPhone || ""}
+                            </div>
+                          </td>
+                          <td className="p-3 text-right">
+                            <button
+                              className="px-3 py-1.5 rounded-lg border text-xs hover:bg-gray-50"
+                              onClick={() => {
+                                setSelectedSale(s);
+                                setAmount(
+                                  String(s.totalAmount ?? s.total ?? ""),
+                                );
+                              }}
+                            >
+                              Select
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredAwaitingSales.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="p-4 text-sm text-gray-600">
+                            No sales awaiting payment record.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Right: form */}
+            <div className="bg-white rounded-xl shadow p-4">
+              <div className="font-semibold">Record payment</div>
               <div className="text-xs text-gray-500 mt-1">
-                After payment, the sale moves from “Awaiting Payment” to “Paid Today”.
+                Uses POST /payments (permission: PAYMENT_RECORD).
+              </div>
+
+              {!selectedSale ? (
+                <div className="mt-4 text-sm text-gray-600">
+                  Select a sale from the left.
+                </div>
+              ) : (
+                <div className="mt-4">
+                  <div className="text-sm">
+                    <div>
+                      <b>Sale:</b> #{selectedSale.id}
+                    </div>
+                    <div>
+                      <b>Total:</b>{" "}
+                      {money(
+                        selectedSale.totalAmount ?? selectedSale.total ?? 0,
+                      )}
+                    </div>
+                    <div>
+                      <b>Customer:</b> {selectedSale.customerName || "-"}{" "}
+                      {selectedSale.customerPhone
+                        ? `(${selectedSale.customerPhone})`
+                        : ""}
+                    </div>
+                  </div>
+
+                  <form
+                    onSubmit={recordPayment}
+                    className="mt-4 grid grid-cols-1 gap-3"
+                  >
+                    <input
+                      className="border rounded-lg px-3 py-2"
+                      placeholder="Amount"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                    />
+
+                    <select
+                      className="border rounded-lg px-3 py-2"
+                      value={method}
+                      onChange={(e) => setMethod(e.target.value)}
+                    >
+                      {METHODS.map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+
+                    <input
+                      className="border rounded-lg px-3 py-2"
+                      placeholder="Note (optional)"
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                    />
+
+                    <div className="flex gap-2 flex-wrap">
+                      <button className="px-4 py-2 rounded-lg bg-black text-white text-sm">
+                        Record payment
+                      </button>
+                      <button
+                        type="button"
+                        className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
+                        onClick={() => setSelectedSale(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Payments tab */}
+        {tab === "payments" ? (
+          <div className="mt-4 bg-white rounded-xl shadow overflow-hidden">
+            <div className="p-4 border-b flex items-center justify-between gap-3">
+              <div>
+                <div className="font-semibold">Payments list (read-only)</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Uses GET /payments (should be permission: PAYMENT_VIEW).
+                </div>
+              </div>
+
+              <div className="flex gap-2 items-center">
+                <input
+                  className="border rounded-lg px-3 py-2 text-sm"
+                  placeholder="Search id/sale/method/amount"
+                  value={payQ}
+                  onChange={(e) => setPayQ(e.target.value)}
+                />
+                <button
+                  onClick={() => {
+                    loadSummary();
+                    loadPayments();
+                  }}
+                  className="px-4 py-2 rounded-lg bg-black text-white text-sm"
+                >
+                  Refresh
+                </button>
               </div>
             </div>
 
-            {loadingSales ? (
+            {!canReadPayments ? (
+              <div className="p-4 text-sm text-yellow-900 bg-yellow-50">
+                Payments read is forbidden for cashier. Fix backend permission
+                (PAYMENT_VIEW) as described above.
+              </div>
+            ) : paymentsLoading ? (
               <div className="p-4 text-sm text-gray-600">Loading...</div>
             ) : (
               <div className="overflow-x-auto">
@@ -265,45 +562,30 @@ export default function CashierPage() {
                   <thead className="bg-gray-50 text-gray-600">
                     <tr>
                       <th className="text-left p-3">ID</th>
-                      <th className="text-left p-3">Customer</th>
-                      <th className="text-right p-3">Total</th>
-                      <th className="text-left p-3">Status</th>
+                      <th className="text-left p-3">Sale</th>
+                      <th className="text-right p-3">Amount</th>
+                      <th className="text-left p-3">Method</th>
                       <th className="text-left p-3">Time</th>
-                      <th className="text-right p-3">Select</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {list.map((s) => (
-                      <tr key={s.id} className="border-t">
-                        <td className="p-3 font-medium">{s.id}</td>
-                        <td className="p-3">
-                          {(s.customerName || "").trim() ? s.customerName : "-"}
-                          <div className="text-xs text-gray-500">{s.customerPhone || ""}</div>
-                        </td>
-                        <td className="p-3 text-right">{money(s.totalAmount)}</td>
-                        <td className="p-3">{s.status}</td>
-                        <td className="p-3">{fmt(s.createdAt)}</td>
+                    {filteredPayments.map((p, idx) => (
+                      <tr key={p.id || idx} className="border-t">
+                        <td className="p-3 font-medium">{p.id ?? "-"}</td>
+                        <td className="p-3">#{p.saleId ?? p.sale_id ?? "-"}</td>
                         <td className="p-3 text-right">
-                          <button
-                            disabled={tab !== "awaiting"}
-                            onClick={() => {
-                              setSaleId(String(s.id));
-                              setAmount(String(s.totalAmount || ""));
-                            }}
-                            className={
-                              "px-3 py-1.5 rounded-lg text-xs border " +
-                              (tab === "awaiting" ? "hover:bg-gray-50" : "bg-gray-100 text-gray-400 cursor-not-allowed")
-                            }
-                          >
-                            Use
-                          </button>
+                          {money(p.amount ?? 0)}
+                        </td>
+                        <td className="p-3">{p.method ?? "-"}</td>
+                        <td className="p-3">
+                          {safeDate(p.createdAt || p.created_at)}
                         </td>
                       </tr>
                     ))}
-                    {list.length === 0 ? (
+                    {filteredPayments.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="p-4 text-sm text-gray-600">
-                          No items here.
+                        <td colSpan={5} className="p-4 text-sm text-gray-600">
+                          No payments found.
                         </td>
                       </tr>
                     ) : null}
@@ -312,74 +594,21 @@ export default function CashierPage() {
               </div>
             )}
           </div>
-
-          {/* Right: record payment */}
-          <div className="bg-white rounded-xl shadow p-4">
-            <div className="font-semibold">Record payment</div>
-            <div className="text-xs text-gray-500 mt-1">
-              Only for sales in status <b>AWAITING_PAYMENT_RECORD</b>.
-            </div>
-
-            <form onSubmit={recordPayment} className="mt-4 grid gap-3">
-              <input
-                className="border rounded-lg px-3 py-2"
-                placeholder="Sale ID (pick from left list)"
-                value={saleId}
-                onChange={(e) => setSaleId(e.target.value)}
-              />
-              <input
-                className="border rounded-lg px-3 py-2"
-                placeholder="Amount"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-              />
-
-              <select
-                className="border rounded-lg px-3 py-2"
-                value={method}
-                onChange={(e) => setMethod(e.target.value)}
-              >
-                <option value="CASH">CASH</option>
-                <option value="MOMO">MOMO</option>
-                <option value="CARD">CARD</option>
-                <option value="BANK">BANK</option>
-              </select>
-
-              <input
-                className="border rounded-lg px-3 py-2"
-                placeholder="Note (optional)"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-              />
-
-              <button
-                disabled={submitting}
-                className={
-                  "w-fit px-4 py-2 rounded-lg text-white " +
-                  (submitting ? "bg-gray-400 cursor-not-allowed" : "bg-black")
-                }
-              >
-                {submitting ? "Saving..." : "Record payment"}
-              </button>
-            </form>
-
-            <div className="mt-4 text-xs text-gray-500">
-              If you want a “refund” feature, we add that in Phase 2 (manager-only).
-            </div>
-          </div>
-        </div>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function Tab({ active, onClick, children }) {
+function TabButton({ active, onClick, children }) {
   return (
     <button
       onClick={onClick}
       className={
         "px-3 py-2 rounded-lg border text-sm " +
-        (active ? "bg-black text-white border-black" : "bg-white text-gray-700 hover:bg-gray-100")
+        (active
+          ? "bg-black text-white border-black"
+          : "bg-white text-gray-700 hover:bg-gray-100")
       }
     >
       {children}
@@ -395,4 +624,18 @@ function Card({ label, value, sub }) {
       {sub ? <div className="text-sm text-gray-600 mt-1">{sub}</div> : null}
     </div>
   );
+}
+
+function money(n) {
+  const x = Number(n || 0);
+  return x.toLocaleString();
+}
+
+function safeDate(v) {
+  if (!v) return "-";
+  try {
+    return new Date(v).toLocaleString();
+  } catch {
+    return String(v);
+  }
 }
