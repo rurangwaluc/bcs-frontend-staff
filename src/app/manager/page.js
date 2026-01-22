@@ -200,7 +200,7 @@ export default function ManagerPage() {
 
   const loadPayments = useCallback(async () => {
     setLoadingPayments(true);
-    setMsg("");
+    
     try {
       const data = await apiFetch(ENDPOINTS.PAYMENTS_LIST, { method: "GET" });
       const items = data?.payments ?? data?.items ?? data?.rows ?? [];
@@ -219,7 +219,7 @@ export default function ManagerPage() {
 
   const loadPaymentsSummary = useCallback(async () => {
     setLoadingPaySummary(true);
-    setMsg("");
+    
     try {
       const data = await apiFetch(ENDPOINTS.PAYMENTS_SUMMARY, {
         method: "GET",
@@ -237,7 +237,7 @@ export default function ManagerPage() {
 
   const loadAudit = useCallback(async () => {
     setLoadingAudit(true);
-    setMsg("");
+    
     try {
       const data = await apiFetch(ENDPOINTS.AUDIT_LIST, { method: "GET" });
       const items =
