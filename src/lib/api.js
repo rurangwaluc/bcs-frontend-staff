@@ -8,7 +8,7 @@ export async function apiFetch(path, options = {}) {
   opts.headers = { ...(opts.headers || {}) };
 
   // Only set JSON headers if we actually have a body
-  const hasBody = opts.body !== undefined && opts.body !== null;
+  const hasBody = "body" in opts;
 
   if (hasBody) {
     // If body is a plain object, stringify it
