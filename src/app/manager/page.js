@@ -7,39 +7,22 @@ import CashReportsPanel from "../../components/CashReportsPanel";
 import CustomersPanel from "../../components/CustomersPanel";
 import InventoryAdjustRequestsPanel from "../../components/InventoryAdjustRequestsPanel";
 import ManagerUsersPanel from "../../components/ManagerUsersPanel";
+import ProductPricingPanel from "../../components/ProductPricingPanel";
 import RoleBar from "../../components/RoleBar";
 import { apiFetch } from "../../lib/api";
 import { getMe } from "../../lib/auth";
 import { useRouter } from "next/navigation";
 
-/**
- * Phase 1 Manager abilities (policy):
- * - view sales (GET /sales)
- * - cancel sale (POST /sales/:id/cancel)
- * - view products (GET /products)
- * - view inventory balances (GET /inventory)
- * - view credits (GET /credits/open) [optional]
- * - view payments (GET /payments, GET /payments/summary) [optional]
- * - view audit (GET /audit) [optional]
- *
- * ✅ Real world Cash Reports (if backend exists):
- * - GET /cash/reports/payments?from=YYYY-MM-DD&to=YYYY-MM-DD
- * - GET /cash/reports/deposits?from=...&to=...
- * - GET /cash/reports/expenses?from=...&to=...
- * - GET /cash/reports/refunds?from=...&to=...
- * - GET /cash/reports/reconciles?from=...&to=...
- * - (optional) GET /cash/reports/summary?from=...&to=...
- */
 const ENDPOINTS = {
   SALES_LIST: "/sales",
   SALE_CANCEL: (id) => `/sales/${id}/cancel`,
   PRODUCTS_LIST: "/products",
   INVENTORY_LIST: "/inventory",
 
-  // Optional: only works if your backend has these routes
   CREDITS_OPEN: "/credits/open",
   PAYMENTS_LIST: "/payments",
   PAYMENTS_SUMMARY: "/payments/summary",
+
   INVENTORY_ARRIVALS_LIST: "/inventory/arrivals",
 };
 
@@ -72,29 +55,12 @@ function isToday(dateStr) {
   }
 }
 
-function isoDateLocal(d = new Date()) {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function pickList(data, keys) {
-  for (const k of keys) {
-    if (Array.isArray(data?.[k])) return data[k];
-  }
-  return [];
-}
-
 function ArrivalDocCard({ doc }) {
   const raw = doc?.fileUrl || doc?.url || "";
-
   if (!raw) return null;
 
-  // If url is already absolute (https://...), keep it.
-  // If it's relative (/uploads/.. or uploads/..), force it to backend.
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"; // fallback for local dev
-
+  // Keep absolute URLs; otherwise prefix backend base.
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000";
   const url = /^https?:\/\//i.test(raw)
     ? raw
     : `${API_BASE}${raw.startsWith("/") ? "" : "/"}${raw}`;
@@ -123,6 +89,7 @@ function ArrivalDocCard({ doc }) {
     </div>
   );
 }
+
 function buildEvidenceUrl({
   entity,
   entityId,
@@ -151,19 +118,20 @@ export default function ManagerPage() {
   const [me, setMe] = useState(null);
   const [msg, setMsg] = useState("");
 
-  // ✅ added evidence tab
-  const [tab, setTab] = useState("dashboard"); // dashboard | sales | inventory | arrivals | cash_reports | users | credits | customers | audit | evidence  // ---------- SALES ----------
+  const [tab, setTab] = useState("dashboard");
+  // dashboard | sales | arrivals | inventory | pricing | cash_reports | users | credits | customers | audit | evidence | inv_requests
+
+  // ---------- SALES ----------
   const [sales, setSales] = useState([]);
   const [loadingSales, setLoadingSales] = useState(false);
   const [salesQ, setSalesQ] = useState("");
 
-  // Cancel modal
   const [cancelOpen, setCancelOpen] = useState(false);
   const [canceling, setCanceling] = useState(false);
   const [cancelSaleId, setCancelSaleId] = useState(null);
   const [cancelReason, setCancelReason] = useState("");
 
-  // ---------- INVENTORY ----------
+  // ---------- INVENTORY / PRODUCTS ----------
   const [inventory, setInventory] = useState([]);
   const [products, setProducts] = useState([]);
   const [loadingInv, setLoadingInv] = useState(false);
@@ -174,17 +142,17 @@ export default function ManagerPage() {
   const [arrivals, setArrivals] = useState([]);
   const [loadingArrivals, setLoadingArrivals] = useState(false);
 
-  // ---------- PAYMENTS (optional) ----------
+  // ---------- PAYMENTS ----------
   const [payments, setPayments] = useState([]);
   const [paymentsSummary, setPaymentsSummary] = useState(null);
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [loadingPaySummary, setLoadingPaySummary] = useState(false);
 
-  // ---------- CREDITS (optional) ----------
+  // ---------- CREDITS ----------
   const [openCredits, setOpenCredits] = useState([]);
   const [loadingCredits, setLoadingCredits] = useState(false);
 
-  // ✅ Evidence form (Manager)
+  // ---------- EVIDENCE ----------
   const [evEntity, setEvEntity] = useState("sale");
   const [evEntityId, setEvEntityId] = useState("");
   const [evFrom, setEvFrom] = useState("");
@@ -332,8 +300,6 @@ export default function ManagerPage() {
       const data = await apiFetch(ENDPOINTS.INVENTORY_ARRIVALS_LIST, {
         method: "GET",
       });
-
-      // supports multiple backend response styles
       const list = data?.arrivals ?? data?.items ?? data?.rows ?? [];
       setArrivals(Array.isArray(list) ? list : []);
     } catch (e) {
@@ -344,7 +310,6 @@ export default function ManagerPage() {
     }
   }, []);
 
-  // Load per tab (avoid spamming endpoints)
   useEffect(() => {
     if (!isAuthorized) return;
 
@@ -358,8 +323,6 @@ export default function ManagerPage() {
       loadPayments();
     }
     if (tab === "credits") loadCreditsOpen();
-    // ✅ audit handled by AuditLogsPanel (it fetches itself)
-    // ✅ evidence does not fetch anything here (it only navigates to /evidence)
     if (tab === "arrivals") loadArrivals();
   }, [
     isAuthorized,
@@ -367,9 +330,9 @@ export default function ManagerPage() {
     loadSales,
     loadInventory,
     loadProducts,
-    loadCreditsOpen,
-    loadPayments,
     loadPaymentsSummary,
+    loadPayments,
+    loadCreditsOpen,
     loadArrivals,
   ]);
 
@@ -383,7 +346,6 @@ export default function ManagerPage() {
 
   function canCancelSale(s) {
     const st = String(s?.status || "");
-    // Phase 1: never cancel COMPLETED
     return st !== "COMPLETED";
   }
 
@@ -453,7 +415,6 @@ export default function ManagerPage() {
     [sales],
   );
 
-  // Sales search filter
   const filteredSales = useMemo(() => {
     const qq = String(salesQ || "")
       .trim()
@@ -474,7 +435,6 @@ export default function ManagerPage() {
     });
   }, [salesSorted, salesQ]);
 
-  // Inventory filter
   const filteredInventory = useMemo(() => {
     const list = Array.isArray(inventory) ? inventory : [];
     const qq = String(invQ || "")
@@ -500,7 +460,6 @@ export default function ManagerPage() {
     return price == null ? "-" : money(price);
   }
 
-  // Payments KPI (optional)
   const paidToday = useMemo(() => {
     const list = Array.isArray(payments) ? payments : [];
     return list.filter((p) => isToday(p.createdAt));
@@ -510,7 +469,6 @@ export default function ManagerPage() {
     return paidToday.reduce((sum, p) => sum + Number(p.amount || 0), 0);
   }, [paidToday]);
 
-  // ---------------- RENDER ----------------
   if (!isAuthorized) {
     return <div className="p-6 text-sm text-gray-600">Redirecting...</div>;
   }
@@ -525,7 +483,7 @@ export default function ManagerPage() {
       <div className="max-w-6xl mx-auto p-6">
         {msg ? (
           <div className="mt-4 text-sm">
-            {msg.startsWith("✅") ? (
+            {String(msg).startsWith("✅") ? (
               <div className="p-3 rounded-lg bg-green-50 text-green-800">
                 {msg}
               </div>
@@ -535,7 +493,6 @@ export default function ManagerPage() {
           </div>
         ) : null}
 
-        {/* Tabs */}
         <div className="mt-6 flex gap-2 text-sm flex-wrap items-center">
           <Tab active={tab === "dashboard"} onClick={() => setTab("dashboard")}>
             Dashboard
@@ -549,6 +506,15 @@ export default function ManagerPage() {
           <Tab active={tab === "inventory"} onClick={() => setTab("inventory")}>
             Inventory
           </Tab>
+          <Tab active={tab === "pricing"} onClick={() => setTab("pricing")}>
+            Pricing
+          </Tab>
+          <Tab
+            active={tab === "inv_requests"}
+            onClick={() => setTab("inv_requests")}
+          >
+            Inventory Requests
+          </Tab>
           <Tab
             active={tab === "cash_reports"}
             onClick={() => setTab("cash_reports")}
@@ -558,7 +524,6 @@ export default function ManagerPage() {
           <Tab active={tab === "users"} onClick={() => setTab("users")}>
             Users
           </Tab>
-
           <Tab active={tab === "credits"} onClick={() => setTab("credits")}>
             Credits
           </Tab>
@@ -568,17 +533,8 @@ export default function ManagerPage() {
           <Tab active={tab === "audit"} onClick={() => setTab("audit")}>
             Audit
           </Tab>
-
-          {/* ✅ NEW */}
           <Tab active={tab === "evidence"} onClick={() => setTab("evidence")}>
             Evidence
-          </Tab>
-
-          <Tab
-            active={tab === "inv_requests"}
-            onClick={() => setTab("inv_requests")}
-          >
-            Inventory Requests
           </Tab>
 
           <button
@@ -594,10 +550,8 @@ export default function ManagerPage() {
               } else if (tab === "sales") loadSales();
               else if (tab === "inventory")
                 Promise.all([loadInventory(), loadProducts()]);
-              else if (tab === "payments")
-                Promise.all([loadPaymentsSummary(), loadPayments()]);
               else if (tab === "credits") loadCreditsOpen();
-              // audit refresh handled inside AuditLogsPanel
+              else if (tab === "arrivals") loadArrivals();
             }}
             className="ml-auto px-4 py-2 rounded-lg bg-black text-white"
           >
@@ -605,7 +559,6 @@ export default function ManagerPage() {
           </button>
         </div>
 
-        {/* DASHBOARD */}
         {tab === "dashboard" ? (
           <div>
             <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -651,7 +604,6 @@ export default function ManagerPage() {
           </div>
         ) : null}
 
-        {/* SALES */}
         {tab === "sales" ? (
           <div className="mt-6 bg-white rounded-xl shadow overflow-hidden">
             <div className="p-4 border-b">
@@ -730,13 +682,13 @@ export default function ManagerPage() {
           </div>
         ) : null}
 
-        {/* INVENTORY */}
         {tab === "inventory" ? (
           <div className="mt-6 bg-white rounded-xl shadow overflow-hidden">
             <div className="p-4 border-b">
-              <div className="font-semibold">Inventory (view only)</div>
+              <div className="font-semibold">Inventory</div>
               <div className="text-xs text-gray-500 mt-1">
-                GET /inventory and price joined from GET /products.
+                Qty from GET /inventory; selling price joined from GET
+                /products.
               </div>
             </div>
 
@@ -760,7 +712,7 @@ export default function ManagerPage() {
                       <th className="text-left p-3">Name</th>
                       <th className="text-left p-3">SKU</th>
                       <th className="text-right p-3">On hand</th>
-                      <th className="text-right p-3">Price</th>
+                      <th className="text-right p-3">Selling</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -794,14 +746,15 @@ export default function ManagerPage() {
           </div>
         ) : null}
 
-        {/* ARRIVALS */}
+        {tab === "pricing" ? <ProductPricingPanel /> : null}
+
         {tab === "arrivals" ? (
           <div className="mt-6 bg-white rounded-xl shadow overflow-hidden">
             <div className="p-4 border-b flex items-center justify-between gap-3">
               <div>
                 <div className="font-semibold">Stock arrivals</div>
                 <div className="text-xs text-gray-500 mt-1">
-                  View deliveries + attached documents uploaded by store keeper.
+                  View deliveries + attached documents.
                 </div>
               </div>
               <button
@@ -867,21 +820,18 @@ export default function ManagerPage() {
           </div>
         ) : null}
 
-        {/* CASH REPORTS */}
         {tab === "cash_reports" ? (
           <div className="mt-6">
             <CashReportsPanel title="Manager Cash Reports" />
           </div>
         ) : null}
 
-        {/* USERS LIST (view-only) */}
         {tab === "users" ? (
           <div className="mt-6">
             <ManagerUsersPanel title="Staff list (view-only)" />
           </div>
         ) : null}
 
-        {/* CREDITS (optional) */}
         {tab === "credits" ? (
           <div className="mt-6 bg-white rounded-xl shadow overflow-hidden">
             <div className="p-4 border-b flex items-center justify-between gap-3">
@@ -935,33 +885,28 @@ export default function ManagerPage() {
           </div>
         ) : null}
 
-        {/* CUSTOMERS */}
         {tab === "customers" ? (
           <div className="mt-6">
             <CustomersPanel title="Customers (Manager)" />
           </div>
         ) : null}
 
-        {/* AUDIT */}
         {tab === "audit" ? (
           <div className="mt-6">
             <AuditLogsPanel
               title="Audit logs"
-              subtitle="Manager view (read-only). Filters + cursor pagination from backend."
+              subtitle="Manager view (read-only)."
               defaultLimit={50}
             />
           </div>
         ) : null}
 
-        {/* ✅ EVIDENCE TAB */}
         {tab === "evidence" ? (
           <div className="mt-6 bg-white rounded-xl shadow p-4 space-y-3">
             <div>
               <div className="font-semibold">Evidence (investigation)</div>
               <div className="text-sm text-gray-600 mt-1">
-                Open the audit trail for one record
-                (sale/payment/credit/refund). This is read-only and used for
-                disputes & fraud checks.
+                Open the audit trail for one record.
               </div>
             </div>
 
@@ -982,6 +927,7 @@ export default function ManagerPage() {
                   <option value="deposit">deposit</option>
                   <option value="user">user</option>
                   <option value="inventory">inventory</option>
+                  <option value="product">product</option>
                 </select>
               </div>
 
@@ -1025,7 +971,7 @@ export default function ManagerPage() {
                 </div>
                 <input
                   className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="e.g. SALE_CREATE"
+                  placeholder="e.g. PRODUCT_PRICING_UPDATE"
                   value={evAction}
                   onChange={(e) => setEvAction(e.target.value)}
                 />
@@ -1106,17 +1052,17 @@ export default function ManagerPage() {
               >
                 Clear
               </button>
-
-              <div className="text-xs text-gray-500">
-                Opens a read-only investigation page backed by <b>GET /audit</b>
-                .
-              </div>
             </div>
+          </div>
+        ) : null}
+
+        {tab === "inv_requests" ? (
+          <div className="mt-6">
+            <InventoryAdjustRequestsPanel />
           </div>
         ) : null}
       </div>
 
-      {/* Cancel modal */}
       {cancelOpen ? (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow max-w-md w-full p-4">
@@ -1156,12 +1102,6 @@ export default function ManagerPage() {
               </button>
             </div>
           </div>
-        </div>
-      ) : null}
-
-      {tab === "inv_requests" ? (
-        <div className="mt-6">
-          <InventoryAdjustRequestsPanel />
         </div>
       ) : null}
     </div>
