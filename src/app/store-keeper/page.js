@@ -10,9 +10,11 @@ import { useRouter } from "next/navigation";
 
 /**
  * ✅ LOCKED BACKEND ENDPOINTS (only change here)
- * Requests flow:
- *  - POST /requests/:id/approve  body: { decision: "APPROVE" | "REJECT" }
- *  - POST /requests/:id/release  body: {} (safe)
+ *
+ * Option B (NEW):
+ * - Seller creates sale as DRAFT (POST /sales)
+ * - Storekeeper fulfills sale (POST /sales/:id/fulfill)  ✅ must exist in backend
+ * - Seller later finalizes (mark PAID/PENDING)
  */
 const ENDPOINTS = {
   PRODUCTS_LIST: "/products",
@@ -24,10 +26,10 @@ const ENDPOINTS = {
   INV_ADJ_REQ_CREATE: "/inventory-adjust-requests",
   INV_ADJ_REQ_MINE: "/inventory-adjust-requests/mine",
 
-  // ✅ Seller stock requests (correct)
-  STOCK_REQUESTS_LIST: "/requests",
-  STOCK_REQUEST_DECIDE: (id) => `/requests/${id}/approve`,
-  STOCK_REQUEST_RELEASE: (id) => `/requests/${id}/release`,
+  // ✅ Option B: sales
+  SALES_LIST: "/sales",
+  SALE_GET: (id) => `/sales/${id}`,
+  SALE_FULFILL: (id) => `/sales/${id}/fulfill`, // ✅ backend must implement
 };
 
 export default function StoreKeeperPage() {
@@ -36,7 +38,7 @@ export default function StoreKeeperPage() {
   const [me, setMe] = useState(null);
   const [msg, setMsg] = useState("");
 
-  const [tab, setTab] = useState("inventory"); // inventory | arrivals | adjustments | requests
+  const [tab, setTab] = useState("inventory"); // inventory | arrivals | adjustments | sales
 
   // Products + inventory
   const [products, setProducts] = useState([]);
@@ -67,14 +69,15 @@ export default function StoreKeeperPage() {
   const [myAdjRequests, setMyAdjRequests] = useState([]);
   const [myAdjLoading, setMyAdjLoading] = useState(false);
 
-  // Seller stock requests (Storekeeper receives, approves, releases)
-  const [requests, setRequests] = useState([]);
-  const [reqLoading, setReqLoading] = useState(false);
-  const [reqQ, setReqQ] = useState("");
-  const [reqStatusFilter, setReqStatusFilter] = useState("ALL");
-  const [reqActionLoadingId, setReqActionLoadingId] = useState(null);
+  // ✅ Option B: Draft sales for fulfillment
+  const [sales, setSales] = useState([]);
+  const [salesLoading, setSalesLoading] = useState(false);
+  const [salesQ, setSalesQ] = useState("");
+  const [salesStatusFilter, setSalesStatusFilter] = useState("DRAFT"); // default: incoming work
+  const [saleActionLoadingId, setSaleActionLoadingId] = useState(null);
 
-  const [viewReq, setViewReq] = useState(null);
+  const [viewSale, setViewSale] = useState(null);
+  const [viewSaleLoading, setViewSaleLoading] = useState(false);
 
   // ---------------- ROLE GUARD ----------------
   useEffect(() => {
@@ -149,25 +152,6 @@ export default function StoreKeeperPage() {
     }
   }, []);
 
-  const loadRequests = useCallback(async () => {
-    setReqLoading(true);
-    setMsg("");
-    try {
-      const data = await apiFetch(ENDPOINTS.STOCK_REQUESTS_LIST, {
-        method: "GET",
-      });
-      const list = Array.isArray(data?.requests)
-        ? data.requests
-        : data?.items || data?.rows || data?.data || [];
-      setRequests(Array.isArray(list) ? list : []);
-    } catch (e) {
-      setMsg(e?.data?.error || e.message || "Failed to load requests");
-      setRequests([]);
-    } finally {
-      setReqLoading(false);
-    }
-  }, []);
-
   const loadMyAdjustRequests = useCallback(async () => {
     setMyAdjLoading(true);
     setMsg("");
@@ -189,6 +173,48 @@ export default function StoreKeeperPage() {
     }
   }, []);
 
+  const loadSales = useCallback(async () => {
+    setSalesLoading(true);
+    setMsg("");
+    try {
+      // We filter by status via query if your backend supports it; if not, we still filter client-side.
+      const qs =
+        salesStatusFilter && salesStatusFilter !== "ALL"
+          ? `?status=${encodeURIComponent(salesStatusFilter)}`
+          : "";
+      const data = await apiFetch(`${ENDPOINTS.SALES_LIST}${qs}`, {
+        method: "GET",
+      });
+
+      const list = Array.isArray(data?.sales)
+        ? data.sales
+        : data?.items || data?.rows || [];
+      setSales(Array.isArray(list) ? list : []);
+    } catch (e) {
+      setMsg(e?.data?.error || e.message || "Failed to load sales");
+      setSales([]);
+    } finally {
+      setSalesLoading(false);
+    }
+  }, [salesStatusFilter]);
+
+  async function openSaleDetails(saleId) {
+    const id = Number(saleId);
+    if (!id) return;
+
+    setViewSaleLoading(true);
+    setMsg("");
+    try {
+      const data = await apiFetch(ENDPOINTS.SALE_GET(id), { method: "GET" });
+      setViewSale(data?.sale || null);
+    } catch (e) {
+      setMsg(e?.data?.error || e.message || "Failed to load sale details");
+      setViewSale(null);
+    } finally {
+      setViewSaleLoading(false);
+    }
+  }
+
   // Load base data after login + on tab switch
   useEffect(() => {
     if (!isAuthorized) return;
@@ -196,62 +222,18 @@ export default function StoreKeeperPage() {
     loadProducts();
     loadInventory();
 
-    if (tab === "requests") loadRequests();
     if (tab === "adjustments") loadMyAdjustRequests();
+    if (tab === "sales") loadSales();
   }, [
     isAuthorized,
     tab,
     loadProducts,
     loadInventory,
-    loadRequests,
     loadMyAdjustRequests,
+    loadSales,
   ]);
 
-  // ---------------- HELPERS (Requests normalize) ----------------
-  function reqStatus(r) {
-    return String(r?.status || r?.state || "UNKNOWN").toUpperCase();
-  }
-
-  function reqItems(r) {
-    const items = r?.items || r?.requestItems || r?.lines || r?.details?.items;
-    return Array.isArray(items) ? items : [];
-  }
-
-  function reqProductLabel(r) {
-    const items = reqItems(r);
-    if (items.length === 0) return { title: "-", subtitle: "" };
-
-    if (items.length === 1) {
-      const it = items[0];
-      const pid = it.productId ?? it.product_id ?? "-";
-      const name = it.productName || it.name || "";
-      return { title: `#${pid}`, subtitle: name };
-    }
-
-    return { title: `${items.length} items`, subtitle: "Multiple products" };
-  }
-
-  function reqTotalQty(r) {
-    return reqItems(r).reduce((sum, it) => {
-      const q = Number(it.qty ?? it.qtyRequested ?? it.quantity ?? 0);
-      return sum + (Number.isFinite(q) ? q : 0);
-    }, 0);
-  }
-
-  function reqSellerLabel(r) {
-    return (
-      r?.sellerEmail ||
-      r?.sellerName ||
-      r?.requestedByEmail ||
-      String(r?.sellerId ?? r?.seller_id ?? r?.requestedByUserId ?? "-")
-    );
-  }
-
-  function reqCreatedAt(r) {
-    return r?.createdAt || r?.created_at || r?.requestedAt || null;
-  }
-
-  // ---------------- FILTERS / KPIs ----------------
+  // ---------------- KPIs ----------------
   const filteredInventory = useMemo(() => {
     const qq = String(q || "")
       .trim()
@@ -272,41 +254,41 @@ export default function StoreKeeperPage() {
     );
   }, [inventory]);
 
-  const pendingStockRequests = useMemo(() => {
-    return (Array.isArray(requests) ? requests : []).filter(
-      (r) => reqStatus(r) === "PENDING",
-    ).length;
-  }, [requests]);
-
   const pendingAdjRequests = useMemo(() => {
     return (Array.isArray(myAdjRequests) ? myAdjRequests : []).filter(
       (r) => String(r.status || "").toUpperCase() === "PENDING",
     ).length;
   }, [myAdjRequests]);
 
-  const filteredRequests = useMemo(() => {
-    const list = Array.isArray(requests) ? requests : [];
+  const draftSalesCount = useMemo(() => {
+    return (Array.isArray(sales) ? sales : []).filter(
+      (s) => String(s.status || "").toUpperCase() === "DRAFT",
+    ).length;
+  }, [sales]);
 
-    const qq = String(reqQ || "")
+  // ---------------- SALES FILTERS ----------------
+  const filteredSales = useMemo(() => {
+    const list = Array.isArray(sales) ? sales : [];
+    const qq = String(salesQ || "")
       .trim()
       .toLowerCase();
+    if (!qq) return list;
 
-    return list.filter((r) => {
-      const st = reqStatus(r).toLowerCase();
-      const id = String(r?.id ?? "").toLowerCase();
-      const seller = String(reqSellerLabel(r) ?? "").toLowerCase();
-      const matchQ = !qq
-        ? true
-        : id.includes(qq) || st.includes(qq) || seller.includes(qq);
-
-      const matchStatus =
-        reqStatusFilter === "ALL"
-          ? true
-          : st === String(reqStatusFilter).toLowerCase();
-
-      return matchQ && matchStatus;
+    return list.filter((s) => {
+      const id = String(s?.id ?? "").toLowerCase();
+      const status = String(s?.status ?? "").toLowerCase();
+      const sellerId = String(s?.sellerId ?? s?.seller_id ?? "").toLowerCase();
+      const customerName = String(s?.customerName ?? "").toLowerCase();
+      const customerPhone = String(s?.customerPhone ?? "").toLowerCase();
+      return (
+        id.includes(qq) ||
+        status.includes(qq) ||
+        sellerId.includes(qq) ||
+        customerName.includes(qq) ||
+        customerPhone.includes(qq)
+      );
     });
-  }, [requests, reqQ, reqStatusFilter]);
+  }, [sales, salesQ]);
 
   // ---------------- ACTIONS ----------------
   async function createProduct(e) {
@@ -425,42 +407,31 @@ export default function StoreKeeperPage() {
     }
   }
 
-  // ✅ DECIDE: sends required body to avoid "expected object, got undefined"
-  async function decideStockRequest(id, decision) {
-    setMsg("");
-    setReqActionLoadingId(id);
-    try {
-      await apiFetch(ENDPOINTS.STOCK_REQUEST_DECIDE(id), {
-        method: "POST",
-        body: { decision }, // "APPROVE" | "REJECT"
-      });
+  async function fulfillSale(saleId) {
+    const id = Number(saleId);
+    if (!id) return setMsg("Invalid sale id.");
 
-      setMsg(decision === "APPROVE" ? "✅ Approved" : "✅ Rejected");
-      await loadRequests();
-    } catch (e) {
-      setMsg(e?.data?.error || e.message || "Decision failed");
-    } finally {
-      setReqActionLoadingId(null);
-    }
-  }
-
-  // ✅ RELEASE: this is what moves stock (inventory down + seller_holdings up)
-  async function releaseStockRequest(id) {
     setMsg("");
-    setReqActionLoadingId(id);
+    setSaleActionLoadingId(id);
+
     try {
-      await apiFetch(ENDPOINTS.STOCK_REQUEST_RELEASE(id), {
+      await apiFetch(ENDPOINTS.SALE_FULFILL(id), {
         method: "POST",
         body: {}, // safe
       });
 
-      setMsg("✅ Released (stock moved to seller)");
-      await loadRequests();
+      setMsg(`✅ Sale #${id} fulfilled`);
+      await loadSales();
       await loadInventory();
+
+      // refresh modal if open
+      if (viewSale?.id === id) {
+        await openSaleDetails(id);
+      }
     } catch (e) {
-      setMsg(e?.data?.error || e.message || "Release failed");
+      setMsg(e?.data?.error || e.message || "Fulfill failed");
     } finally {
-      setReqActionLoadingId(null);
+      setSaleActionLoadingId(null);
     }
   }
 
@@ -501,9 +472,9 @@ export default function StoreKeeperPage() {
             sub="Warehouse stock"
           />
           <Card
-            label="Pending seller requests"
-            value={reqLoading ? "…" : String(pendingStockRequests)}
-            sub="Need action"
+            label="Draft sales"
+            value={salesLoading ? "…" : String(draftSalesCount)}
+            sub="Need fulfillment"
           />
           <Card
             label="Pending adjustment requests"
@@ -532,11 +503,8 @@ export default function StoreKeeperPage() {
           >
             Adjustment requests
           </TabButton>
-          <TabButton
-            active={tab === "requests"}
-            onClick={() => setTab("requests")}
-          >
-            Seller requests
+          <TabButton active={tab === "sales"} onClick={() => setTab("sales")}>
+            Sales fulfillment
           </TabButton>
         </div>
 
@@ -822,10 +790,6 @@ export default function StoreKeeperPage() {
               <div className="p-4 border-b flex items-center justify-between gap-3">
                 <div>
                   <div className="font-semibold">My adjustment requests</div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    If empty, backend may not expose{" "}
-                    <code>/inventory-adjust-requests/mine</code>.
-                  </div>
                 </div>
                 <button
                   onClick={loadMyAdjustRequests}
@@ -882,47 +846,52 @@ export default function StoreKeeperPage() {
           </div>
         ) : null}
 
-        {/* SELLER REQUESTS TAB ✅ FIXED (Approve/Reject/Release + Filter) */}
-        {tab === "requests" ? (
+        {/* SALES TAB (Option B) */}
+        {tab === "sales" ? (
           <div className="mt-4 bg-white rounded-xl shadow overflow-hidden">
             <div className="p-4 border-b flex items-center justify-between gap-3">
               <div>
-                <div className="font-semibold">Seller stock requests</div>
+                <div className="font-semibold">
+                  Sales fulfillment (Option B)
+                </div>
                 <div className="text-xs text-gray-500 mt-1">
-                  Approve/Reject first. Then <b>Release</b> to move stock to
-                  seller holdings.
+                  Sellers create <b>DRAFT</b> sales. You fulfill by deducting
+                  warehouse inventory. Seller finalizes later.
                 </div>
               </div>
               <button
-                onClick={loadRequests}
+                onClick={loadSales}
                 className="px-4 py-2 rounded-lg bg-black text-white text-sm"
               >
                 Refresh
               </button>
             </div>
 
-            {/* ✅ Filters */}
             <div className="p-3 border-b flex gap-2 flex-wrap">
               <input
                 className="flex-1 border rounded-lg px-3 py-2 text-sm"
-                placeholder="Search by id / status / seller"
-                value={reqQ}
-                onChange={(e) => setReqQ(e.target.value)}
+                placeholder="Search id/status/seller/customer"
+                value={salesQ}
+                onChange={(e) => setSalesQ(e.target.value)}
               />
               <select
                 className="border rounded-lg px-3 py-2 text-sm"
-                value={reqStatusFilter}
-                onChange={(e) => setReqStatusFilter(e.target.value)}
+                value={salesStatusFilter}
+                onChange={(e) => setSalesStatusFilter(e.target.value)}
               >
                 <option value="ALL">All</option>
+                <option value="DRAFT">DRAFT (incoming)</option>
+                <option value="FULFILLED">FULFILLED</option>
                 <option value="PENDING">PENDING</option>
-                <option value="APPROVED">APPROVED</option>
-                <option value="REJECTED">REJECTED</option>
-                <option value="RELEASED">RELEASED</option>
+                <option value="AWAITING_PAYMENT_RECORD">
+                  AWAITING_PAYMENT_RECORD
+                </option>
+                <option value="COMPLETED">COMPLETED</option>
+                <option value="CANCELLED">CANCELLED</option>
               </select>
             </div>
 
-            {reqLoading ? (
+            {salesLoading ? (
               <div className="p-4 text-sm text-gray-600">Loading...</div>
             ) : (
               <div className="overflow-x-auto">
@@ -930,101 +899,65 @@ export default function StoreKeeperPage() {
                   <thead className="bg-gray-50 text-gray-600">
                     <tr>
                       <th className="text-left p-3">ID</th>
-                      <th className="text-left p-3">Seller</th>
-                      <th className="text-left p-3">Product</th>
-                      <th className="text-right p-3">Qty</th>
                       <th className="text-left p-3">Status</th>
-                      <th className="text-left p-3">Time</th>
+                      <th className="text-right p-3">Total</th>
+                      <th className="text-left p-3">Seller</th>
+                      <th className="text-left p-3">Customer</th>
+                      <th className="text-left p-3">Created</th>
                       <th className="text-right p-3">Action</th>
                       <th className="text-right p-3">View</th>
                     </tr>
                   </thead>
-
                   <tbody>
-                    {(Array.isArray(filteredRequests)
-                      ? filteredRequests
-                      : []
-                    ).map((r) => {
-                      const status = reqStatus(r);
-                      const prod = reqProductLabel(r);
-                      const qty = reqTotalQty(r);
-                      const seller = reqSellerLabel(r);
-                      const created = reqCreatedAt(r);
+                    {filteredSales.map((s) => {
+                      const status = String(s.status || "").toUpperCase();
+                      const canFulfill = status === "DRAFT";
+                      const loading = saleActionLoadingId === s.id;
 
-                      const loading = reqActionLoadingId === r.id;
+                      const sellerLabel = String(
+                        s.sellerEmail ||
+                          s.sellerName ||
+                          s.sellerId ||
+                          s.seller_id ||
+                          "-",
+                      );
 
-                      const canApprove = status === "PENDING";
-                      const canReject = status === "PENDING";
-                      const canRelease = status === "APPROVED";
+                      const customerLabel = [
+                        s.customerName || "-",
+                        s.customerPhone || "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ");
 
                       return (
-                        <tr key={r.id} className="border-t">
-                          <td className="p-3 font-medium">{r.id}</td>
-
-                          <td className="p-3">{seller}</td>
-
-                          <td className="p-3">
-                            <div className="font-medium">{prod.title}</div>
-                            {prod.subtitle ? (
-                              <div className="text-xs text-gray-500">
-                                {prod.subtitle}
-                              </div>
-                            ) : null}
-                          </td>
-
-                          <td className="p-3 text-right">{qty}</td>
-
+                        <tr key={s.id} className="border-t">
+                          <td className="p-3 font-medium">{s.id}</td>
                           <td className="p-3">{status}</td>
-
-                          <td className="p-3">{safeDate(created)}</td>
-
                           <td className="p-3 text-right">
-                            <div className="flex justify-end gap-2 flex-wrap">
-                              <button
-                                disabled={!canApprove || loading}
-                                className={`px-3 py-1.5 rounded-lg text-xs ${
-                                  canApprove && !loading
-                                    ? "bg-black text-white"
-                                    : "bg-gray-200 text-gray-500"
-                                }`}
-                                onClick={() =>
-                                  decideStockRequest(r.id, "APPROVE")
-                                }
-                              >
-                                {loading ? "..." : "Approve"}
-                              </button>
-
-                              <button
-                                disabled={!canReject || loading}
-                                className={`px-3 py-1.5 rounded-lg text-xs border ${
-                                  canReject && !loading
-                                    ? "hover:bg-gray-50"
-                                    : "bg-gray-100 text-gray-400"
-                                }`}
-                                onClick={() =>
-                                  decideStockRequest(r.id, "REJECT")
-                                }
-                              >
-                                {loading ? "..." : "Reject"}
-                              </button>
-
-                              <button
-                                disabled={!canRelease || loading}
-                                className={`px-3 py-1.5 rounded-lg text-xs ${
-                                  canRelease && !loading
-                                    ? "bg-green-600 text-white hover:bg-green-700"
-                                    : "bg-gray-200 text-gray-500"
-                                }`}
-                                onClick={() => releaseStockRequest(r.id)}
-                              >
-                                {loading ? "..." : "Release"}
-                              </button>
-                            </div>
+                            {fmtMoney(s.totalAmount ?? 0)}
+                          </td>
+                          <td className="p-3">{sellerLabel}</td>
+                          <td className="p-3">{customerLabel}</td>
+                          <td className="p-3">{safeDate(s.createdAt)}</td>
+                          <td className="p-3 text-right">
+                            <button
+                              disabled={!canFulfill || loading}
+                              className={`px-3 py-1.5 rounded-lg text-xs ${
+                                canFulfill && !loading
+                                  ? "bg-green-600 text-white hover:bg-green-700"
+                                  : "bg-gray-200 text-gray-500"
+                              }`}
+                              onClick={() => fulfillSale(s.id)}
+                            >
+                              {loading ? "..." : "Fulfill"}
+                            </button>
                           </td>
                           <td className="p-3 text-right">
                             <button
                               className="px-3 py-1.5 rounded-lg border text-xs hover:bg-gray-50"
-                              onClick={() => setViewReq(r)}
+                              onClick={async () => {
+                                await openSaleDetails(s.id);
+                              }}
                             >
                               View
                             </button>
@@ -1032,12 +965,10 @@ export default function StoreKeeperPage() {
                         </tr>
                       );
                     })}
-
-                    {(Array.isArray(filteredRequests) ? filteredRequests : [])
-                      .length === 0 ? (
+                    {filteredSales.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="p-4 text-sm text-gray-600">
-                          No requests found.
+                        <td colSpan={8} className="p-4 text-sm text-gray-600">
+                          No sales found.
                         </td>
                       </tr>
                     ) : null}
@@ -1047,14 +978,12 @@ export default function StoreKeeperPage() {
             )}
           </div>
         ) : null}
-        <RequestModal
-          open={!!viewReq}
-          request={viewReq}
-          loadingId={reqActionLoadingId}
-          onClose={() => setViewReq(null)}
-          onApprove={(id) => decideStockRequest(id, "APPROVE")}
-          onReject={(id) => decideStockRequest(id, "REJECT")}
-          onRelease={(id) => releaseStockRequest(id)}
+
+        <SaleModal
+          open={!!viewSale}
+          sale={viewSale}
+          loading={viewSaleLoading}
+          onClose={() => setViewSale(null)}
         />
       </div>
     </div>
@@ -1064,6 +993,7 @@ export default function StoreKeeperPage() {
 function TabButton({ active, onClick, children }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       className={
         "px-3 py-2 rounded-lg border text-sm " +
@@ -1096,62 +1026,30 @@ function safeDate(v) {
   }
 }
 
-function RequestModal({
-  open,
-  onClose,
-  request,
-  onApprove,
-  onReject,
-  onRelease,
-  loadingId,
-}) {
-  if (!open || !request) return null;
+function fmtMoney(n) {
+  const x = Number(n ?? 0);
+  if (!Number.isFinite(x)) return "0";
+  // RWF formatting (no cents)
+  return Math.round(x).toLocaleString();
+}
 
-  const status = String(request?.status || "UNKNOWN").toUpperCase();
-  const items =
-    request?.items ||
-    request?.requestItems ||
-    request?.lines ||
-    request?.details?.items ||
-    [];
-
-  const safeItems = Array.isArray(items) ? items : [];
-  const totalQty = safeItems.reduce(
-    (sum, it) => sum + Number(it.qty ?? it.qtyRequested ?? it.quantity ?? 0),
-    0,
-  );
-
-  const seller =
-    request?.sellerEmail ||
-    request?.sellerName ||
-    request?.requestedByEmail ||
-    String(
-      request?.sellerId ??
-        request?.seller_id ??
-        request?.requestedByUserId ??
-        "-",
-    );
-
-  const createdAt =
-    request?.createdAt || request?.created_at || request?.requestedAt || null;
-
-  const canApprove = status === "PENDING";
-  const canReject = status === "PENDING";
-  const canRelease = status === "APPROVED";
-  const loading = loadingId === request.id;
+function SaleModal({ open, sale, loading, onClose }) {
+  if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* overlay */}
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 
-      {/* modal */}
       <div className="relative w-full max-w-2xl bg-white rounded-xl shadow-lg overflow-hidden">
         <div className="p-4 border-b flex items-center justify-between gap-3">
           <div>
-            <div className="font-semibold">Request #{request.id}</div>
+            <div className="font-semibold">
+              Sale #{sale?.id ?? "-"} {loading ? "…" : ""}
+            </div>
             <div className="text-xs text-gray-500 mt-1">
-              Seller: {seller} • Status: {status} • Time: {safeDate(createdAt)}
+              Status: {String(sale?.status || "-").toUpperCase()} • Seller:{" "}
+              {String(sale?.sellerId ?? "-")} • Total:{" "}
+              {fmtMoney(sale?.totalAmount ?? 0)}
             </div>
           </div>
 
@@ -1164,82 +1062,52 @@ function RequestModal({
         </div>
 
         <div className="p-4">
-          <div className="text-sm font-semibold">Items</div>
-          <div className="text-xs text-gray-500 mt-1">
-            Total qty: {totalQty}
-          </div>
+          {loading ? (
+            <div className="text-sm text-gray-600">Loading...</div>
+          ) : (
+            <>
+              <div className="text-sm font-semibold">Items</div>
+              <div className="mt-3 overflow-x-auto border rounded-lg">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-600">
+                    <tr>
+                      <th className="text-left p-3">Product</th>
+                      <th className="text-left p-3">SKU</th>
+                      <th className="text-right p-3">Qty</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(Array.isArray(sale?.items) ? sale.items : []).map(
+                      (it, idx) => (
+                        <tr key={it.id || idx} className="border-t">
+                          <td className="p-3 font-medium">
+                            {it.productName ||
+                              it.name ||
+                              `#${it.productId ?? "-"}`}
+                          </td>
+                          <td className="p-3 text-gray-600">{it.sku || "-"}</td>
+                          <td className="p-3 text-right">{it.qty ?? 0}</td>
+                        </tr>
+                      ),
+                    )}
+                    {(Array.isArray(sale?.items) ? sale.items : []).length ===
+                    0 ? (
+                      <tr>
+                        <td colSpan={3} className="p-4 text-sm text-gray-600">
+                          No items.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
 
-          <div className="mt-3 overflow-x-auto border rounded-lg">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600">
-                <tr>
-                  <th className="text-left p-3">Product</th>
-                  <th className="text-left p-3">SKU</th>
-                  <th className="text-right p-3">Qty</th>
-                </tr>
-              </thead>
-              <tbody>
-                {safeItems.map((it, idx) => (
-                  <tr key={it.id || idx} className="border-t">
-                    <td className="p-3 font-medium">
-                      {it.productName ||
-                        it.name ||
-                        `#${it.productId ?? it.product_id ?? "-"}`}
-                    </td>
-                    <td className="p-3 text-gray-600">{it.sku || "-"}</td>
-                    <td className="p-3 text-right">
-                      {it.qty ?? it.qtyRequested ?? it.quantity ?? 0}
-                    </td>
-                  </tr>
-                ))}
-                {safeItems.length === 0 ? (
-                  <tr>
-                    <td colSpan={3} className="p-4 text-sm text-gray-600">
-                      No items found in this request.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="mt-4 flex gap-2 flex-wrap justify-end">
-            <button
-              disabled={!canApprove || loading}
-              className={`px-4 py-2 rounded-lg text-sm ${
-                canApprove && !loading
-                  ? "bg-black text-white"
-                  : "bg-gray-200 text-gray-500"
-              }`}
-              onClick={() => onApprove(request.id)}
-            >
-              {loading ? "Working..." : "Approve"}
-            </button>
-
-            <button
-              disabled={!canReject || loading}
-              className={`px-4 py-2 rounded-lg text-sm border ${
-                canReject && !loading
-                  ? "hover:bg-gray-50"
-                  : "bg-gray-100 text-gray-400"
-              }`}
-              onClick={() => onReject(request.id)}
-            >
-              {loading ? "Working..." : "Reject"}
-            </button>
-
-            <button
-              disabled={!canRelease || loading}
-              className={`px-4 py-2 rounded-lg text-sm ${
-                canRelease && !loading
-                  ? "bg-green-600 text-white hover:bg-green-700"
-                  : "bg-gray-200 text-gray-500"
-              }`}
-              onClick={() => onRelease(request.id)}
-            >
-              {loading ? "Working..." : "Release"}
-            </button>
-          </div>
+              <div className="mt-4 text-xs text-gray-500">
+                Storekeeper action is <b>Fulfill</b> from the list (deducts
+                warehouse stock). Seller finalizes after fulfillment.
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
