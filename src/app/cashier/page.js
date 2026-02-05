@@ -1,3 +1,6 @@
+// ✅ PASTE THIS WHOLE FILE INTO:
+// frontend-staff/src/app/cashier/page.js
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -114,7 +117,6 @@ export default function CashierPage() {
 
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("CASH");
-  const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
   const [recording, setRecording] = useState(false);
 
@@ -122,8 +124,10 @@ export default function CashierPage() {
   const [paymentsLoading, setPaymentsLoading] = useState(false);
   const [payQ, setPayQ] = useState("");
 
+  // ✅ today + yesterday + all time
   const [summary, setSummary] = useState({
     today: { count: 0, total: 0 },
+    yesterday: { count: 0, total: 0 },
     allTime: { count: 0, total: 0 },
   });
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -220,6 +224,10 @@ export default function CashierPage() {
           count: Number(s?.today?.count || 0),
           total: Number(s?.today?.total || 0),
         },
+        yesterday: {
+          count: Number(s?.yesterday?.count || 0),
+          total: Number(s?.yesterday?.total || 0),
+        },
         allTime: {
           count: Number(s?.allTime?.count || 0),
           total: Number(s?.allTime?.total || 0),
@@ -227,7 +235,7 @@ export default function CashierPage() {
       });
       setCanReadPayments(true);
     } catch (e) {
-      const errText = e?.data?.error || e?.message || "Cannot load summary";
+      const errText = e?.data?.error || e?.message || "Cannot load money info";
       if (String(errText).toLowerCase().includes("forbidden")) {
         setCanReadPayments(false);
         return;
@@ -305,7 +313,7 @@ export default function CashierPage() {
         : data?.items || data?.rows || [];
       setReconciles(Array.isArray(list) ? list : []);
     } catch (e) {
-      setMsg(e?.data?.error || e?.message || "Cannot load cash check");
+      setMsg(e?.data?.error || e?.message || "Cannot load cash checks");
       setReconciles([]);
     } finally {
       setReconcilesLoading(false);
@@ -380,11 +388,15 @@ export default function CashierPage() {
         .trim()
         .toLowerCase();
       const total = String(s?.totalAmount ?? s?.total ?? "");
+      const sellerMethod = String(getSellerPaymentMethodFromSale(s) || "")
+        .trim()
+        .toLowerCase();
       return (
         id.includes(qq) ||
         name.includes(qq) ||
         phone.includes(qq) ||
-        total.includes(qq)
+        total.includes(qq) ||
+        sellerMethod.includes(qq)
       );
     });
   }, [awaitingSales, salesQ]);
@@ -521,7 +533,6 @@ export default function CashierPage() {
       setSelectedSale(null);
       setAmount("");
       setMethod("CASH");
-      setReference("");
       setNote("");
 
       await loadSales();
@@ -807,19 +818,24 @@ export default function CashierPage() {
         ) : null}
 
         {/* KPIs */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <Card
-            label="Paid today"
+            label="Today money"
             value={summaryLoading ? "…" : String(summary.today.count)}
             sub={`Total: ${money(summary.today.total)}`}
           />
           <Card
-            label="All payments"
+            label="Yesterday money"
+            value={summaryLoading ? "…" : String(summary.yesterday.count)}
+            sub={`Total: ${money(summary.yesterday.total)}`}
+          />
+          <Card
+            label="All time money"
             value={summaryLoading ? "…" : String(summary.allTime.count)}
             sub={`Total: ${money(summary.allTime.total)}`}
           />
           <Card
-            label="Need payment"
+            label="Waiting sales"
             value={salesLoading ? "…" : String(awaitingSales.length)}
             sub="Sales waiting for payment"
           />
@@ -894,7 +910,7 @@ export default function CashierPage() {
               <div className="p-3 border-b">
                 <input
                   className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Search"
+                  placeholder="Search (id/name/phone/total/method)"
                   value={salesQ}
                   onChange={(e) => setSalesQ(e.target.value)}
                 />
@@ -910,6 +926,7 @@ export default function CashierPage() {
                         <th className="text-left p-3">ID</th>
                         <th className="text-right p-3">Total</th>
                         <th className="text-left p-3">Customer</th>
+                        <th className="text-left p-3">Seller method</th>
                         <th className="text-right p-3">Pick</th>
                       </tr>
                     </thead>
@@ -920,6 +937,8 @@ export default function CashierPage() {
                           s?.customerName ?? s?.customer_name ?? "-";
                         const cphone =
                           s?.customerPhone ?? s?.customer_phone ?? "";
+                        const sellerMethod = getSellerPaymentMethodFromSale(s);
+
                         return (
                           <tr key={s?.id} className="border-t">
                             <td className="p-3 font-medium">#{s?.id}</td>
@@ -930,17 +949,27 @@ export default function CashierPage() {
                                 {cphone}
                               </div>
                             </td>
+
+                            <td className="p-3">
+                              <span className="text-xs px-2 py-1 rounded-full border">
+                                {sellerMethod || "—"}
+                              </span>
+                            </td>
+
                             <td className="p-3 text-right">
                               <button
                                 type="button"
                                 className="px-3 py-1.5 rounded-lg border text-xs hover:bg-gray-50"
                                 onClick={() => {
+                                  const sm = getSellerPaymentMethodFromSale(s);
+
                                   setSelectedSale(s);
                                   setAmount(
                                     String(Math.round(Number(total) || 0)),
                                   );
-                                  setMethod("CASH");
-                                  setReference("");
+
+                                  // If seller picked CASH/MOMO/BANK, preselect it. Otherwise default CASH.
+                                  setMethod(sm || "CASH");
                                   setNote("");
                                 }}
                               >
@@ -952,7 +981,7 @@ export default function CashierPage() {
                       })}
                       {filteredAwaitingSales.length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="p-4 text-sm text-gray-600">
+                          <td colSpan={5} className="p-4 text-sm text-gray-600">
                             No sales here.
                           </td>
                         </tr>
@@ -984,6 +1013,10 @@ export default function CashierPage() {
                       {money(
                         selectedSale.totalAmount ?? selectedSale.total ?? 0,
                       )}
+                    </div>
+                    <div className="mt-1">
+                      <b>Seller method:</b>{" "}
+                      {getSellerPaymentMethodFromSale(selectedSale) || "-"}
                     </div>
                   </div>
 
@@ -1241,15 +1274,12 @@ export default function CashierPage() {
           </div>
         ) : null}
 
-        {/* DEPOSITS TAB */}
+        {/* DEPOSITS / EXPENSES / RECONCILE / REFUNDS */}
         {tab === "deposits" ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-white rounded-xl shadow p-4">
-              <div className="font-semibold">Save deposit</div>
-              <div className="text-xs text-gray-500 mt-1">
-                Money you put in bank.
-              </div>
-
+          <SimpleTwoCol
+            leftTitle="Save deposit"
+            leftHint="Money you put in bank."
+            leftForm={
               <form
                 onSubmit={createDeposit}
                 className="mt-4 grid gap-3 max-w-md"
@@ -1294,81 +1324,55 @@ export default function CashierPage() {
                   {depositSaving ? "Saving..." : "Save"}
                 </button>
               </form>
-            </div>
-
-            <div className="bg-white rounded-xl shadow overflow-hidden">
-              <div className="p-4 border-b flex items-center justify-between">
-                <div className="font-semibold">Deposits</div>
-                <button
-                  type="button"
-                  onClick={loadDeposits}
-                  className="px-4 py-2 rounded-lg bg-black text-white text-sm"
-                >
-                  Refresh
-                </button>
-              </div>
-
-              <div className="p-3 border-b">
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Search"
-                  value={depositQ}
-                  onChange={(e) => setDepositQ(e.target.value)}
-                />
-              </div>
-
-              {depositsLoading ? (
-                <div className="p-4 text-sm text-gray-600">Loading...</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left p-3">ID</th>
-                        <th className="text-right p-3">Amount</th>
-                        <th className="text-left p-3">Method</th>
-                        <th className="text-left p-3">Ref</th>
-                        <th className="text-left p-3">Time</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredDeposits.map((d, idx) => (
-                        <tr key={d?.id || idx} className="border-t">
-                          <td className="p-3 font-medium">{d?.id ?? "-"}</td>
-                          <td className="p-3 text-right">
-                            {money(d?.amount ?? 0)}
-                          </td>
-                          <td className="p-3">{d?.method ?? "-"}</td>
-                          <td className="p-3">
-                            {d?.reference || d?.ref || "-"}
-                          </td>
-                          <td className="p-3">
-                            {safeDate(d?.createdAt || d?.created_at)}
-                          </td>
-                        </tr>
-                      ))}
-                      {filteredDeposits.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="p-4 text-sm text-gray-600">
-                            No deposits yet.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
+            }
+            rightTitle="Deposits"
+            rightSearchValue={depositQ}
+            rightSearchOnChange={(v) => setDepositQ(v)}
+            rightRefresh={loadDeposits}
+            rightLoading={depositsLoading}
+            rightTable={
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="text-left p-3">ID</th>
+                    <th className="text-right p-3">Amount</th>
+                    <th className="text-left p-3">Method</th>
+                    <th className="text-left p-3">Ref</th>
+                    <th className="text-left p-3">Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredDeposits.map((d, idx) => (
+                    <tr key={d?.id || idx} className="border-t">
+                      <td className="p-3 font-medium">{d?.id ?? "-"}</td>
+                      <td className="p-3 text-right">
+                        {money(d?.amount ?? 0)}
+                      </td>
+                      <td className="p-3">{d?.method ?? "-"}</td>
+                      <td className="p-3">{d?.reference || d?.ref || "-"}</td>
+                      <td className="p-3">
+                        {safeDate(d?.createdAt || d?.created_at)}
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredDeposits.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-4 text-sm text-gray-600">
+                        No deposits yet.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            }
+          />
         ) : null}
 
-        {/* EXPENSES TAB */}
         {tab === "expenses" ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-white rounded-xl shadow p-4">
-              <div className="font-semibold">Save expense</div>
-              <div className="text-xs text-gray-500 mt-1">Money you used.</div>
-
+          <SimpleTwoCol
+            leftTitle="Save expense"
+            leftHint="Money you used."
+            leftForm={
               <form
                 onSubmit={createExpense}
                 className="mt-4 grid gap-3 max-w-md"
@@ -1379,28 +1383,24 @@ export default function CashierPage() {
                   value={expenseAmount}
                   onChange={(e) => setExpenseAmount(e.target.value)}
                 />
-
                 <input
                   className="border rounded-lg px-3 py-2"
                   placeholder="Type (e.g. Transport, Lunch)"
                   value={expenseCategory}
                   onChange={(e) => setExpenseCategory(e.target.value)}
                 />
-
                 <input
                   className="border rounded-lg px-3 py-2"
                   placeholder="Reference (optional)"
                   value={expenseRef}
                   onChange={(e) => setExpenseRef(e.target.value)}
                 />
-
                 <input
                   className="border rounded-lg px-3 py-2"
                   placeholder="Note (optional)"
                   value={expenseNote}
                   onChange={(e) => setExpenseNote(e.target.value)}
                 />
-
                 <button
                   disabled={expenseSaving}
                   className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
@@ -1408,85 +1408,55 @@ export default function CashierPage() {
                   {expenseSaving ? "Saving..." : "Save"}
                 </button>
               </form>
-            </div>
-
-            <div className="bg-white rounded-xl shadow overflow-hidden">
-              <div className="p-4 border-b flex items-center justify-between">
-                <div className="font-semibold">Expenses</div>
-                <button
-                  type="button"
-                  onClick={loadExpenses}
-                  className="px-4 py-2 rounded-lg bg-black text-white text-sm"
-                >
-                  Refresh
-                </button>
-              </div>
-
-              <div className="p-3 border-b">
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Search"
-                  value={expenseQ}
-                  onChange={(e) => setExpenseQ(e.target.value)}
-                />
-              </div>
-
-              {expensesLoading ? (
-                <div className="p-4 text-sm text-gray-600">Loading...</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left p-3">ID</th>
-                        <th className="text-right p-3">Amount</th>
-                        <th className="text-left p-3">Type</th>
-                        <th className="text-left p-3">Ref</th>
-                        <th className="text-left p-3">Time</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredExpenses.map((x, idx) => (
-                        <tr key={x?.id || idx} className="border-t">
-                          <td className="p-3 font-medium">{x?.id ?? "-"}</td>
-                          <td className="p-3 text-right">
-                            {money(x?.amount ?? 0)}
-                          </td>
-                          <td className="p-3">
-                            {x?.category || x?.type || "-"}
-                          </td>
-                          <td className="p-3">
-                            {x?.reference || x?.ref || "-"}
-                          </td>
-                          <td className="p-3">
-                            {safeDate(x?.createdAt || x?.created_at)}
-                          </td>
-                        </tr>
-                      ))}
-                      {filteredExpenses.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="p-4 text-sm text-gray-600">
-                            No expenses yet.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
+            }
+            rightTitle="Expenses"
+            rightSearchValue={expenseQ}
+            rightSearchOnChange={(v) => setExpenseQ(v)}
+            rightRefresh={loadExpenses}
+            rightLoading={expensesLoading}
+            rightTable={
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="text-left p-3">ID</th>
+                    <th className="text-right p-3">Amount</th>
+                    <th className="text-left p-3">Type</th>
+                    <th className="text-left p-3">Ref</th>
+                    <th className="text-left p-3">Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredExpenses.map((x, idx) => (
+                    <tr key={x?.id || idx} className="border-t">
+                      <td className="p-3 font-medium">{x?.id ?? "-"}</td>
+                      <td className="p-3 text-right">
+                        {money(x?.amount ?? 0)}
+                      </td>
+                      <td className="p-3">{x?.category || x?.type || "-"}</td>
+                      <td className="p-3">{x?.reference || x?.ref || "-"}</td>
+                      <td className="p-3">
+                        {safeDate(x?.createdAt || x?.created_at)}
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredExpenses.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-4 text-sm text-gray-600">
+                        No expenses yet.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            }
+          />
         ) : null}
 
-        {/* RECONCILE TAB */}
         {tab === "reconcile" ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-white rounded-xl shadow p-4">
-              <div className="font-semibold">Cash check</div>
-              <div className="text-xs text-gray-500 mt-1">
-                Count the cash in hand, then save.
-              </div>
-
+          <SimpleTwoCol
+            leftTitle="Cash check"
+            leftHint="Count the cash in hand, then save."
+            leftForm={
               <form
                 onSubmit={createReconcile}
                 className="mt-4 grid gap-3 max-w-md"
@@ -1510,79 +1480,53 @@ export default function CashierPage() {
                   {reconcileSaving ? "Saving..." : "Save"}
                 </button>
               </form>
-            </div>
-
-            <div className="bg-white rounded-xl shadow overflow-hidden">
-              <div className="p-4 border-b flex items-center justify-between">
-                <div className="font-semibold">Cash checks</div>
-                <button
-                  type="button"
-                  onClick={loadReconciles}
-                  className="px-4 py-2 rounded-lg bg-black text-white text-sm"
-                >
-                  Refresh
-                </button>
-              </div>
-
-              <div className="p-3 border-b">
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Search"
-                  value={reconcileQ}
-                  onChange={(e) => setReconcileQ(e.target.value)}
-                />
-              </div>
-
-              {reconcilesLoading ? (
-                <div className="p-4 text-sm text-gray-600">Loading...</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left p-3">ID</th>
-                        <th className="text-left p-3">Status</th>
-                        <th className="text-right p-3">Counted</th>
-                        <th className="text-left p-3">Time</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredReconciles.map((r, idx) => (
-                        <tr key={r?.id || idx} className="border-t">
-                          <td className="p-3 font-medium">{r?.id ?? "-"}</td>
-                          <td className="p-3 font-medium">
-                            {reconcileStatus(r)}
-                          </td>
-                          <td className="p-3 text-right">
-                            {money(r?.countedCash ?? r?.counted_cash ?? 0)}
-                          </td>
-                          <td className="p-3">
-                            {safeDate(r?.createdAt || r?.created_at)}
-                          </td>
-                        </tr>
-                      ))}
-                      {filteredReconciles.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="p-4 text-sm text-gray-600">
-                            No cash checks yet.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
+            }
+            rightTitle="Cash checks"
+            rightSearchValue={reconcileQ}
+            rightSearchOnChange={(v) => setReconcileQ(v)}
+            rightRefresh={loadReconciles}
+            rightLoading={reconcilesLoading}
+            rightTable={
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="text-left p-3">ID</th>
+                    <th className="text-left p-3">Status</th>
+                    <th className="text-right p-3">Counted</th>
+                    <th className="text-left p-3">Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredReconciles.map((r, idx) => (
+                    <tr key={r?.id || idx} className="border-t">
+                      <td className="p-3 font-medium">{r?.id ?? "-"}</td>
+                      <td className="p-3 font-medium">{reconcileStatus(r)}</td>
+                      <td className="p-3 text-right">
+                        {money(r?.countedCash ?? r?.counted_cash ?? 0)}
+                      </td>
+                      <td className="p-3">
+                        {safeDate(r?.createdAt || r?.created_at)}
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredReconciles.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="p-4 text-sm text-gray-600">
+                        No cash checks yet.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            }
+          />
         ) : null}
 
-        {/* REFUNDS TAB */}
         {tab === "refunds" ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-white rounded-xl shadow p-4">
-              <div className="font-semibold">Save refund</div>
-              <div className="text-xs text-gray-500 mt-1">Give money back.</div>
-
+          <SimpleTwoCol
+            leftTitle="Save refund"
+            leftHint="Give money back."
+            leftForm={
               <form
                 onSubmit={createRefund}
                 className="mt-4 grid gap-3 max-w-md"
@@ -1606,79 +1550,107 @@ export default function CashierPage() {
                   {refundSaving ? "Saving..." : "Save"}
                 </button>
               </form>
-            </div>
-
-            <div className="bg-white rounded-xl shadow overflow-hidden">
-              <div className="p-4 border-b flex items-center justify-between">
-                <div className="font-semibold">Refunds</div>
-                <button
-                  type="button"
-                  onClick={loadRefunds}
-                  className="px-4 py-2 rounded-lg bg-black text-white text-sm"
-                >
-                  Refresh
-                </button>
-              </div>
-
-              <div className="p-3 border-b">
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Search"
-                  value={refundQ}
-                  onChange={(e) => setRefundQ(e.target.value)}
-                />
-              </div>
-
-              {refundsLoading ? (
-                <div className="p-4 text-sm text-gray-600">Loading...</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left p-3">ID</th>
-                        <th className="text-left p-3">Sale</th>
-                        <th className="text-right p-3">Amount</th>
-                        <th className="text-left p-3">Reason</th>
-                        <th className="text-left p-3">Time</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredRefunds.map((r, idx) => (
-                        <tr key={r?.id || idx} className="border-t">
-                          <td className="p-3 font-medium">{r?.id ?? "-"}</td>
-                          <td className="p-3">
-                            #{r?.saleId ?? r?.sale_id ?? "-"}
-                          </td>
-                          <td className="p-3 text-right">
-                            {money(r?.amount ?? 0)}
-                          </td>
-                          <td className="p-3">{r?.reason || "-"}</td>
-                          <td className="p-3">
-                            {safeDate(r?.createdAt || r?.created_at)}
-                          </td>
-                        </tr>
-                      ))}
-                      {filteredRefunds.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="p-4 text-sm text-gray-600">
-                            No refunds yet.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
+            }
+            rightTitle="Refunds"
+            rightSearchValue={refundQ}
+            rightSearchOnChange={(v) => setRefundQ(v)}
+            rightRefresh={loadRefunds}
+            rightLoading={refundsLoading}
+            rightTable={
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="text-left p-3">ID</th>
+                    <th className="text-left p-3">Sale</th>
+                    <th className="text-right p-3">Amount</th>
+                    <th className="text-left p-3">Reason</th>
+                    <th className="text-left p-3">Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRefunds.map((r, idx) => (
+                    <tr key={r?.id || idx} className="border-t">
+                      <td className="p-3 font-medium">{r?.id ?? "-"}</td>
+                      <td className="p-3">#{r?.saleId ?? r?.sale_id ?? "-"}</td>
+                      <td className="p-3 text-right">
+                        {money(r?.amount ?? 0)}
+                      </td>
+                      <td className="p-3">{r?.reason || "-"}</td>
+                      <td className="p-3">
+                        {safeDate(r?.createdAt || r?.created_at)}
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredRefunds.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-4 text-sm text-gray-600">
+                        No refunds yet.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            }
+          />
         ) : null}
       </div>
     </div>
   );
 }
 
-/* UI helpers */
+/* Small reusable layout (still same file) */
+function SimpleTwoCol({
+  leftTitle,
+  leftHint,
+  leftForm,
+  rightTitle,
+  rightSearchValue,
+  rightSearchOnChange,
+  rightRefresh,
+  rightLoading,
+  rightTable,
+}) {
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="bg-white rounded-xl shadow p-4">
+        <div className="font-semibold">{leftTitle}</div>
+        {leftHint ? (
+          <div className="text-xs text-gray-500 mt-1">{leftHint}</div>
+        ) : null}
+        {leftForm}
+      </div>
+
+      <div className="bg-white rounded-xl shadow overflow-hidden">
+        <div className="p-4 border-b flex items-center justify-between">
+          <div className="font-semibold">{rightTitle}</div>
+          <button
+            type="button"
+            onClick={rightRefresh}
+            className="px-4 py-2 rounded-lg bg-black text-white text-sm"
+          >
+            Refresh
+          </button>
+        </div>
+
+        <div className="p-3 border-b">
+          <input
+            className="w-full border rounded-lg px-3 py-2 text-sm"
+            placeholder="Search"
+            value={rightSearchValue}
+            onChange={(e) => rightSearchOnChange(e.target.value)}
+          />
+        </div>
+
+        {rightLoading ? (
+          <div className="p-4 text-sm text-gray-600">Loading...</div>
+        ) : (
+          <div className="overflow-x-auto">{rightTable}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TabButton({ active, onClick, children }) {
   return (
     <button
@@ -1704,6 +1676,15 @@ function Card({ label, value, sub }) {
       {sub ? <div className="text-sm text-gray-600 mt-1">{sub}</div> : null}
     </div>
   );
+}
+
+// Reads seller-picked method from the sale.note tag like:
+// [SELLER_PAYMENT_METHOD=CASH] / [SELLER_PAYMENT_METHOD=MOMO] / [SELLER_PAYMENT_METHOD=BANK]
+function getSellerPaymentMethodFromSale(sale) {
+  const note = String(sale?.note || "");
+  const m = note.match(/\[SELLER_PAYMENT_METHOD=(CASH|MOMO|BANK)\]/i);
+  if (!m) return null;
+  return String(m[1] || "").toUpperCase();
 }
 
 function money(n) {

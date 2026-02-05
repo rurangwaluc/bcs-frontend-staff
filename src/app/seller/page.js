@@ -1,4 +1,4 @@
-// frontend/app/seller/page.js
+// frontend-staff/src/app/seller/page.js
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -9,14 +9,18 @@ import { getMe } from "../../lib/auth";
 import { useRouter } from "next/navigation";
 
 /**
- * ✅ Option B (NO holdings) - UI must match backend:
- * - Seller creates sale as DRAFT
- * - Storekeeper fulfills -> sale becomes FULFILLED
- * - Seller can mark only after FULFILLED:
- *    - PAID  -> AWAITING_PAYMENT_RECORD
- *    - PENDING -> PENDING
+ * Backend contract:
+ * POST /sales/:id/mark
+ * body: { status: "PAID" | "PENDING", paymentMethod?: "CASH"|"MOMO"|"BANK" }
  *
- * If endpoints differ, change ONLY here.
+ * UI rules:
+ * - DISPLAY "PENDING" as "CREDIT"
+ * - SEND "PENDING" to backend
+ *
+ * Dashboard rules:
+ * - "Today's sales/total/credit" = based on createdAt
+ * - "Paid by Cash/MoMo/Bank today" = based on updatedAt (when seller marked PAID)
+ *   This avoids zeros when sale was created yesterday but paid today.
  */
 const ENDPOINTS = {
   PRODUCTS_LIST: "/products",
@@ -26,8 +30,14 @@ const ENDPOINTS = {
 };
 
 const MARK_OPTIONS = [
-  { value: "PENDING", label: "PENDING (customer will pay later)" },
+  { value: "PENDING", label: "CREDIT (customer will pay later)" },
   { value: "PAID", label: "PAID (customer has paid)" },
+];
+
+const PAYMENT_METHODS = [
+  { value: "CASH", label: "Cash" },
+  { value: "MOMO", label: "MoMo" },
+  { value: "BANK", label: "Bank" },
 ];
 
 export default function SellerPage() {
@@ -38,7 +48,7 @@ export default function SellerPage() {
 
   const [tab, setTab] = useState("dashboard"); // dashboard | create | sales
 
-  // products (for selling prices + discount limits)
+  // products
   const [products, setProducts] = useState([]);
   const [productsLoading, setProductsLoading] = useState(false);
   const [prodQ, setProdQ] = useState("");
@@ -54,11 +64,14 @@ export default function SellerPage() {
   const [note, setNote] = useState("");
   const [saleCart, setSaleCart] = useState([]);
 
-  // sale-level discount (combined)
+  // sale-level discount
   const [saleDiscountPercent, setSaleDiscountPercent] = useState("");
   const [saleDiscountAmount, setSaleDiscountAmount] = useState("");
 
-  // ---------------- ROLE GUARD (HARD) ----------------
+  // per sale chosen pay method (used when marking PAID)
+  const [salePayMethod, setSalePayMethod] = useState({}); // { [saleId]: "CASH" }
+
+  // ---------------- ROLE GUARD ----------------
   useEffect(() => {
     let alive = true;
 
@@ -138,16 +151,10 @@ export default function SellerPage() {
     if (!isAuthorized) return;
 
     async function run() {
-      // products used for "create sale" cart + prices/discounts
       await loadProducts();
 
-      if (tab === "dashboard") {
-        await loadSales();
-      }
-
-      if (tab === "sales") {
-        await loadSales();
-      }
+      if (tab === "dashboard") await loadSales();
+      if (tab === "sales") await loadSales();
     }
 
     run();
@@ -184,10 +191,7 @@ export default function SellerPage() {
       sku: p?.sku || "-",
       sellingPrice: sp,
       maxDiscountPercent: md,
-
       qty: 1,
-
-      // Seller can discount but not above max, unit price not above sellingPrice (backend enforces too)
       unitPrice: sp,
       discountPercent: 0,
       discountAmount: 0,
@@ -255,7 +259,6 @@ export default function SellerPage() {
       return setMsg("Cart empty. Add items from Products first.");
     }
 
-    // Client-side guards (backend still enforces)
     const strictMax = saleCart.reduce((min, it) => {
       const v = Number(it.maxDiscountPercent ?? 0);
       return Math.min(min, Number.isFinite(v) ? v : 0);
@@ -356,16 +359,27 @@ export default function SellerPage() {
   }
 
   // ---------------- SALES: MARK ----------------
-  async function markSale(saleId, newStatus) {
+  async function markSale(saleId, newStatus, paymentMethod) {
     setMsg("");
 
     try {
+      // ✅ Strict body to avoid contract mismatch:
+      // - PAID => include paymentMethod
+      // - PENDING => DO NOT include paymentMethod
+      const upper = String(newStatus || "").toUpperCase();
+      const body =
+        upper === "PAID"
+          ? { status: "PAID", paymentMethod }
+          : { status: "PENDING" };
+
       await apiFetch(ENDPOINTS.SALE_MARK(saleId), {
         method: "POST",
-        body: { status: newStatus }, // MUST be "PAID" or "PENDING"
+        body,
       });
 
-      setMsg(`✅ Sale #${saleId} marked as ${newStatus}`);
+      const uiLabel = upper === "PENDING" ? "CREDIT" : "PAID";
+      const pm = upper === "PAID" ? ` (${paymentMethod || "-"})` : "";
+      setMsg(`✅ Sale #${saleId} marked as ${uiLabel}${pm}`);
       await loadSales();
     } catch (err) {
       const debug = err?.data?.debug
@@ -377,19 +391,37 @@ export default function SellerPage() {
     }
   }
 
-  // ---------------- DASHBOARD METRICS ----------------
-  function isToday(dateLike) {
-    if (!dateLike) return false;
-    const d = new Date(dateLike);
-    if (Number.isNaN(d.getTime())) return false;
-    const now = new Date();
+  // ---------------- DASHBOARD HELPERS ----------------
+  function isSameLocalDay(a, b) {
+    const da = new Date(a);
+    const db = new Date(b);
+    if (Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return false;
     return (
-      d.getFullYear() === now.getFullYear() &&
-      d.getMonth() === now.getMonth() &&
-      d.getDate() === now.getDate()
+      da.getFullYear() === db.getFullYear() &&
+      da.getMonth() === db.getMonth() &&
+      da.getDate() === db.getDate()
     );
   }
 
+  function isToday(dateLike) {
+    if (!dateLike) return false;
+    const now = new Date();
+    return isSameLocalDay(dateLike, now);
+  }
+
+  // backend returns either paymentMethod or payment_method
+  function getPaymentMethodFromSale(s) {
+    const raw = s?.paymentMethod ?? s?.payment_method ?? null;
+    return raw ? String(raw).toUpperCase() : null;
+  }
+
+  // "Paid-like" statuses (money already received, cashier may still record)
+  const paidStatuses = useMemo(
+    () => new Set(["AWAITING_PAYMENT_RECORD", "COMPLETED"]),
+    [],
+  );
+
+  // ---------------- CREATED TODAY (for "Today's sales/total/credit") ----------------
   const salesToday = useMemo(() => {
     const list = Array.isArray(sales) ? sales : [];
     return list.filter((s) => isToday(s?.createdAt || s?.created_at));
@@ -410,15 +442,75 @@ export default function SellerPage() {
     }, 0);
   }, [salesToday]);
 
-  const todayMoneyPaidLike = useMemo(() => {
-    const paidStatuses = new Set(["AWAITING_PAYMENT_RECORD", "COMPLETED"]);
+  const todayCreditTotal = useMemo(() => {
     return salesToday.reduce((sum, s) => {
       const st = String(s?.status || "").toUpperCase();
-      if (!paidStatuses.has(st)) return sum;
+      if (st !== "PENDING") return sum; // PENDING == CREDIT
       const v = Number(s?.totalAmount ?? s?.total ?? 0);
       return sum + (Number.isFinite(v) ? v : 0);
     }, 0);
   }, [salesToday]);
+
+  const todayCreditCount = useMemo(() => {
+    return salesToday.filter(
+      (s) => String(s?.status || "").toUpperCase() === "PENDING",
+    ).length;
+  }, [salesToday]);
+
+  // ---------------- PAID TODAY (for breakdown) ----------------
+  // Use updatedAt because seller marking PAID updates updatedAt in your backend service.
+  const paidLikeToday = useMemo(() => {
+    const list = Array.isArray(sales) ? sales : [];
+    return list.filter((s) => {
+      const st = String(s?.status || "").toUpperCase();
+      if (!paidStatuses.has(st)) return false;
+      const paidMoment = s?.updatedAt || s?.updated_at || null;
+      return isToday(paidMoment);
+    });
+  }, [sales, paidStatuses]);
+
+  const todayMoneyPaidLike = useMemo(() => {
+    return paidLikeToday.reduce((sum, s) => {
+      const v = Number(s?.totalAmount ?? s?.total ?? 0);
+      return sum + (Number.isFinite(v) ? v : 0);
+    }, 0);
+  }, [paidLikeToday]);
+
+  const todayPaidCash = useMemo(() => {
+    return paidLikeToday.reduce((sum, s) => {
+      const pm = getPaymentMethodFromSale(s);
+      if (pm !== "CASH") return sum;
+      const v = Number(s?.totalAmount ?? s?.total ?? 0);
+      return sum + (Number.isFinite(v) ? v : 0);
+    }, 0);
+  }, [paidLikeToday]);
+
+  const todayPaidMoMo = useMemo(() => {
+    return paidLikeToday.reduce((sum, s) => {
+      const pm = getPaymentMethodFromSale(s);
+      if (pm !== "MOMO") return sum;
+      const v = Number(s?.totalAmount ?? s?.total ?? 0);
+      return sum + (Number.isFinite(v) ? v : 0);
+    }, 0);
+  }, [paidLikeToday]);
+
+  const todayPaidBank = useMemo(() => {
+    return paidLikeToday.reduce((sum, s) => {
+      const pm = getPaymentMethodFromSale(s);
+      if (pm !== "BANK") return sum;
+      const v = Number(s?.totalAmount ?? s?.total ?? 0);
+      return sum + (Number.isFinite(v) ? v : 0);
+    }, 0);
+  }, [paidLikeToday]);
+
+  const todayPaidUnknown = useMemo(() => {
+    return paidLikeToday.reduce((sum, s) => {
+      const pm = getPaymentMethodFromSale(s);
+      if (pm === "CASH" || pm === "MOMO" || pm === "BANK") return sum;
+      const v = Number(s?.totalAmount ?? s?.total ?? 0);
+      return sum + (Number.isFinite(v) ? v : 0);
+    }, 0);
+  }, [paidLikeToday]);
 
   // ---------------- FILTERS ----------------
   const filteredSales = useMemo(() => {
@@ -427,21 +519,31 @@ export default function SellerPage() {
       .trim()
       .toLowerCase();
     if (!qq) return list;
+
     return list.filter((s) => {
       const id = String(s?.id ?? "");
-      const status = String(s?.status ?? "").toLowerCase();
-      const name = String(s?.customerName ?? "").toLowerCase();
-      const phone = String(s?.customerPhone ?? "").toLowerCase();
+      const st = String(s?.status ?? "");
+      const statusReadable = st.toUpperCase() === "PENDING" ? "CREDIT" : st;
+
+      const name = String(
+        s?.customerName ?? s?.customer_name ?? "",
+      ).toLowerCase();
+      const phone = String(
+        s?.customerPhone ?? s?.customer_phone ?? "",
+      ).toLowerCase();
+
+      const pm = String(getPaymentMethodFromSale(s) || "").toLowerCase();
+
       return (
         id.includes(qq) ||
-        status.includes(qq) ||
+        String(statusReadable).toLowerCase().includes(qq) ||
         name.includes(qq) ||
-        phone.includes(qq)
+        phone.includes(qq) ||
+        pm.includes(qq)
       );
     });
   }, [sales, salesQ]);
 
-  // HARD STOP RENDER if not seller
   if (!isAuthorized) {
     return <div className="p-6 text-sm text-gray-600">Redirecting...</div>;
   }
@@ -485,32 +587,68 @@ export default function SellerPage() {
 
         {/* DASHBOARD */}
         {tab === "dashboard" ? (
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
             <StatCard
               title="Today's sales"
               value={String(todaySalesCount)}
-              hint="Count of sales created today (not cancelled)"
-              loading={salesLoading}
-            />
-            <StatCard
-              title="Today's total"
-              value={`${fmtMoney(todaySalesTotal)} RWF`}
-              hint="Sum of today’s non-cancelled sales"
-              loading={salesLoading}
-            />
-            <StatCard
-              title="Today's money"
-              value={`${fmtMoney(todayMoneyPaidLike)} RWF`}
-              hint="AWAITING_PAYMENT_RECORD + COMPLETED"
+              hint="Sales created today (not cancelled)"
               loading={salesLoading}
             />
 
-            <div className="md:col-span-3 bg-white rounded-xl shadow p-4 mt-2">
+            <StatCard
+              title="Today's total"
+              value={`${fmtMoney(todaySalesTotal)} RWF`}
+              hint="Sum of today’s non-cancelled sales (created today)"
+              loading={salesLoading}
+            />
+
+            <StatCard
+              title="Today's credit"
+              value={`${fmtMoney(todayCreditTotal)} RWF`}
+              hint={`Credit sales created today: ${todayCreditCount}`}
+              loading={salesLoading}
+            />
+
+            <StatCard
+              title="Money received today"
+              value={`${fmtMoney(todayMoneyPaidLike)} RWF`}
+              hint="Paid-like sales where updatedAt is today"
+              loading={salesLoading}
+            />
+
+            {/* Breakdown of money received today */}
+            <StatCard
+              title="Paid by cash (today)"
+              value={`${fmtMoney(todayPaidCash)} RWF`}
+              hint="Paid-like sales updated today with method=CASH"
+              loading={salesLoading}
+            />
+            <StatCard
+              title="Paid by MoMo (today)"
+              value={`${fmtMoney(todayPaidMoMo)} RWF`}
+              hint="Paid-like sales updated today with method=MOMO"
+              loading={salesLoading}
+            />
+            <StatCard
+              title="Paid by bank (today)"
+              value={`${fmtMoney(todayPaidBank)} RWF`}
+              hint="Paid-like sales updated today with method=BANK"
+              loading={salesLoading}
+            />
+            <StatCard
+              title="Paid (method missing)"
+              value={`${fmtMoney(todayPaidUnknown)} RWF`}
+              hint="Paid-like sales updated today but paymentMethod is empty"
+              loading={salesLoading}
+            />
+
+            <div className="md:col-span-4 bg-white rounded-xl shadow p-4 mt-2">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="font-semibold">Quick actions</div>
                   <div className="text-xs text-gray-500 mt-1">
-                    Create draft → Store Keeper fulfills → you finalize.
+                    Create draft → Store Keeper fulfills → you finalize (Paid or
+                    Credit).
                   </div>
                 </div>
                 <button
@@ -545,7 +683,7 @@ export default function SellerPage() {
                 >
                   <div className="font-medium">Check my sales</div>
                   <div className="text-xs text-gray-500 mt-1">
-                    When fulfilled, mark PAID or PENDING.
+                    When fulfilled, mark PAID or CREDIT.
                   </div>
                 </button>
               </div>
@@ -553,7 +691,7 @@ export default function SellerPage() {
           </div>
         ) : null}
 
-        {/* CREATE SALE (Draft) */}
+        {/* CREATE SALE */}
         {tab === "create" ? (
           <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-white rounded-xl shadow overflow-hidden">
@@ -561,8 +699,7 @@ export default function SellerPage() {
                 <div>
                   <div className="font-semibold">Products</div>
                   <div className="text-xs text-gray-500 mt-1">
-                    Seller sees selling price + max discount. Add items to
-                    draft.
+                    Add items to draft.
                   </div>
                 </div>
                 <button
@@ -640,8 +777,7 @@ export default function SellerPage() {
             <div className="bg-white rounded-xl shadow p-4">
               <div className="font-semibold">Create Sale (Draft)</div>
               <div className="text-xs text-gray-500 mt-1">
-                Draft first → Store Keeper fulfills → then you mark
-                PAID/PENDING.
+                Draft first → Store Keeper fulfills → then you mark Paid/Credit.
               </div>
 
               <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -816,7 +952,7 @@ export default function SellerPage() {
               <div className="flex gap-2 items-center">
                 <input
                   className="border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Search id/status/name/phone"
+                  placeholder="Search id/status/name/phone (try: credit, momo)"
                   value={salesQ}
                   onChange={(e) => setSalesQ(e.target.value)}
                 />
@@ -839,6 +975,7 @@ export default function SellerPage() {
                     <tr>
                       <th className="text-left p-3">ID</th>
                       <th className="text-left p-3">Status</th>
+                      <th className="text-left p-3">Payment</th>
                       <th className="text-right p-3">Total</th>
                       <th className="text-left p-3">Customer</th>
                       <th className="text-left p-3">Created</th>
@@ -865,8 +1002,6 @@ export default function SellerPage() {
 
                       const total = s.totalAmount ?? s.total ?? 0;
 
-                      // ✅ UI matches backend:
-                      // - allow mark only when FULFILLED (or allow PAID when PENDING if you want to support "customer paid later")
                       const canMark = st === "FULFILLED" || st === "PENDING";
                       const options =
                         st === "FULFILLED"
@@ -880,10 +1015,35 @@ export default function SellerPage() {
                               ]
                             : [];
 
+                      const statusUi = st === "PENDING" ? "CREDIT" : st;
+
+                      // show method if backend returned it
+                      const pm = getPaymentMethodFromSale(s);
+                      const pmLabel =
+                        pm === "CASH"
+                          ? "Cash"
+                          : pm === "MOMO"
+                            ? "MoMo"
+                            : pm === "BANK"
+                              ? "Bank"
+                              : null;
+
+                      const paymentUi =
+                        st === "PENDING"
+                          ? "Credit"
+                          : st === "AWAITING_PAYMENT_RECORD"
+                            ? `Paid${pmLabel ? ` (${pmLabel})` : ""} • waiting cashier`
+                            : st === "COMPLETED"
+                              ? `Paid${pmLabel ? ` (${pmLabel})` : ""} • recorded`
+                              : "-";
+
+                      const selectedMethod = salePayMethod[s.id] || "CASH";
+
                       return (
                         <tr key={s.id} className="border-t hover:bg-gray-50">
                           <td className="p-3 font-medium">{s.id}</td>
-                          <td className="p-3">{st}</td>
+                          <td className="p-3">{statusUi}</td>
+                          <td className="p-3">{paymentUi}</td>
                           <td className="p-3 text-right">{fmtMoney(total)}</td>
 
                           <td className="p-3">
@@ -902,12 +1062,37 @@ export default function SellerPage() {
                               <StatusHint status={st} />
                             ) : (
                               <>
+                                {/* payment method picker (used for PAID) */}
+                                <select
+                                  value={selectedMethod}
+                                  onChange={(e) =>
+                                    setSalePayMethod((prev) => ({
+                                      ...prev,
+                                      [s.id]: e.target.value,
+                                    }))
+                                  }
+                                  className="border rounded px-2 py-1 text-sm mr-2"
+                                >
+                                  {PAYMENT_METHODS.map((m) => (
+                                    <option key={m.value} value={m.value}>
+                                      {m.label}
+                                    </option>
+                                  ))}
+                                </select>
+
+                                {/* status picker */}
                                 <select
                                   defaultValue=""
                                   onChange={async (e) => {
                                     const newStatus = e.target.value;
                                     if (!newStatus) return;
-                                    await markSale(s.id, newStatus);
+
+                                    const pmToSend =
+                                      String(newStatus).toUpperCase() === "PAID"
+                                        ? selectedMethod
+                                        : undefined;
+
+                                    await markSale(s.id, newStatus, pmToSend);
                                     e.target.value = "";
                                   }}
                                   className="border rounded px-2 py-1 text-sm"
@@ -926,8 +1111,8 @@ export default function SellerPage() {
 
                                 <div className="text-[10px] text-gray-500 mt-1">
                                   {st === "FULFILLED"
-                                    ? "Fulfilled — choose Paid or Pending"
-                                    : "Pending — mark Paid when customer pays"}
+                                    ? "Choose Paid or Credit"
+                                    : "Mark Paid when customer pays"}
                                 </div>
                               </>
                             )}
@@ -938,7 +1123,7 @@ export default function SellerPage() {
 
                     {filteredSales.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="p-4 text-sm text-gray-600">
+                        <td colSpan={7} className="p-4 text-sm text-gray-600">
                           No sales found.
                         </td>
                       </tr>
