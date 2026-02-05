@@ -23,8 +23,8 @@ const ENDPOINTS = {
   EXPENSES_LIST: "/cash/expenses",
   EXPENSE_CREATE: "/cash/expenses",
 
-  CASH_RECONCILES_LIST: "/cash-reconcile/cash/reconciles",
-  CASH_RECONCILE_CREATE: "/cash-reconcile/cash/reconcile",
+  CASH_RECONCILES_LIST: "/reconciles",
+  CASH_RECONCILE_CREATE: "/reconcile",
 
   REFUNDS_LIST: "/refunds",
   REFUND_CREATE: "/refunds",
@@ -176,7 +176,7 @@ export default function CashierPage() {
         : data?.items || data?.rows || [];
       setSales(Array.isArray(list) ? list : []);
     } catch (e) {
-      setMsg(e?.data?.error || e?.message || "Failed to load sales");
+      setMsg(e?.data?.error || e?.message || "Cannot load sales");
       setSales([]);
     } finally {
       setSalesLoading(false);
@@ -194,7 +194,7 @@ export default function CashierPage() {
       setPayments(Array.isArray(list) ? list : []);
       setCanReadPayments(true);
     } catch (e) {
-      const errText = e?.data?.error || e?.message || "Failed to load payments";
+      const errText = e?.data?.error || e?.message || "Cannot load payments";
       if (String(errText).toLowerCase().includes("forbidden")) {
         setCanReadPayments(false);
         setPayments([]);
@@ -227,7 +227,7 @@ export default function CashierPage() {
       });
       setCanReadPayments(true);
     } catch (e) {
-      const errText = e?.data?.error || e?.message || "Failed to load summary";
+      const errText = e?.data?.error || e?.message || "Cannot load summary";
       if (String(errText).toLowerCase().includes("forbidden")) {
         setCanReadPayments(false);
         return;
@@ -250,7 +250,7 @@ export default function CashierPage() {
         : data?.items || data?.rows || [];
       setSessions(Array.isArray(list) ? list : []);
     } catch (e) {
-      setMsg(e?.data?.error || e?.message || "Failed to load cash sessions");
+      setMsg(e?.data?.error || e?.message || "Cannot load sessions");
       setSessions([]);
     } finally {
       setSessionsLoading(false);
@@ -269,7 +269,7 @@ export default function CashierPage() {
         : data?.items || data?.rows || [];
       setDeposits(Array.isArray(list) ? list : []);
     } catch (e) {
-      setMsg(e?.data?.error || e?.message || "Failed to load deposits");
+      setMsg(e?.data?.error || e?.message || "Cannot load deposits");
       setDeposits([]);
     } finally {
       setDepositsLoading(false);
@@ -286,7 +286,7 @@ export default function CashierPage() {
         : data?.items || data?.rows || [];
       setExpenses(Array.isArray(list) ? list : []);
     } catch (e) {
-      setMsg(e?.data?.error || e?.message || "Failed to load expenses");
+      setMsg(e?.data?.error || e?.message || "Cannot load expenses");
       setExpenses([]);
     } finally {
       setExpensesLoading(false);
@@ -305,7 +305,7 @@ export default function CashierPage() {
         : data?.items || data?.rows || [];
       setReconciles(Array.isArray(list) ? list : []);
     } catch (e) {
-      setMsg(e?.data?.error || e?.message || "Failed to load reconciles");
+      setMsg(e?.data?.error || e?.message || "Cannot load cash check");
       setReconciles([]);
     } finally {
       setReconcilesLoading(false);
@@ -322,7 +322,7 @@ export default function CashierPage() {
         : data?.items || data?.rows || [];
       setRefunds(Array.isArray(list) ? list : []);
     } catch (e) {
-      setMsg(e?.data?.error || e?.message || "Failed to load refunds");
+      setMsg(e?.data?.error || e?.message || "Cannot load refunds");
       setRefunds([]);
     } finally {
       setRefundsLoading(false);
@@ -401,13 +401,11 @@ export default function CashierPage() {
       const saleId = String(p?.saleId || p?.sale_id || "");
       const m = String(p?.method || "").toLowerCase();
       const amt = String(p?.amount ?? "");
-      const ref = String(p?.reference || p?.ref || "").toLowerCase();
       return (
         id.includes(qq) ||
         saleId.includes(qq) ||
         m.includes(qq) ||
-        amt.includes(qq) ||
-        ref.includes(qq)
+        amt.includes(qq)
       );
     });
   }, [payments, payQ]);
@@ -498,22 +496,18 @@ export default function CashierPage() {
     if (recording) return;
     setMsg("");
 
-    if (!currentOpenSession?.id) {
-      return setMsg("Open a cash session first (Sessions tab).");
-    }
-    if (!selectedSale?.id) return setMsg("Select a sale first.");
+    if (!currentOpenSession?.id) return setMsg("Open a session first.");
+    if (!selectedSale?.id) return setMsg("Pick a sale first.");
 
     const n = Number(amount);
-    if (!Number.isFinite(n) || n <= 0) return setMsg("Enter a valid amount.");
+    if (!Number.isFinite(n) || n <= 0) return setMsg("Type a good amount.");
 
     const payload = {
       saleId: Number(selectedSale.id),
       amount: Math.round(n),
       method: String(method || "CASH").toUpperCase(),
       note: note?.trim() ? note.trim().slice(0, 200) : undefined,
-      cashSessionId: Number(currentOpenSession.id), // ✅ REQUIRED
-      // reference is UI-only unless backend supports it:
-      // reference: reference?.trim() ? reference.trim().slice(0, 100) : undefined,
+      cashSessionId: Number(currentOpenSession.id),
     };
 
     setRecording(true);
@@ -523,8 +517,7 @@ export default function CashierPage() {
         body: payload,
       });
 
-      setMsg(`✅ Payment recorded for sale #${selectedSale.id}`);
-
+      setMsg(`✅ Done! Payment saved for sale #${selectedSale.id}`);
       setSelectedSale(null);
       setAmount("");
       setMethod("CASH");
@@ -536,7 +529,7 @@ export default function CashierPage() {
       await loadPayments();
       await loadSessions();
     } catch (e2) {
-      setMsg(e2?.data?.error || e2?.message || "Record payment failed");
+      setMsg(e2?.data?.error || e2?.message || "Payment failed");
     } finally {
       setRecording(false);
     }
@@ -548,8 +541,7 @@ export default function CashierPage() {
     setMsg("");
 
     const n = Number(openingBalance);
-    if (!Number.isFinite(n) || n < 0)
-      return setMsg("Opening balance must be a valid number.");
+    if (!Number.isFinite(n) || n < 0) return setMsg("Type opening money.");
 
     setSessionOpenLoading(true);
     try {
@@ -561,7 +553,7 @@ export default function CashierPage() {
         },
       });
 
-      setMsg("✅ Cash session opened");
+      setMsg("✅ Session is open");
       setOpeningBalance("");
       setOpenNote("");
       await loadSessions();
@@ -577,11 +569,10 @@ export default function CashierPage() {
     if (sessionCloseLoading) return;
     setMsg("");
 
-    if (!currentOpenSession?.id) return setMsg("No OPEN session to close.");
+    if (!currentOpenSession?.id) return setMsg("No open session.");
 
     const n = Number(closingBalance);
-    if (!Number.isFinite(n) || n < 0)
-      return setMsg("Closing balance must be a valid number.");
+    if (!Number.isFinite(n) || n < 0) return setMsg("Type closing money.");
 
     setSessionCloseLoading(true);
     try {
@@ -593,7 +584,7 @@ export default function CashierPage() {
         },
       });
 
-      setMsg("✅ Cash session closed");
+      setMsg("✅ Session is closed");
       setClosingBalance("");
       setCloseNote("");
       await loadSessions();
@@ -609,12 +600,10 @@ export default function CashierPage() {
     if (depositSaving) return;
     setMsg("");
 
-    if (!currentOpenSession?.id)
-      return setMsg("Open a cash session first (Sessions tab).");
+    if (!currentOpenSession?.id) return setMsg("Open a session first.");
 
     const n = Number(depositAmount);
-    if (!Number.isFinite(n) || n <= 0)
-      return setMsg("Deposit amount must be a valid number.");
+    if (!Number.isFinite(n) || n <= 0) return setMsg("Type deposit money.");
 
     setDepositSaving(true);
     try {
@@ -633,7 +622,7 @@ export default function CashierPage() {
         },
       });
 
-      setMsg("✅ Deposit recorded");
+      setMsg("✅ Deposit saved");
       setDepositAmount("");
       setDepositMethod("BANK");
       setDepositReference("");
@@ -653,12 +642,10 @@ export default function CashierPage() {
     if (expenseSaving) return;
     setMsg("");
 
-    if (!currentOpenSession?.id)
-      return setMsg("Open a cash session first (Sessions tab).");
+    if (!currentOpenSession?.id) return setMsg("Open a session first.");
 
     const n = Number(expenseAmount);
-    if (!Number.isFinite(n) || n <= 0)
-      return setMsg("Expense amount must be a valid number.");
+    if (!Number.isFinite(n) || n <= 0) return setMsg("Type expense money.");
 
     setExpenseSaving(true);
     try {
@@ -677,7 +664,7 @@ export default function CashierPage() {
         },
       });
 
-      setMsg("✅ Expense recorded");
+      setMsg("✅ Expense saved");
       setExpenseAmount("");
       setExpenseCategory("GENERAL");
       setExpenseRef("");
@@ -697,12 +684,10 @@ export default function CashierPage() {
     if (reconcileSaving) return;
     setMsg("");
 
-    if (!currentOpenSession?.id)
-      return setMsg("Open a cash session first (Sessions tab).");
+    if (!currentOpenSession?.id) return setMsg("Open a session first.");
 
     const n = Number(reconcileCountedCash);
-    if (!Number.isFinite(n) || n < 0)
-      return setMsg("Counted cash must be a valid number.");
+    if (!Number.isFinite(n) || n < 0) return setMsg("Type cash you counted.");
 
     const payload = {
       cashSessionId: Number(currentOpenSession.id),
@@ -720,14 +705,14 @@ export default function CashierPage() {
         body: payload,
       });
 
-      setMsg("✅ Reconcile saved");
+      setMsg("✅ Cash check saved");
       setReconcileCountedCash("");
       setReconcileNote("");
 
       await loadReconciles();
       await loadSessions();
     } catch (e2) {
-      setMsg(e2?.data?.error || e2?.message || "Reconcile failed");
+      setMsg(e2?.data?.error || e2?.message || "Cash check failed");
     } finally {
       setReconcileSaving(false);
     }
@@ -739,8 +724,7 @@ export default function CashierPage() {
     setMsg("");
 
     const sid = Number(refundSaleId);
-    if (!Number.isInteger(sid) || sid <= 0)
-      return setMsg("Enter a valid sale ID.");
+    if (!Number.isInteger(sid) || sid <= 0) return setMsg("Type a sale ID.");
 
     setRefundSaving(true);
     try {
@@ -754,7 +738,7 @@ export default function CashierPage() {
         },
       });
 
-      setMsg(`✅ Refund created for sale #${sid}`);
+      setMsg(`✅ Refund saved for sale #${sid}`);
       setRefundSaleId("");
       setRefundReason("");
 
@@ -788,7 +772,7 @@ export default function CashierPage() {
         <div className="mb-4">
           {sessionsLoading ? (
             <div className="p-3 rounded-lg bg-gray-50 text-gray-700 text-sm">
-              Loading cash sessions...
+              Loading sessions...
             </div>
           ) : currentOpenSession ? (
             <div className="p-3 rounded-lg bg-green-50 text-green-900 text-sm">
@@ -804,8 +788,7 @@ export default function CashierPage() {
             </div>
           ) : (
             <div className="p-3 rounded-lg bg-yellow-50 text-yellow-900 text-sm">
-              ⚠️ No open cash session. Open one in <b>Sessions</b> before
-              recording payments / deposits / expenses.
+              ⚠️ No open session. Open one in <b>Sessions</b>.
             </div>
           )}
         </div>
@@ -823,7 +806,7 @@ export default function CashierPage() {
           </div>
         ) : null}
 
-        {/* KPI row */}
+        {/* KPIs */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <Card
             label="Paid today"
@@ -831,20 +814,20 @@ export default function CashierPage() {
             sub={`Total: ${money(summary.today.total)}`}
           />
           <Card
-            label="Payments (all time)"
+            label="All payments"
             value={summaryLoading ? "…" : String(summary.allTime.count)}
             sub={`Total: ${money(summary.allTime.total)}`}
           />
           <Card
-            label="Awaiting payment record"
+            label="Need payment"
             value={salesLoading ? "…" : String(awaitingSales.length)}
-            sub="Sales with status AWAITING_PAYMENT_RECORD"
+            sub="Sales waiting for payment"
           />
         </div>
 
         {!canReadPayments ? (
           <div className="mb-4 text-sm p-3 rounded-lg bg-yellow-50 text-yellow-900">
-            ⚠️ Payments read is forbidden for cashier in backend permissions.
+            ⚠️ You cannot view payments list (permission).
           </div>
         ) : null}
 
@@ -878,7 +861,7 @@ export default function CashierPage() {
             active={tab === "reconcile"}
             onClick={() => setTab("reconcile")}
           >
-            Reconcile
+            Cash check
           </TabButton>
           <TabButton
             active={tab === "refunds"}
@@ -894,9 +877,9 @@ export default function CashierPage() {
             <div className="bg-white rounded-xl shadow overflow-hidden">
               <div className="p-4 border-b flex items-center justify-between">
                 <div>
-                  <div className="font-semibold">Awaiting payment record</div>
+                  <div className="font-semibold">Sales waiting for payment</div>
                   <div className="text-xs text-gray-500 mt-1">
-                    Cashier selects a sale then records payment.
+                    Pick a sale, then save payment.
                   </div>
                 </div>
                 <button
@@ -911,7 +894,7 @@ export default function CashierPage() {
               <div className="p-3 border-b">
                 <input
                   className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Search id/name/phone/total"
+                  placeholder="Search"
                   value={salesQ}
                   onChange={(e) => setSalesQ(e.target.value)}
                 />
@@ -927,7 +910,7 @@ export default function CashierPage() {
                         <th className="text-left p-3">ID</th>
                         <th className="text-right p-3">Total</th>
                         <th className="text-left p-3">Customer</th>
-                        <th className="text-right p-3">Action</th>
+                        <th className="text-right p-3">Pick</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -961,7 +944,7 @@ export default function CashierPage() {
                                   setNote("");
                                 }}
                               >
-                                Select
+                                Pick
                               </button>
                             </td>
                           </tr>
@@ -970,7 +953,7 @@ export default function CashierPage() {
                       {filteredAwaitingSales.length === 0 ? (
                         <tr>
                           <td colSpan={4} className="p-4 text-sm text-gray-600">
-                            No sales awaiting payment record.
+                            No sales here.
                           </td>
                         </tr>
                       ) : null}
@@ -981,14 +964,14 @@ export default function CashierPage() {
             </div>
 
             <div className="bg-white rounded-xl shadow p-4">
-              <div className="font-semibold">Record payment</div>
+              <div className="font-semibold">Save payment</div>
               <div className="text-xs text-gray-500 mt-1">
-                POST /payments (requires open session)
+                You must have an open session.
               </div>
 
               {!selectedSale ? (
                 <div className="mt-4 text-sm text-gray-600">
-                  Select a sale from the left.
+                  Pick a sale first.
                 </div>
               ) : (
                 <div className="mt-4">
@@ -1001,16 +984,6 @@ export default function CashierPage() {
                       {money(
                         selectedSale.totalAmount ?? selectedSale.total ?? 0,
                       )}
-                    </div>
-                    <div>
-                      <b>Customer:</b>{" "}
-                      {selectedSale.customerName ??
-                        selectedSale.customer_name ??
-                        "-"}{" "}
-                      {(selectedSale.customerPhone ??
-                      selectedSale.customer_phone)
-                        ? `(${selectedSale.customerPhone ?? selectedSale.customer_phone})`
-                        : ""}
                     </div>
                   </div>
 
@@ -1036,13 +1009,6 @@ export default function CashierPage() {
 
                     <input
                       className="border rounded-lg px-3 py-2"
-                      placeholder="Reference (optional)"
-                      value={reference}
-                      onChange={(e) => setReference(e.target.value)}
-                    />
-
-                    <input
-                      className="border rounded-lg px-3 py-2"
                       placeholder="Note (optional)"
                       value={note}
                       onChange={(e) => setNote(e.target.value)}
@@ -1053,7 +1019,7 @@ export default function CashierPage() {
                         disabled={recording}
                         className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
                       >
-                        {recording ? "Recording..." : "Record payment"}
+                        {recording ? "Saving..." : "Save"}
                       </button>
                       <button
                         type="button"
@@ -1069,14 +1035,11 @@ export default function CashierPage() {
 
               <div className="mt-6 border-t pt-4">
                 <div className="font-semibold">Payments list</div>
-                <div className="text-xs text-gray-500 mt-1">
-                  GET /payments (if cashier has permission)
-                </div>
 
                 <div className="mt-3 flex gap-2 items-center">
                   <input
                     className="flex-1 border rounded-lg px-3 py-2 text-sm"
-                    placeholder="Search id/sale/method/amount/reference"
+                    placeholder="Search"
                     value={payQ}
                     onChange={(e) => setPayQ(e.target.value)}
                   />
@@ -1094,8 +1057,7 @@ export default function CashierPage() {
 
                 {!canReadPayments ? (
                   <div className="mt-3 text-sm text-yellow-900 bg-yellow-50 p-3 rounded-lg">
-                    Payments list is forbidden for cashier in backend
-                    permissions.
+                    You cannot view this list.
                   </div>
                 ) : paymentsLoading ? (
                   <div className="mt-3 text-sm text-gray-600">Loading...</div>
@@ -1133,7 +1095,7 @@ export default function CashierPage() {
                               colSpan={5}
                               className="p-4 text-sm text-gray-600"
                             >
-                              No payments found.
+                              No payments yet.
                             </td>
                           </tr>
                         ) : null}
@@ -1150,15 +1112,12 @@ export default function CashierPage() {
         {tab === "sessions" ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-white rounded-xl shadow p-4">
-              <div className="font-semibold">Open cash session</div>
-              <div className="text-xs text-gray-500 mt-1">
-                POST /cash-sessions/open
-              </div>
+              <div className="font-semibold">Open session</div>
 
               <form onSubmit={openSession} className="mt-4 grid gap-3 max-w-md">
                 <input
                   className="border rounded-lg px-3 py-2"
-                  placeholder="Opening balance"
+                  placeholder="Opening money"
                   value={openingBalance}
                   onChange={(e) => setOpeningBalance(e.target.value)}
                   disabled={!!currentOpenSession}
@@ -1175,22 +1134,19 @@ export default function CashierPage() {
                   className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
                 >
                   {currentOpenSession
-                    ? "Session already open"
+                    ? "Already open"
                     : sessionOpenLoading
                       ? "Opening..."
-                      : "Open session"}
+                      : "Open"}
                 </button>
               </form>
 
               <div className="mt-6 border-t pt-4">
-                <div className="font-semibold">Close current session</div>
-                <div className="text-xs text-gray-500 mt-1">
-                  POST /cash-sessions/:id/close
-                </div>
+                <div className="font-semibold">Close session</div>
 
                 {!currentOpenSession ? (
                   <div className="mt-3 text-sm text-gray-600">
-                    No open session to close.
+                    No open session.
                   </div>
                 ) : (
                   <form
@@ -1199,7 +1155,7 @@ export default function CashierPage() {
                   >
                     <input
                       className="border rounded-lg px-3 py-2"
-                      placeholder="Closing balance"
+                      placeholder="Closing money"
                       value={closingBalance}
                       onChange={(e) => setClosingBalance(e.target.value)}
                     />
@@ -1213,7 +1169,7 @@ export default function CashierPage() {
                       disabled={sessionCloseLoading}
                       className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
                     >
-                      {sessionCloseLoading ? "Closing..." : "Close session"}
+                      {sessionCloseLoading ? "Closing..." : "Close"}
                     </button>
                   </form>
                 )}
@@ -1222,12 +1178,7 @@ export default function CashierPage() {
 
             <div className="bg-white rounded-xl shadow overflow-hidden">
               <div className="p-4 border-b flex items-center justify-between">
-                <div>
-                  <div className="font-semibold">My sessions</div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    GET /cash-sessions/mine
-                  </div>
-                </div>
+                <div className="font-semibold">My sessions</div>
                 <button
                   type="button"
                   onClick={loadSessions}
@@ -1248,8 +1199,8 @@ export default function CashierPage() {
                         <th className="text-left p-3">Status</th>
                         <th className="text-left p-3">Opened</th>
                         <th className="text-left p-3">Closed</th>
-                        <th className="text-right p-3">Opening</th>
-                        <th className="text-right p-3">Closing</th>
+                        <th className="text-right p-3">Open</th>
+                        <th className="text-right p-3">Close</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1266,8 +1217,6 @@ export default function CashierPage() {
                           <td className="p-3 text-right">
                             {money(s?.openingBalance ?? s?.opening_balance)}
                           </td>
-
-                          {/* ✅ FIXED: correct JSX ternary */}
                           <td className="p-3 text-right">
                             {s?.closingBalance == null &&
                             s?.closing_balance == null
@@ -1276,12 +1225,11 @@ export default function CashierPage() {
                           </td>
                         </tr>
                       ))}
-
                       {(Array.isArray(sessions) ? sessions : []).length ===
                       0 ? (
                         <tr>
                           <td colSpan={6} className="p-4 text-sm text-gray-600">
-                            No sessions found.
+                            No sessions yet.
                           </td>
                         </tr>
                       ) : null}
@@ -1293,13 +1241,444 @@ export default function CashierPage() {
           </div>
         ) : null}
 
-        {/* The rest of tabs (deposits/expenses/reconcile/refunds) can stay as you already have.
-            They already send cashSessionId correctly. */}
+        {/* DEPOSITS TAB */}
+        {tab === "deposits" ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-white rounded-xl shadow p-4">
+              <div className="font-semibold">Save deposit</div>
+              <div className="text-xs text-gray-500 mt-1">
+                Money you put in bank.
+              </div>
+
+              <form
+                onSubmit={createDeposit}
+                className="mt-4 grid gap-3 max-w-md"
+              >
+                <input
+                  className="border rounded-lg px-3 py-2"
+                  placeholder="Amount"
+                  value={depositAmount}
+                  onChange={(e) => setDepositAmount(e.target.value)}
+                />
+
+                <select
+                  className="border rounded-lg px-3 py-2"
+                  value={depositMethod}
+                  onChange={(e) => setDepositMethod(e.target.value)}
+                >
+                  {METHODS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  className="border rounded-lg px-3 py-2"
+                  placeholder="Reference (optional)"
+                  value={depositReference}
+                  onChange={(e) => setDepositReference(e.target.value)}
+                />
+
+                <input
+                  className="border rounded-lg px-3 py-2"
+                  placeholder="Note (optional)"
+                  value={depositNote}
+                  onChange={(e) => setDepositNote(e.target.value)}
+                />
+
+                <button
+                  disabled={depositSaving}
+                  className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
+                >
+                  {depositSaving ? "Saving..." : "Save"}
+                </button>
+              </form>
+            </div>
+
+            <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="p-4 border-b flex items-center justify-between">
+                <div className="font-semibold">Deposits</div>
+                <button
+                  type="button"
+                  onClick={loadDeposits}
+                  className="px-4 py-2 rounded-lg bg-black text-white text-sm"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              <div className="p-3 border-b">
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  placeholder="Search"
+                  value={depositQ}
+                  onChange={(e) => setDepositQ(e.target.value)}
+                />
+              </div>
+
+              {depositsLoading ? (
+                <div className="p-4 text-sm text-gray-600">Loading...</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        <th className="text-left p-3">ID</th>
+                        <th className="text-right p-3">Amount</th>
+                        <th className="text-left p-3">Method</th>
+                        <th className="text-left p-3">Ref</th>
+                        <th className="text-left p-3">Time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredDeposits.map((d, idx) => (
+                        <tr key={d?.id || idx} className="border-t">
+                          <td className="p-3 font-medium">{d?.id ?? "-"}</td>
+                          <td className="p-3 text-right">
+                            {money(d?.amount ?? 0)}
+                          </td>
+                          <td className="p-3">{d?.method ?? "-"}</td>
+                          <td className="p-3">
+                            {d?.reference || d?.ref || "-"}
+                          </td>
+                          <td className="p-3">
+                            {safeDate(d?.createdAt || d?.created_at)}
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredDeposits.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-4 text-sm text-gray-600">
+                            No deposits yet.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {/* EXPENSES TAB */}
+        {tab === "expenses" ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-white rounded-xl shadow p-4">
+              <div className="font-semibold">Save expense</div>
+              <div className="text-xs text-gray-500 mt-1">Money you used.</div>
+
+              <form
+                onSubmit={createExpense}
+                className="mt-4 grid gap-3 max-w-md"
+              >
+                <input
+                  className="border rounded-lg px-3 py-2"
+                  placeholder="Amount"
+                  value={expenseAmount}
+                  onChange={(e) => setExpenseAmount(e.target.value)}
+                />
+
+                <input
+                  className="border rounded-lg px-3 py-2"
+                  placeholder="Type (e.g. Transport, Lunch)"
+                  value={expenseCategory}
+                  onChange={(e) => setExpenseCategory(e.target.value)}
+                />
+
+                <input
+                  className="border rounded-lg px-3 py-2"
+                  placeholder="Reference (optional)"
+                  value={expenseRef}
+                  onChange={(e) => setExpenseRef(e.target.value)}
+                />
+
+                <input
+                  className="border rounded-lg px-3 py-2"
+                  placeholder="Note (optional)"
+                  value={expenseNote}
+                  onChange={(e) => setExpenseNote(e.target.value)}
+                />
+
+                <button
+                  disabled={expenseSaving}
+                  className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
+                >
+                  {expenseSaving ? "Saving..." : "Save"}
+                </button>
+              </form>
+            </div>
+
+            <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="p-4 border-b flex items-center justify-between">
+                <div className="font-semibold">Expenses</div>
+                <button
+                  type="button"
+                  onClick={loadExpenses}
+                  className="px-4 py-2 rounded-lg bg-black text-white text-sm"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              <div className="p-3 border-b">
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  placeholder="Search"
+                  value={expenseQ}
+                  onChange={(e) => setExpenseQ(e.target.value)}
+                />
+              </div>
+
+              {expensesLoading ? (
+                <div className="p-4 text-sm text-gray-600">Loading...</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        <th className="text-left p-3">ID</th>
+                        <th className="text-right p-3">Amount</th>
+                        <th className="text-left p-3">Type</th>
+                        <th className="text-left p-3">Ref</th>
+                        <th className="text-left p-3">Time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredExpenses.map((x, idx) => (
+                        <tr key={x?.id || idx} className="border-t">
+                          <td className="p-3 font-medium">{x?.id ?? "-"}</td>
+                          <td className="p-3 text-right">
+                            {money(x?.amount ?? 0)}
+                          </td>
+                          <td className="p-3">
+                            {x?.category || x?.type || "-"}
+                          </td>
+                          <td className="p-3">
+                            {x?.reference || x?.ref || "-"}
+                          </td>
+                          <td className="p-3">
+                            {safeDate(x?.createdAt || x?.created_at)}
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredExpenses.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-4 text-sm text-gray-600">
+                            No expenses yet.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {/* RECONCILE TAB */}
+        {tab === "reconcile" ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-white rounded-xl shadow p-4">
+              <div className="font-semibold">Cash check</div>
+              <div className="text-xs text-gray-500 mt-1">
+                Count the cash in hand, then save.
+              </div>
+
+              <form
+                onSubmit={createReconcile}
+                className="mt-4 grid gap-3 max-w-md"
+              >
+                <input
+                  className="border rounded-lg px-3 py-2"
+                  placeholder="Cash you counted"
+                  value={reconcileCountedCash}
+                  onChange={(e) => setReconcileCountedCash(e.target.value)}
+                />
+                <input
+                  className="border rounded-lg px-3 py-2"
+                  placeholder="Note (optional)"
+                  value={reconcileNote}
+                  onChange={(e) => setReconcileNote(e.target.value)}
+                />
+                <button
+                  disabled={reconcileSaving}
+                  className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
+                >
+                  {reconcileSaving ? "Saving..." : "Save"}
+                </button>
+              </form>
+            </div>
+
+            <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="p-4 border-b flex items-center justify-between">
+                <div className="font-semibold">Cash checks</div>
+                <button
+                  type="button"
+                  onClick={loadReconciles}
+                  className="px-4 py-2 rounded-lg bg-black text-white text-sm"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              <div className="p-3 border-b">
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  placeholder="Search"
+                  value={reconcileQ}
+                  onChange={(e) => setReconcileQ(e.target.value)}
+                />
+              </div>
+
+              {reconcilesLoading ? (
+                <div className="p-4 text-sm text-gray-600">Loading...</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        <th className="text-left p-3">ID</th>
+                        <th className="text-left p-3">Status</th>
+                        <th className="text-right p-3">Counted</th>
+                        <th className="text-left p-3">Time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredReconciles.map((r, idx) => (
+                        <tr key={r?.id || idx} className="border-t">
+                          <td className="p-3 font-medium">{r?.id ?? "-"}</td>
+                          <td className="p-3 font-medium">
+                            {reconcileStatus(r)}
+                          </td>
+                          <td className="p-3 text-right">
+                            {money(r?.countedCash ?? r?.counted_cash ?? 0)}
+                          </td>
+                          <td className="p-3">
+                            {safeDate(r?.createdAt || r?.created_at)}
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredReconciles.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="p-4 text-sm text-gray-600">
+                            No cash checks yet.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {/* REFUNDS TAB */}
+        {tab === "refunds" ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-white rounded-xl shadow p-4">
+              <div className="font-semibold">Save refund</div>
+              <div className="text-xs text-gray-500 mt-1">Give money back.</div>
+
+              <form
+                onSubmit={createRefund}
+                className="mt-4 grid gap-3 max-w-md"
+              >
+                <input
+                  className="border rounded-lg px-3 py-2"
+                  placeholder="Sale ID"
+                  value={refundSaleId}
+                  onChange={(e) => setRefundSaleId(e.target.value)}
+                />
+                <input
+                  className="border rounded-lg px-3 py-2"
+                  placeholder="Reason (optional)"
+                  value={refundReason}
+                  onChange={(e) => setRefundReason(e.target.value)}
+                />
+                <button
+                  disabled={refundSaving}
+                  className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
+                >
+                  {refundSaving ? "Saving..." : "Save"}
+                </button>
+              </form>
+            </div>
+
+            <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="p-4 border-b flex items-center justify-between">
+                <div className="font-semibold">Refunds</div>
+                <button
+                  type="button"
+                  onClick={loadRefunds}
+                  className="px-4 py-2 rounded-lg bg-black text-white text-sm"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              <div className="p-3 border-b">
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  placeholder="Search"
+                  value={refundQ}
+                  onChange={(e) => setRefundQ(e.target.value)}
+                />
+              </div>
+
+              {refundsLoading ? (
+                <div className="p-4 text-sm text-gray-600">Loading...</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        <th className="text-left p-3">ID</th>
+                        <th className="text-left p-3">Sale</th>
+                        <th className="text-right p-3">Amount</th>
+                        <th className="text-left p-3">Reason</th>
+                        <th className="text-left p-3">Time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredRefunds.map((r, idx) => (
+                        <tr key={r?.id || idx} className="border-t">
+                          <td className="p-3 font-medium">{r?.id ?? "-"}</td>
+                          <td className="p-3">
+                            #{r?.saleId ?? r?.sale_id ?? "-"}
+                          </td>
+                          <td className="p-3 text-right">
+                            {money(r?.amount ?? 0)}
+                          </td>
+                          <td className="p-3">{r?.reason || "-"}</td>
+                          <td className="p-3">
+                            {safeDate(r?.createdAt || r?.created_at)}
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredRefunds.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-4 text-sm text-gray-600">
+                            No refunds yet.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
 }
 
+/* UI helpers */
 function TabButton({ active, onClick, children }) {
   return (
     <button
