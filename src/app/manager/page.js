@@ -1,9 +1,13 @@
+// ✅ PASTE THIS WHOLE FILE INTO:
+// frontend-staff/src/app/manager/page.js
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import AuditLogsPanel from "../../components/AuditLogsPanel";
 import CashReportsPanel from "../../components/CashReportsPanel";
+import CreditsPanel from "../../components/CreditsPanel";
 import CustomersPanel from "../../components/CustomersPanel";
 import InventoryAdjustRequestsPanel from "../../components/InventoryAdjustRequestsPanel";
 import ManagerUsersPanel from "../../components/ManagerUsersPanel";
@@ -16,12 +20,16 @@ import { useRouter } from "next/navigation";
 const ENDPOINTS = {
   SALES_LIST: "/sales",
   SALE_CANCEL: (id) => `/sales/${id}/cancel`,
+
+  MANAGER_DASHBOARD: "/manager/dashboard",
+
   PRODUCTS_LIST: "/products",
   INVENTORY_LIST: "/inventory",
 
   CREDITS_OPEN: "/credits/open",
   PAYMENTS_LIST: "/payments",
   PAYMENTS_SUMMARY: "/payments/summary",
+  PAYMENTS_BREAKDOWN: "/payments/breakdown", // ✅ ADDED
 
   INVENTORY_ARRIVALS_LIST: "/inventory/arrivals",
 };
@@ -55,11 +63,41 @@ function isToday(dateStr) {
   }
 }
 
+function normalizeMethodKey(method) {
+  const m = String(method || "")
+    .trim()
+    .toUpperCase();
+  if (!m) return "OTHER";
+  if (m === "CASH") return "CASH";
+  if (m === "MOMO" || m === "MOBILEMONEY" || m === "MOBILE") return "MOMO";
+  if (m === "BANK" || m === "TRANSFER") return "BANK";
+  if (m === "CARD" || m === "POS") return "CARD";
+  if (m === "OTHER") return "OTHER";
+  return "OTHER";
+}
+
+function sumBreakdown(rows) {
+  const out = {
+    CASH: { count: 0, total: 0 },
+    MOMO: { count: 0, total: 0 },
+    BANK: { count: 0, total: 0 },
+    CARD: { count: 0, total: 0 },
+    OTHER: { count: 0, total: 0 },
+  };
+
+  const list = Array.isArray(rows) ? rows : [];
+  for (const r of list) {
+    const k = normalizeMethodKey(r?.method);
+    out[k].count += Number(r?.count || 0);
+    out[k].total += Number(r?.total || 0);
+  }
+  return out;
+}
+
 function ArrivalDocCard({ doc }) {
   const raw = doc?.fileUrl || doc?.url || "";
   if (!raw) return null;
 
-  // Keep absolute URLs; otherwise prefix backend base.
   const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000";
   const url = /^https?:\/\//i.test(raw)
     ? raw
@@ -121,6 +159,9 @@ export default function ManagerPage() {
   const [tab, setTab] = useState("dashboard");
   // dashboard | sales | arrivals | inventory | pricing | cash_reports | users | credits | customers | audit | evidence | inv_requests
 
+  const [dash, setDash] = useState(null);
+  const [dashLoading, setDashLoading] = useState(false);
+
   // ---------- SALES ----------
   const [sales, setSales] = useState([]);
   const [loadingSales, setLoadingSales] = useState(false);
@@ -145,8 +186,13 @@ export default function ManagerPage() {
   // ---------- PAYMENTS ----------
   const [payments, setPayments] = useState([]);
   const [paymentsSummary, setPaymentsSummary] = useState(null);
+  const [paymentsBreakdown, setPaymentsBreakdown] = useState(null); // ✅ ADDED
+
+  const [payQ, setPayQ] = useState("");
+
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [loadingPaySummary, setLoadingPaySummary] = useState(false);
+  const [loadingPayBreakdown, setLoadingPayBreakdown] = useState(false); // ✅ ADDED
 
   // ---------- CREDITS ----------
   const [openCredits, setOpenCredits] = useState([]);
@@ -201,6 +247,23 @@ export default function ManagerPage() {
   const isAuthorized = !!me && me.role === "manager";
 
   // ---------------- LOADERS ----------------
+
+  const loadDashboard = useCallback(async () => {
+    setDashLoading(true);
+    setMsg("");
+    try {
+      const data = await apiFetch(ENDPOINTS.MANAGER_DASHBOARD, {
+        method: "GET",
+      });
+      setDash(data?.dashboard || null);
+    } catch (e) {
+      setDash(null);
+      setMsg(e?.data?.error || e?.message || "Failed to load dashboard");
+    } finally {
+      setDashLoading(false);
+    }
+  }, []);
+
   const loadSales = useCallback(async () => {
     setLoadingSales(true);
     setMsg("");
@@ -293,6 +356,56 @@ export default function ManagerPage() {
     }
   }, []);
 
+  const loadPaymentsBreakdown = useCallback(async () => {
+    setLoadingPayBreakdown(true);
+    try {
+      const data = await apiFetch(ENDPOINTS.PAYMENTS_BREAKDOWN, {
+        method: "GET",
+      });
+      setPaymentsBreakdown(data?.breakdown || null);
+    } catch (e) {
+      setPaymentsBreakdown(null);
+      const text = e?.data?.error || e?.message || "";
+      if (String(text).toLowerCase().includes("not found")) return;
+      setMsg(
+        e?.data?.error || e.message || "Failed to load payments breakdown",
+      );
+    } finally {
+      setLoadingPayBreakdown(false);
+    }
+  }, []);
+
+  const filteredPayments = useMemo(() => {
+    const qq = String(payQ || "")
+      .trim()
+      .toLowerCase();
+    const list = Array.isArray(payments) ? payments : [];
+    if (!qq) return list;
+
+    return list.filter((p) => {
+      const id = String(p?.id ?? "");
+      const saleId = String(p?.saleId ?? p?.sale_id ?? "");
+      const method = String(p?.method ?? "").toLowerCase();
+      const amount = String(p?.amount ?? "");
+      return (
+        id.includes(qq) ||
+        saleId.includes(qq) ||
+        method.includes(qq) ||
+        amount.includes(qq)
+      );
+    });
+  }, [payments, payQ]);
+
+  const breakdownAll = useMemo(() => {
+    const rows = paymentsBreakdown?.allTime || [];
+    return sumBreakdown(rows);
+  }, [paymentsBreakdown]);
+
+  const breakdownYesterday = useMemo(() => {
+    const rows = paymentsBreakdown?.yesterday || [];
+    return sumBreakdown(rows);
+  }, [paymentsBreakdown]);
+
   const loadArrivals = useCallback(async () => {
     setLoadingArrivals(true);
     setMsg("");
@@ -319,19 +432,28 @@ export default function ManagerPage() {
       loadProducts();
     }
     if (tab === "dashboard") {
+      loadDashboard();
       loadPaymentsSummary();
       loadPayments();
+      loadPaymentsBreakdown(); // ✅ ADDED
     }
     if (tab === "credits") loadCreditsOpen();
     if (tab === "arrivals") loadArrivals();
+    if (tab === "payments") {
+      loadPayments();
+      loadPaymentsSummary();
+      loadPaymentsBreakdown();
+    }
   }, [
     isAuthorized,
     tab,
+    loadDashboard,
     loadSales,
     loadInventory,
     loadProducts,
     loadPaymentsSummary,
     loadPayments,
+    loadPaymentsBreakdown,
     loadCreditsOpen,
     loadArrivals,
   ]);
@@ -469,6 +591,23 @@ export default function ManagerPage() {
     return paidToday.reduce((sum, p) => sum + Number(p.amount || 0), 0);
   }, [paidToday]);
 
+  // ✅ Breakdown mapping for "today"
+  const breakdownTodayTotals = useMemo(() => {
+    const rows = paymentsBreakdown?.today || [];
+    return sumBreakdown(rows);
+  }, [paymentsBreakdown]);
+
+  const todayBreakdownTotalMoney = useMemo(() => {
+    const t = breakdownTodayTotals;
+    return (
+      Number(t.CASH.total || 0) +
+      Number(t.MOMO.total || 0) +
+      Number(t.BANK.total || 0) +
+      Number(t.CARD.total || 0) +
+      Number(t.OTHER.total || 0)
+    );
+  }, [breakdownTodayTotals]);
+
   if (!isAuthorized) {
     return <div className="p-6 text-sm text-gray-600">Redirecting...</div>;
   }
@@ -515,6 +654,9 @@ export default function ManagerPage() {
           >
             Inventory Requests
           </Tab>
+          <Tab active={tab === "payments"} onClick={() => setTab("payments")}>
+            Payments
+          </Tab>
           <Tab
             active={tab === "cash_reports"}
             onClick={() => setTab("cash_reports")}
@@ -546,6 +688,7 @@ export default function ManagerPage() {
                   loadProducts(),
                   loadPaymentsSummary(),
                   loadPayments(),
+                  loadPaymentsBreakdown(),
                 ]);
               } else if (tab === "sales") loadSales();
               else if (tab === "inventory")
@@ -560,49 +703,98 @@ export default function ManagerPage() {
         </div>
 
         {tab === "dashboard" ? (
-          <div>
-            <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Card
-                label="Sales today"
-                value={salesToday.length}
-                sub={`Total: ${money(salesTodayTotal)}`}
-              />
-              <Card
-                label="Awaiting payment"
-                value={awaitingPayment.length}
-                sub="Cashier must record"
-              />
-              <Card
-                label="Draft sales"
-                value={draftSales.length}
-                sub="Seller didn’t finish"
-              />
-              <Card
-                label="Completed today"
-                value={completedToday.length}
-                sub="Done"
-              />
-            </div>
+          <div className="mt-6 space-y-4">
+            {dashLoading ? (
+              <div className="p-4 text-sm text-gray-600 bg-white rounded-xl shadow">
+                Loading dashboard…
+              </div>
+            ) : !dash ? (
+              <div className="p-4 text-sm text-gray-600 bg-white rounded-xl shadow">
+                No dashboard data.
+              </div>
+            ) : (
+              <>
+                {/* ✅ Widget 2: Today payment mix (counts + totals + % share) */}
+                <TodayMixWidget
+                  breakdown={dash?.payments?.breakdownToday || []}
+                />
 
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Card
-                label="Paid today (payments)"
-                value={paidToday.length}
-                sub={`Total: ${money(paidTodayTotal)}`}
-              />
-              <Card
-                label="Payments today (summary)"
-                value={paymentsSummary?.today?.count ?? "-"}
-                sub={`Total: ${money(paymentsSummary?.today?.total ?? 0)}`}
-              />
-              <Card
-                label="Payments all time"
-                value={paymentsSummary?.allTime?.count ?? "-"}
-                sub={`Total: ${money(paymentsSummary?.allTime?.total ?? 0)}`}
-              />
-            </div>
+                {/* ✅ Widget 3: Low stock alerts */}
+                <LowStockWidget
+                  lowStock={dash?.inventory?.lowStock || []}
+                  threshold={dash?.inventory?.lowStockThreshold ?? 5}
+                  products={products}
+                />
+
+                {/* ✅ Widget 4: Stuck pipeline */}
+                <StuckSalesWidget
+                  stuck={dash?.sales?.stuck || []}
+                  rule={dash?.sales?.stuckRule}
+                />
+                {/* ✅ Widget 1: Last 10 payments */}
+                <div className="bg-white rounded-xl shadow overflow-hidden">
+                  <div className="p-4 border-b flex items-center justify-between">
+                    <div>
+                      <div className="font-semibold">Last 10 payments</div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        Quick sanity check without opening Payments tab.
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() =>
+                        Promise.all([loadDashboard(), loadProducts()])
+                      }
+                      className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-600">
+                        <tr>
+                          <th className="text-left p-3">ID</th>
+                          <th className="text-left p-3">Sale</th>
+                          <th className="text-right p-3">Amount</th>
+                          <th className="text-left p-3">Method</th>
+                          <th className="text-left p-3">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(dash?.payments?.last10 || []).map((p, idx) => (
+                          <tr key={p?.id || idx} className="border-t">
+                            <td className="p-3 font-medium">{p?.id ?? "-"}</td>
+                            <td className="p-3">#{p?.saleId ?? "-"}</td>
+                            <td className="p-3 text-right">
+                              {money(p?.amount ?? 0)}
+                            </td>
+                            <td className="p-3">{p?.method ?? "-"}</td>
+                            <td className="p-3">{fmt(p?.createdAt)}</td>
+                          </tr>
+                        ))}
+
+                        {(dash?.payments?.last10 || []).length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={5}
+                              className="p-4 text-sm text-gray-600"
+                            >
+                              No payments yet.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         ) : null}
+
+        {/* --- the rest of your tabs below are unchanged --- */}
 
         {tab === "sales" ? (
           <div className="mt-6 bg-white rounded-xl shadow overflow-hidden">
@@ -826,6 +1018,199 @@ export default function ManagerPage() {
           </div>
         ) : null}
 
+        {tab === "payments" ? (
+          <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* LEFT: Payments list */}
+            <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="p-4 border-b flex items-center justify-between">
+                <div>
+                  <div className="font-semibold">Payments</div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Read-only. From GET /payments.
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    loadPayments();
+                    loadPaymentsSummary();
+                    loadPaymentsBreakdown();
+                  }}
+                  className="px-4 py-2 rounded-lg bg-black text-white text-sm"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              <div className="p-3 border-b">
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  placeholder="Search by id / sale / method / amount"
+                  value={payQ}
+                  onChange={(e) => setPayQ(e.target.value)}
+                />
+              </div>
+
+              {loadingPayments ? (
+                <div className="p-4 text-sm text-gray-600">Loading...</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        <th className="text-left p-3">ID</th>
+                        <th className="text-left p-3">Sale</th>
+                        <th className="text-right p-3">Amount</th>
+                        <th className="text-left p-3">Method</th>
+                        <th className="text-left p-3">Time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredPayments.map((p, idx) => (
+                        <tr key={p?.id || idx} className="border-t">
+                          <td className="p-3 font-medium">{p?.id ?? "-"}</td>
+                          <td className="p-3">
+                            #{p?.saleId ?? p?.sale_id ?? "-"}
+                          </td>
+                          <td className="p-3 text-right">
+                            {money(p?.amount ?? 0)}
+                          </td>
+                          <td className="p-3">{p?.method ?? "-"}</td>
+                          <td className="p-3">
+                            {fmt(p?.createdAt || p?.created_at)}
+                          </td>
+                        </tr>
+                      ))}
+
+                      {filteredPayments.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-4 text-sm text-gray-600">
+                            No payments.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* RIGHT: Summary + breakdown */}
+            <div className="bg-white rounded-xl shadow p-4 space-y-4">
+              <div>
+                <div className="font-semibold">Summary</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  From GET /payments/summary and /payments/breakdown
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <Card
+                  label="Today"
+                  value={
+                    paymentsSummary?.today?.count ??
+                    (loadingPaySummary ? "…" : 0)
+                  }
+                  sub={`Total: ${money(paymentsSummary?.today?.total ?? 0)}`}
+                />
+                <Card
+                  label="Yesterday"
+                  value={
+                    paymentsSummary?.yesterday?.count ??
+                    (loadingPaySummary ? "…" : 0)
+                  }
+                  sub={`Total: ${money(paymentsSummary?.yesterday?.total ?? 0)}`}
+                />
+                <Card
+                  label="All time"
+                  value={
+                    paymentsSummary?.allTime?.count ??
+                    (loadingPaySummary ? "…" : 0)
+                  }
+                  sub={`Total: ${money(paymentsSummary?.allTime?.total ?? 0)}`}
+                />
+              </div>
+
+              <div className="border-t pt-4">
+                <div className="font-semibold mb-2">Breakdown (Today)</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Card
+                    label="Cash"
+                    value={
+                      loadingPayBreakdown
+                        ? "…"
+                        : breakdownTodayTotals.CASH.count
+                    }
+                    sub={`Total: ${money(breakdownTodayTotals.CASH.total)}`}
+                  />
+                  <Card
+                    label="MoMo"
+                    value={
+                      loadingPayBreakdown
+                        ? "…"
+                        : breakdownTodayTotals.MOMO.count
+                    }
+                    sub={`Total: ${money(breakdownTodayTotals.MOMO.total)}`}
+                  />
+                  <Card
+                    label="Bank"
+                    value={
+                      loadingPayBreakdown
+                        ? "…"
+                        : breakdownTodayTotals.BANK.count
+                    }
+                    sub={`Total: ${money(breakdownTodayTotals.BANK.total)}`}
+                  />
+                  <Card
+                    label="Card"
+                    value={
+                      loadingPayBreakdown
+                        ? "…"
+                        : breakdownTodayTotals.CARD.count
+                    }
+                    sub={`Total: ${money(breakdownTodayTotals.CARD.total)}`}
+                  />
+                </div>
+              </div>
+
+              <div className="border-t pt-4">
+                <div className="font-semibold mb-2">Breakdown (Yesterday)</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Card
+                    label="Cash"
+                    value={
+                      loadingPayBreakdown ? "…" : breakdownYesterday.CASH.count
+                    }
+                    sub={`Total: ${money(breakdownYesterday.CASH.total)}`}
+                  />
+                  <Card
+                    label="MoMo"
+                    value={
+                      loadingPayBreakdown ? "…" : breakdownYesterday.MOMO.count
+                    }
+                    sub={`Total: ${money(breakdownYesterday.MOMO.total)}`}
+                  />
+                </div>
+              </div>
+
+              <div className="border-t pt-4">
+                <div className="font-semibold mb-2">Breakdown (All time)</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Card
+                    label="Cash"
+                    value={loadingPayBreakdown ? "…" : breakdownAll.CASH.count}
+                    sub={`Total: ${money(breakdownAll.CASH.total)}`}
+                  />
+                  <Card
+                    label="MoMo"
+                    value={loadingPayBreakdown ? "…" : breakdownAll.MOMO.count}
+                    sub={`Total: ${money(breakdownAll.MOMO.total)}`}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {tab === "users" ? (
           <div className="mt-6">
             <ManagerUsersPanel title="Staff list (view-only)" />
@@ -833,55 +1218,14 @@ export default function ManagerPage() {
         ) : null}
 
         {tab === "credits" ? (
-          <div className="mt-6 bg-white rounded-xl shadow overflow-hidden">
-            <div className="p-4 border-b flex items-center justify-between gap-3">
-              <div>
-                <div className="font-semibold">Open credits</div>
-                <div className="text-xs text-gray-500 mt-1">
-                  Will be empty until you start using credit flow.
-                </div>
-              </div>
-              <button
-                onClick={loadCreditsOpen}
-                className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
-              >
-                {loadingCredits ? "Loading..." : "Reload"}
-              </button>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-gray-600">
-                  <tr>
-                    <th className="text-left p-3">ID</th>
-                    <th className="text-left p-3">Sale</th>
-                    <th className="text-left p-3">Status</th>
-                    <th className="text-right p-3">Amount</th>
-                    <th className="text-left p-3">Created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(openCredits || []).map((c, idx) => (
-                    <tr key={c.id || idx} className="border-t">
-                      <td className="p-3 font-medium">{c.id ?? "-"}</td>
-                      <td className="p-3">{c.saleId ?? "-"}</td>
-                      <td className="p-3">{c.status ?? c.state ?? "-"}</td>
-                      <td className="p-3 text-right">
-                        {money(c.amount ?? c.totalAmount ?? 0)}
-                      </td>
-                      <td className="p-3">{fmt(c.createdAt)}</td>
-                    </tr>
-                  ))}
-                  {(openCredits || []).length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="p-4 text-sm text-gray-600">
-                        No open credits.
-                      </td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
+          <div className="mt-6">
+            <CreditsPanel
+              title="Credits (Manager)"
+              subtitle="Approve or reject credit requests."
+              defaultStatus="OPEN"
+              canDecide={true}
+              canSettle={false}
+            />
           </div>
         ) : null}
 
@@ -1130,6 +1474,176 @@ function Card({ label, value, sub }) {
       <div className="text-sm text-gray-500">{label}</div>
       <div className="text-2xl font-semibold mt-1">{value}</div>
       {sub ? <div className="text-sm text-gray-600 mt-1">{sub}</div> : null}
+    </div>
+  );
+}
+
+function TodayMixWidget({ breakdown }) {
+  const buckets = useMemo(() => {
+    const out = {
+      CASH: { count: 0, total: 0 },
+      MOMO: { count: 0, total: 0 },
+      BANK: { count: 0, total: 0 },
+      CARD: { count: 0, total: 0 },
+      OTHER: { count: 0, total: 0 },
+    };
+    for (const r of Array.isArray(breakdown) ? breakdown : []) {
+      const k = normalizeMethodKey(r?.method);
+      out[k].count += Number(r?.count || 0);
+      out[k].total += Number(r?.total || 0);
+    }
+    return out;
+  }, [breakdown]);
+
+  const totalToday = Object.values(buckets).reduce(
+    (s, x) => s + Number(x.total || 0),
+    0,
+  );
+
+  function pct(total) {
+    const t = Number(total || 0);
+    if (!Number.isFinite(t) || t <= 0) return 0;
+    if (totalToday <= 0) return 0;
+    return Math.round((t / totalToday) * 100);
+  }
+
+  return (
+    <div className="bg-white rounded-xl shadow p-4">
+      <div className="font-semibold">Today payment mix</div>
+      <div className="text-xs text-gray-500 mt-1">
+        Totals + share of today’s collected money.
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-5 gap-3">
+        {["CASH", "MOMO", "BANK", "CARD", "OTHER"].map((k) => (
+          <div key={k} className="border rounded-xl p-3">
+            <div className="text-xs text-gray-500">{k}</div>
+            <div className="text-lg font-semibold mt-1">{buckets[k].count}</div>
+            <div className="text-sm text-gray-700 mt-1">
+              Total: {money(buckets[k].total)}
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              {pct(buckets[k].total)}%
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 text-sm text-gray-700">
+        <b>Today total:</b> {money(totalToday)}
+      </div>
+    </div>
+  );
+}
+
+function LowStockWidget({ lowStock, threshold, products }) {
+  function nameFor(productId) {
+    const pid = String(productId || "");
+    const p =
+      (Array.isArray(products) ? products : []).find(
+        (x) => String(x?.id) === pid,
+      ) || null;
+    return p?.name || p?.productName || p?.title || `Product #${pid}`;
+  }
+
+  return (
+    <div className="bg-white rounded-xl shadow overflow-hidden">
+      <div className="p-4 border-b">
+        <div className="font-semibold">Low stock alerts</div>
+        <div className="text-xs text-gray-500 mt-1">
+          Items with qty ≤ {threshold}.
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-gray-600">
+            <tr>
+              <th className="text-left p-3">Product</th>
+              <th className="text-right p-3">Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(Array.isArray(lowStock) ? lowStock : []).map((r, idx) => (
+              <tr key={`${r?.productId || idx}`} className="border-t">
+                <td className="p-3">
+                  <div className="font-medium">{nameFor(r?.productId)}</div>
+                  <div className="text-xs text-gray-500">
+                    ID: {r?.productId ?? "-"}
+                  </div>
+                </td>
+                <td className="p-3 text-right font-semibold">
+                  {Number(r?.qtyOnHand ?? 0)}
+                </td>
+              </tr>
+            ))}
+            {(Array.isArray(lowStock) ? lowStock : []).length === 0 ? (
+              <tr>
+                <td colSpan={2} className="p-4 text-sm text-gray-600">
+                  No low stock alerts.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function StuckSalesWidget({ stuck, rule }) {
+  function ageLabel(seconds) {
+    const s = Number(seconds || 0);
+    if (!Number.isFinite(s) || s <= 0) return "-";
+    const mins = Math.floor(s / 60);
+    const hrs = Math.floor(mins / 60);
+    const days = Math.floor(hrs / 24);
+    if (days > 0) return `${days}d ${hrs % 24}h`;
+    if (hrs > 0) return `${hrs}h ${mins % 60}m`;
+    return `${mins}m`;
+  }
+
+  return (
+    <div className="bg-white rounded-xl shadow overflow-hidden">
+      <div className="p-4 border-b">
+        <div className="font-semibold">Stuck sales</div>
+        <div className="text-xs text-gray-500 mt-1">
+          Rule: {rule || "aging sales"}.
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-gray-600">
+            <tr>
+              <th className="text-left p-3">Sale</th>
+              <th className="text-left p-3">Status</th>
+              <th className="text-right p-3">Total</th>
+              <th className="text-left p-3">Age</th>
+              <th className="text-left p-3">Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(Array.isArray(stuck) ? stuck : []).map((s, idx) => (
+              <tr key={s?.id || idx} className="border-t">
+                <td className="p-3 font-medium">#{s?.id ?? "-"}</td>
+                <td className="p-3">{s?.status ?? "-"}</td>
+                <td className="p-3 text-right">{money(s?.totalAmount ?? 0)}</td>
+                <td className="p-3">{ageLabel(s?.ageSeconds)}</td>
+                <td className="p-3">{fmt(s?.createdAt)}</td>
+              </tr>
+            ))}
+
+            {(Array.isArray(stuck) ? stuck : []).length === 0 ? (
+              <tr>
+                <td colSpan={5} className="p-4 text-sm text-gray-600">
+                  No stuck sales (good).
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

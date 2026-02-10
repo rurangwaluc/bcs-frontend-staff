@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import CreditsPanel from "../../components/CreditsPanel";
 import RoleBar from "../../components/RoleBar";
 import { apiFetch } from "../../lib/api";
 import { getMe } from "../../lib/auth";
@@ -862,6 +863,12 @@ export default function CashierPage() {
             Sessions
           </TabButton>
           <TabButton
+            active={tab === "credits"}
+            onClick={() => setTab("credits")}
+          >
+            Credits
+          </TabButton>
+          <TabButton
             active={tab === "deposits"}
             onClick={() => setTab("deposits")}
           >
@@ -1274,6 +1281,17 @@ export default function CashierPage() {
           </div>
         ) : null}
 
+        {tab === "credits" ? (
+          <div className="mt-6">
+            <CreditsPanel
+              title="Credits (Cashier)"
+              subtitle="Settle approved credits and record payment."
+              defaultStatus="OPEN"
+              canDecide={false}
+              canSettle={true}
+            />
+          </div>
+        ) : null}
         {/* DEPOSITS / EXPENSES / RECONCILE / REFUNDS */}
         {tab === "deposits" ? (
           <SimpleTwoCol
@@ -1680,11 +1698,12 @@ function Card({ label, value, sub }) {
 
 // Reads seller-picked method from the sale.note tag like:
 // [SELLER_PAYMENT_METHOD=CASH] / [SELLER_PAYMENT_METHOD=MOMO] / [SELLER_PAYMENT_METHOD=BANK]
+// Reads seller-picked method from the sale row (sales.payment_method)
 function getSellerPaymentMethodFromSale(sale) {
-  const note = String(sale?.note || "");
-  const m = note.match(/\[SELLER_PAYMENT_METHOD=(CASH|MOMO|BANK)\]/i);
-  if (!m) return null;
-  return String(m[1] || "").toUpperCase();
+  const raw = sale?.paymentMethod ?? sale?.payment_method ?? null;
+  const m = raw ? String(raw).trim().toUpperCase() : "";
+  // If seller stored something outside these, still show it.
+  return m || null;
 }
 
 function money(n) {
