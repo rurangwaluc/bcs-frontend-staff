@@ -4,11 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 
 import { apiFetch } from "../lib/api";
 
-// backend schema says OPEN / SETTLED, and your list endpoint supports status filter
-const STATUSES = ["", "OPEN", "SETTLED"]; // "" = ALL
+const STATUSES = ["", "OPEN", "SETTLED"];
 
-function toStr(v) {
-  return v === undefined || v === null ? "" : String(v);
+function money(n) {
+  const x = Number(n || 0);
+  return Number.isFinite(x) ? Math.round(x).toLocaleString() : "0";
 }
 
 function formatDate(value) {
@@ -20,28 +20,36 @@ function formatDate(value) {
   }
 }
 
-function money(n) {
-  const x = Number(n || 0);
-  return Number.isFinite(x) ? x.toLocaleString() : "0";
+function normalizeList(data) {
+  if (Array.isArray(data?.rows)) return data.rows;
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.credits)) return data.credits;
+  return [];
+}
+
+function creditStatusLabel(status) {
+  const st = String(status || "").toUpperCase();
+  if (st === "OPEN") return "UNPAID";
+  if (st === "SETTLED") return "PAID";
+  return st || "-";
 }
 
 export default function CreditsPanel({
   title = "Credits",
-  subtitle = "Track who owes money.",
-  defaultStatus = "OPEN",
-
-  // ✅ capabilities (hide actions if false)
-  canDecide = false, // approve/reject
-  canSettle = false, // settle
-  // canCreate = false, // (optional later)
-
-  // endpoints (override if needed)
-  endpoints = {
-    LIST: "/credits",
-    GET: "/credits", // GET /credits/:id
-    DECISION: "/credits", // PATCH /credits/:id/decision
-    SETTLE: "/credits", // PATCH /credits/:id/settle
+  capabilities = {
+    canView: true,
+    canCreate: false,
+    canDecide: false,
+    canSettle: false,
   },
+
+  /**
+   * Prefill from parent (recommended real-world flow)
+   * Example: { saleId: 123, customerId: 44, customerName, customerPhone, note }
+   */
+  prefillCreate = null,
+
+  onChanged = null,
 }) {
   const [rows, setRows] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
@@ -50,7 +58,7 @@ export default function CreditsPanel({
   const [loadingMore, setLoadingMore] = useState(false);
   const [msg, setMsg] = useState("");
 
-  const [status, setStatus] = useState(defaultStatus);
+  const [status, setStatus] = useState("OPEN");
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(50);
 
@@ -58,38 +66,50 @@ export default function CreditsPanel({
   const [creditDetail, setCreditDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  // Action modal
-  const [actionOpen, setActionOpen] = useState(false);
-  const [actionType, setActionType] = useState(null); // "APPROVE" | "REJECT" | "SETTLE"
-  const [actionRow, setActionRow] = useState(null);
-  const [actionNote, setActionNote] = useState("");
-  const [actionMethod, setActionMethod] = useState("CASH");
   const [actionLoading, setActionLoading] = useState(false);
+
+  // ---------- CREATE (ID-less UX) ----------
+  // We only allow creating when prefillCreate exists (sale/customer picked elsewhere)
+  const [createNote, setCreateNote] = useState("");
+
+  useEffect(() => {
+    if (!prefillCreate) return;
+    if (prefillCreate.note) {
+      setCreateNote(String(prefillCreate.note).slice(0, 500));
+    }
+  }, [prefillCreate]);
+
+  // ---------- DECIDE ----------
+  const [decisionNote, setDecisionNote] = useState("");
+
+  // ---------- SETTLE ----------
+  const [settleMethod, setSettleMethod] = useState("CASH");
+  const [settleNote, setSettleNote] = useState("");
+
+  // ---------- CUSTOMER SEARCH + HISTORY ----------
+  const [custQ, setCustQ] = useState("");
+  const [custLoading, setCustLoading] = useState(false);
+  const [custRows, setCustRows] = useState([]);
+  const [history, setHistory] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
-
     if (status) params.set("status", status);
     if (q) params.set("q", String(q).trim());
 
     const lim = Math.min(200, Math.max(1, Number(limit || 50)));
     params.set("limit", String(lim));
-
     return params.toString();
   }, [status, q, limit]);
 
   async function loadFirstPage() {
+    if (!capabilities.canView) return;
     setLoading(true);
     setMsg("");
-    setSelectedId(null);
-    setCreditDetail(null);
-
     try {
-      const data = await apiFetch(`${endpoints.LIST}?${queryString}`, {
-        method: "GET",
-      });
-
-      const list = Array.isArray(data?.rows) ? data.rows : [];
+      const data = await apiFetch(`/credits?${queryString}`, { method: "GET" });
+      const list = normalizeList(data);
       setRows(list);
       setNextCursor(data?.nextCursor ?? null);
     } catch (e) {
@@ -102,21 +122,17 @@ export default function CreditsPanel({
   }
 
   async function loadMore() {
-    if (!nextCursor) return;
-    if (loadingMore) return;
+    if (!nextCursor || loadingMore || !capabilities.canView) return;
 
     setLoadingMore(true);
     setMsg("");
-
     try {
       const data = await apiFetch(
-        `${endpoints.LIST}?${queryString}&cursor=${encodeURIComponent(
-          String(nextCursor),
-        )}`,
+        `/credits?${queryString}&cursor=${encodeURIComponent(String(nextCursor))}`,
         { method: "GET" },
       );
 
-      const list = Array.isArray(data?.rows) ? data.rows : [];
+      const list = normalizeList(data);
       setRows((prev) => prev.concat(list));
       setNextCursor(data?.nextCursor ?? null);
     } catch (e) {
@@ -127,13 +143,13 @@ export default function CreditsPanel({
   }
 
   async function openCredit(id) {
+    if (!capabilities.canView) return;
     setSelectedId(id);
     setCreditDetail(null);
     setDetailLoading(true);
     setMsg("");
-
     try {
-      const data = await apiFetch(`${endpoints.GET}/${id}`, { method: "GET" });
+      const data = await apiFetch(`/credits/${id}`, { method: "GET" });
       setCreditDetail(data?.credit ?? null);
     } catch (e) {
       setMsg(e?.data?.error || e?.message || "Failed to load credit detail");
@@ -142,60 +158,135 @@ export default function CreditsPanel({
     }
   }
 
-  function openAction(type, row) {
-    setActionType(type);
-    setActionRow(row);
-    setActionNote("");
-    setActionMethod("CASH");
-    setActionOpen(true);
-  }
+  async function doCreateCredit() {
+    if (!capabilities.canCreate) return;
 
-  function closeAction() {
-    if (actionLoading) return;
-    setActionOpen(false);
-    setActionType(null);
-    setActionRow(null);
-    setActionNote("");
-    setActionMethod("CASH");
-    setActionLoading(false);
-  }
+    // ✅ Real-world: create only from a selected sale/customer (no manual IDs)
+    const sid = Number(prefillCreate?.saleId);
+    const cid = Number(prefillCreate?.customerId);
 
-  async function submitAction() {
-    const row = actionRow;
-    if (!row?.id) return;
+    if (!Number.isFinite(sid) || sid <= 0) {
+      setMsg("Select a sale first (missing saleId).");
+      return;
+    }
+    if (!Number.isFinite(cid) || cid <= 0) {
+      setMsg("Select a customer first (missing customerId).");
+      return;
+    }
 
     setActionLoading(true);
     setMsg("");
-
     try {
-      if (actionType === "APPROVE" || actionType === "REJECT") {
-        await apiFetch(`${endpoints.DECISION}/${row.id}/decision`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            decision: actionType,
-            note: String(actionNote || "").trim() || undefined,
-          }),
-        });
-        setMsg("✅ Credit updated.");
-      } else if (actionType === "SETTLE") {
-        await apiFetch(`${endpoints.SETTLE}/${row.id}/settle`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            method: String(actionMethod || "CASH"),
-            note: String(actionNote || "").trim() || undefined,
-          }),
-        });
-        setMsg("✅ Credit settled. Payment recorded.");
-      } else {
-        setMsg("Unknown action.");
-      }
+      await apiFetch("/credits", {
+        method: "POST",
+        body: { saleId: sid, customerId: cid, note: createNote || undefined },
+      });
 
-      closeAction();
+      setMsg("✅ Credit created.");
+      if (typeof onChanged === "function") onChanged({ type: "created" });
+
       await loadFirstPage();
     } catch (e) {
-      setMsg(e?.data?.error || e?.message || "Action failed");
+      setMsg(e?.data?.error || e?.message || "Failed to create credit");
     } finally {
       setActionLoading(false);
+    }
+  }
+
+  async function doDecision(decision) {
+    if (!capabilities.canDecide) return;
+    if (!creditDetail?.id) return setMsg("Select a credit first.");
+
+    setActionLoading(true);
+    setMsg("");
+    try {
+      await apiFetch(`/credits/${creditDetail.id}/decision`, {
+        method: "PATCH",
+        body: { decision, note: decisionNote || undefined },
+      });
+
+      setDecisionNote("");
+      setMsg(`✅ ${decision === "APPROVE" ? "Approved" : "Rejected"}.`);
+      if (typeof onChanged === "function")
+        onChanged({ type: "decided", decision });
+
+      await openCredit(creditDetail.id);
+      await loadFirstPage();
+    } catch (e) {
+      setMsg(e?.data?.error || e?.message || "Failed to record decision");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function doSettle() {
+    if (!capabilities.canSettle) return;
+    if (!creditDetail?.id) return setMsg("Select a credit first.");
+
+    setActionLoading(true);
+    setMsg("");
+    try {
+      await apiFetch(`/credits/${creditDetail.id}/settle`, {
+        method: "PATCH",
+        body: {
+          method: String(settleMethod || "CASH").trim(),
+          note: settleNote || undefined,
+        },
+      });
+
+      setSettleNote("");
+      setMsg("✅ Payment recorded. Credit closed.");
+      if (typeof onChanged === "function") onChanged({ type: "settled" });
+
+      await openCredit(creditDetail.id);
+      await loadFirstPage();
+    } catch (e) {
+      setMsg(e?.data?.error || e?.message || "Failed to settle credit");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function searchCustomers() {
+    const qq = String(custQ || "").trim();
+    if (!qq) {
+      setCustRows([]);
+      return;
+    }
+
+    setCustLoading(true);
+    setMsg("");
+    try {
+      const data = await apiFetch(
+        `/customers/search?q=${encodeURIComponent(qq)}`,
+        { method: "GET" },
+      );
+      setCustRows(Array.isArray(data?.customers) ? data.customers : []);
+    } catch (e) {
+      setCustRows([]);
+      setMsg(e?.data?.error || e?.message || "Failed to search customers");
+    } finally {
+      setCustLoading(false);
+    }
+  }
+
+  async function loadCustomerHistory(customerId) {
+    const id = Number(customerId);
+    if (!id) return;
+
+    setHistory(null);
+    setHistoryLoading(true);
+    setMsg("");
+    try {
+      const data = await apiFetch(`/customers/${id}/history?limit=30`, {
+        method: "GET",
+      });
+      setHistory(data || null);
+    } catch (e) {
+      setHistory(null);
+      setMsg(e?.data?.error || e?.message || "Failed to load customer history");
+    } finally {
+      setHistoryLoading(false);
     }
   }
 
@@ -204,391 +295,532 @@ export default function CreditsPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  if (!capabilities.canView) {
+    return (
+      <div className="bg-white rounded-xl shadow p-4">
+        <div className="font-semibold">{title}</div>
+        <div className="text-sm text-gray-600 mt-2">
+          You don’t have permission to view credits.
+        </div>
+      </div>
+    );
+  }
+
+  const selectedIsOpen =
+    String(creditDetail?.status || "").toUpperCase() === "OPEN";
+  const selectedIsApproved = !!creditDetail?.approvedAt;
+
+  const canApproveReject =
+    capabilities.canDecide && selectedIsOpen && !selectedIsApproved;
+
+  const canSettleNow =
+    capabilities.canSettle && selectedIsOpen && selectedIsApproved;
+
+  const createReady =
+    capabilities.canCreate &&
+    Number(prefillCreate?.saleId) > 0 &&
+    Number(prefillCreate?.customerId) > 0;
+
   return (
-    <div>
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold">{title}</h1>
-          <p className="text-sm text-gray-600 mt-1">{subtitle}</p>
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="bg-white rounded-xl shadow p-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div className="text-xl font-bold">{title}</div>
+            <div className="text-sm text-gray-600 mt-1">
+              Find customer → see debt → approve/reject → record payment when
+              paid.
+            </div>
+          </div>
+
+          <button
+            onClick={loadFirstPage}
+            className="px-4 py-2 rounded-lg bg-black text-white"
+            disabled={loading}
+          >
+            {loading ? "Loading..." : "Refresh"}
+          </button>
         </div>
 
-        <button
-          onClick={loadFirstPage}
-          className="px-4 py-2 rounded-lg bg-black text-white"
-          disabled={loading}
-        >
-          {loading ? "Loading..." : "Refresh"}
-        </button>
+        {msg ? (
+          <div className="mt-4 text-sm">
+            <div
+              className={
+                "p-3 rounded-lg " +
+                (String(msg).startsWith("✅")
+                  ? "bg-green-50 text-green-800"
+                  : "bg-red-50 text-red-700")
+              }
+            >
+              {msg}
+            </div>
+          </div>
+        ) : null}
       </div>
 
-      {msg ? (
-        <div className="mt-4 text-sm">
-          <div
-            className={
-              "p-3 rounded-lg " +
-              (String(msg).startsWith("✅")
-                ? "bg-green-50 text-green-800"
-                : "bg-red-50 text-red-700")
-            }
+      {/* Customer quick lookup (non-developer) */}
+      <div className="bg-white rounded-xl shadow p-4">
+        <div className="font-semibold">Find customer</div>
+        <div className="text-xs text-gray-500 mt-1">
+          Search by name or phone. Click a customer to see history and filter
+          credits.
+        </div>
+
+        <div className="mt-3 flex gap-2 flex-wrap">
+          <input
+            className="border rounded-lg px-3 py-2 flex-1 min-w-[220px]"
+            placeholder="Type phone or name…"
+            value={custQ}
+            onChange={(e) => setCustQ(e.target.value)}
+          />
+          <button
+            onClick={searchCustomers}
+            disabled={custLoading}
+            className="px-4 py-2 rounded-lg bg-black text-white"
           >
-            {msg}
+            {custLoading ? "Searching..." : "Search"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCustQ("");
+              setCustRows([]);
+              setHistory(null);
+              setQ("");
+              setSelectedId(null);
+              setCreditDetail(null);
+              setMsg("✅ Cleared.");
+            }}
+            className="px-4 py-2 rounded-lg border hover:bg-gray-50"
+          >
+            Clear
+          </button>
+        </div>
+
+        {custRows.length > 0 ? (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-600">
+                <tr>
+                  <th className="text-left p-3">Customer</th>
+                  <th className="text-left p-3">Phone</th>
+                  <th className="text-left p-3">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {custRows.map((c) => (
+                  <tr key={c.id} className="border-t">
+                    <td className="p-3 font-medium">{c.name}</td>
+                    <td className="p-3">{c.phone}</td>
+                    <td className="p-3">
+                      <button
+                        className="px-3 py-1.5 rounded-lg bg-black text-white text-xs"
+                        onClick={async () => {
+                          // filter credits by phone (simple, staff friendly)
+                          setQ(c.phone || c.name || "");
+                          await loadFirstPage();
+                          await loadCustomerHistory(c.id);
+                          setMsg("✅ Customer selected.");
+                        }}
+                      >
+                        View history
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        {historyLoading ? (
+          <div className="mt-3 text-sm text-gray-600">Loading history...</div>
+        ) : history?.totals ? (
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
+            <MiniStat
+              label="Sales"
+              value={String(history.totals.salesCount || 0)}
+            />
+            <MiniStat
+              label="Total bought"
+              value={money(history.totals.salesTotalAmount)}
+            />
+            <MiniStat
+              label="Total paid"
+              value={money(history.totals.paymentsTotalAmount)}
+            />
+            <MiniStat
+              label="Total credit"
+              value={money(history.totals.creditsTotalAmount)}
+            />
+          </div>
+        ) : null}
+      </div>
+
+      {/* Create credit (no manual IDs) */}
+      {capabilities.canCreate ? (
+        <div className="bg-white rounded-xl shadow p-4">
+          <div className="font-semibold">Request credit</div>
+          <div className="text-xs text-gray-500 mt-1">
+            This should come from a sale screen (so staff never types IDs).
+          </div>
+
+          <div className="mt-3 border rounded-lg p-3 text-sm">
+            <div>
+              <span className="text-gray-500">Sale:</span>{" "}
+              <span className="font-medium">
+                {prefillCreate?.saleId ? `#${prefillCreate.saleId}` : "-"}
+              </span>
+            </div>
+            <div className="mt-1">
+              <span className="text-gray-500">Customer:</span>{" "}
+              <span className="font-medium">
+                {prefillCreate?.customerName || "-"}{" "}
+              </span>
+              <span className="text-gray-600">
+                {prefillCreate?.customerPhone
+                  ? `(${prefillCreate.customerPhone})`
+                  : ""}
+              </span>
+            </div>
+          </div>
+
+          <textarea
+            className="mt-3 w-full border rounded-lg px-3 py-2"
+            placeholder="Optional note (due date, agreement)"
+            value={createNote}
+            onChange={(e) => setCreateNote(e.target.value)}
+            rows={2}
+          />
+
+          <div className="mt-3">
+            <button
+              onClick={doCreateCredit}
+              disabled={!createReady || actionLoading}
+              className={
+                "rounded-lg px-4 py-2 " +
+                (createReady
+                  ? "bg-black text-white"
+                  : "bg-gray-100 text-gray-400")
+              }
+            >
+              {actionLoading ? "Working..." : "Create credit"}
+            </button>
+            {!createReady ? (
+              <div className="text-xs text-gray-500 mt-2">
+                Open a sale and choose “Credit” to auto-fill this section.
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
 
-      {/* Filters */}
-      <div className="mt-6 bg-white rounded-xl shadow p-4">
-        <div className="font-semibold">Filters</div>
-        <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
-          <select
-            className="border rounded-lg px-3 py-2"
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s ? s : "ALL"}
-              </option>
-            ))}
-          </select>
+      {/* Filters + Split */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* LEFT */}
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl shadow p-4">
+            <div className="font-semibold">Filters</div>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
+              <select
+                className="border rounded-lg px-3 py-2"
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+              >
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {s ? (s === "OPEN" ? "UNPAID" : "PAID") : "ALL"}
+                  </option>
+                ))}
+              </select>
 
-          <input
-            className="border rounded-lg px-3 py-2"
-            placeholder="Search customer name or phone"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
+              <input
+                className="border rounded-lg px-3 py-2"
+                placeholder="Search name or phone"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
 
-          <input
-            className="border rounded-lg px-3 py-2"
-            type="number"
-            min="1"
-            max="200"
-            value={limit}
-            onChange={(e) => setLimit(Number(e.target.value))}
-          />
+              <input
+                className="border rounded-lg px-3 py-2"
+                type="number"
+                min="1"
+                max="200"
+                value={limit}
+                onChange={(e) => setLimit(Number(e.target.value))}
+              />
 
-          <button
-            onClick={loadFirstPage}
-            className="rounded-lg bg-black text-white px-4 py-2"
-            disabled={loading}
-          >
-            Apply
-          </button>
-        </div>
-      </div>
+              <button
+                onClick={loadFirstPage}
+                className="rounded-lg bg-black text-white px-4 py-2"
+                disabled={loading}
+              >
+                Apply
+              </button>
+            </div>
+          </div>
 
-      {/* Split */}
-      <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* List */}
-        <div className="bg-white rounded-xl shadow overflow-hidden">
-          <div className="p-4 border-b flex items-center justify-between">
-            <div>
+          <div className="bg-white rounded-xl shadow overflow-hidden">
+            <div className="p-4 border-b">
               <div className="font-semibold">Credits list</div>
               <div className="text-xs text-gray-500 mt-1">
                 Showing {rows.length} rows
                 {nextCursor ? " (more available)" : " (end)"}
               </div>
             </div>
-          </div>
 
-          {loading ? (
-            <div className="p-4 text-sm text-gray-600">Loading...</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-gray-600">
-                  <tr>
-                    <th className="text-left p-3">ID</th>
-                    <th className="text-left p-3">Status</th>
-                    <th className="text-right p-3">Amount</th>
-                    <th className="text-left p-3">Customer</th>
-                    <th className="text-left p-3">Created</th>
-                    <th className="text-right p-3">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((c) => {
-                    const isOpen = String(c.status) === "OPEN";
-                    const isApproved = !!c.approvedAt;
+            {loading ? (
+              <div className="p-4 text-sm text-gray-600">Loading...</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-600">
+                    <tr>
+                      <th className="text-left p-3">Customer</th>
+                      <th className="text-left p-3">Phone</th>
+                      <th className="text-right p-3">Amount</th>
+                      <th className="text-left p-3">State</th>
+                      <th className="text-left p-3">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((c) => {
+                      const approved = !!c.approvedAt;
+                      const stLabel = creditStatusLabel(c.status);
+                      const state =
+                        stLabel === "UNPAID"
+                          ? approved
+                            ? "Approved (waiting payment)"
+                            : "Waiting approval"
+                          : "Paid";
 
-                    return (
-                      <tr
-                        key={c.id}
-                        className={
-                          "border-t hover:bg-gray-50 " +
-                          (selectedId === c.id ? "bg-gray-50" : "")
-                        }
-                      >
-                        <td
-                          className="p-3 font-medium cursor-pointer"
+                      return (
+                        <tr
+                          key={c.id}
+                          className={
+                            "border-t cursor-pointer hover:bg-gray-50 " +
+                            (selectedId === c.id ? "bg-gray-50" : "")
+                          }
                           onClick={() => openCredit(c.id)}
                         >
-                          {c.id}
-                        </td>
+                          <td className="p-3 font-medium">
+                            {c.customerName || "-"}
+                          </td>
+                          <td className="p-3">{c.customerPhone || "-"}</td>
+                          <td className="p-3 text-right">{money(c.amount)}</td>
+                          <td className="p-3">{state}</td>
+                          <td className="p-3">{formatDate(c.createdAt)}</td>
+                        </tr>
+                      );
+                    })}
 
-                        <td
-                          className="p-3 cursor-pointer"
-                          onClick={() => openCredit(c.id)}
-                        >
-                          {c.status}
-                        </td>
-
-                        <td
-                          className="p-3 text-right cursor-pointer"
-                          onClick={() => openCredit(c.id)}
-                        >
-                          {money(c.amount)}
-                        </td>
-
-                        <td
-                          className="p-3 cursor-pointer"
-                          onClick={() => openCredit(c.id)}
-                        >
-                          <div className="font-medium">{c.customerName}</div>
-                          <div className="text-xs text-gray-500">
-                            {c.customerPhone}
-                          </div>
-                        </td>
-
-                        <td
-                          className="p-3 cursor-pointer"
-                          onClick={() => openCredit(c.id)}
-                        >
-                          {formatDate(c.createdAt)}
-                        </td>
-
-                        <td className="p-3">
-                          <div className="flex justify-end gap-2">
-                            {canDecide && isOpen && !isApproved ? (
-                              <>
-                                <button
-                                  className="px-3 py-2 rounded-lg bg-black text-white text-xs"
-                                  onClick={() => openAction("APPROVE", c)}
-                                >
-                                  Approve
-                                </button>
-                                <button
-                                  className="px-3 py-2 rounded-lg border text-xs hover:bg-gray-50"
-                                  onClick={() => openAction("REJECT", c)}
-                                >
-                                  Reject
-                                </button>
-                              </>
-                            ) : null}
-
-                            {canSettle && isOpen && isApproved ? (
-                              <button
-                                className="px-3 py-2 rounded-lg bg-black text-white text-xs"
-                                onClick={() => openAction("SETTLE", c)}
-                              >
-                                Settle
-                              </button>
-                            ) : null}
-
-                            {/* show nothing when no actions */}
-                            {(!canDecide && !canSettle) ||
-                            (!isOpen && (canDecide || canSettle)) ? (
-                              <span className="text-xs text-gray-500">—</span>
-                            ) : null}
-                          </div>
+                    {rows.length === 0 ? (
+                      <tr>
+                        <td className="p-4 text-sm text-gray-600" colSpan={5}>
+                          No credits found.
                         </td>
                       </tr>
-                    );
-                  })}
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
-                  {rows.length === 0 ? (
-                    <tr>
-                      <td className="p-4 text-sm text-gray-600" colSpan={6}>
-                        No credits found.
-                      </td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
+            <div className="p-4 border-t flex items-center justify-between">
+              <div className="text-xs text-gray-500">
+                {nextCursor ? "More rows available." : "End of list."}
+              </div>
+              <button
+                onClick={loadMore}
+                disabled={!nextCursor || loadingMore}
+                className={
+                  "px-4 py-2 rounded-lg text-sm " +
+                  (nextCursor
+                    ? "bg-black text-white"
+                    : "bg-gray-100 text-gray-400")
+                }
+              >
+                {loadingMore ? "Loading..." : "Load more"}
+              </button>
             </div>
-          )}
-
-          <div className="p-4 border-t flex items-center justify-between">
-            <div className="text-xs text-gray-500">
-              {nextCursor ? "More rows available." : "End of list."}
-            </div>
-            <button
-              onClick={loadMore}
-              disabled={!nextCursor || loadingMore}
-              className={
-                "px-4 py-2 rounded-lg text-sm " +
-                (nextCursor
-                  ? "bg-black text-white"
-                  : "bg-gray-100 text-gray-400")
-              }
-            >
-              {loadingMore ? "Loading..." : "Load more"}
-            </button>
           </div>
         </div>
 
-        {/* Detail */}
-        <div className="bg-white rounded-xl shadow">
+        {/* RIGHT */}
+        <div className="bg-white rounded-xl shadow overflow-hidden">
           <div className="p-4 border-b">
             <div className="font-semibold">Credit detail</div>
             <div className="text-xs text-gray-500 mt-1">
-              Click a credit record.
+              Select a credit to approve/reject/record payment.
             </div>
           </div>
 
           {detailLoading ? (
-            <div className="p-4 text-sm text-gray-600">Loading detail...</div>
+            <div className="p-4 text-sm text-gray-600">Loading...</div>
           ) : creditDetail ? (
-            <CreditDetail credit={creditDetail} />
+            <div className="p-4 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm text-gray-500">
+                    Credit #{creditDetail.id}
+                  </div>
+                  <div className="text-lg font-semibold mt-1">
+                    {creditStatusLabel(creditDetail.status)}
+                  </div>
+                  <div className="text-sm text-gray-600 mt-1">
+                    Amount:{" "}
+                    <span className="font-medium">
+                      {money(creditDetail.amount)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-right text-xs text-gray-500">
+                  <div>Created: {formatDate(creditDetail.createdAt)}</div>
+                  <div>
+                    Approved:{" "}
+                    {creditDetail.approvedAt
+                      ? formatDate(creditDetail.approvedAt)
+                      : "Not yet"}
+                  </div>
+                  <div>
+                    Paid:{" "}
+                    {creditDetail.settledAt
+                      ? formatDate(creditDetail.settledAt)
+                      : "Not yet"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="border rounded-lg p-3">
+                  <div className="text-xs text-gray-500">Customer</div>
+                  <div className="font-medium">
+                    {creditDetail.customerName || "-"}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    {creditDetail.customerPhone || "-"}
+                  </div>
+                </div>
+
+                <div className="border rounded-lg p-3">
+                  <div className="text-xs text-gray-500">Sale reference</div>
+                  <div className="font-medium">Sale #{creditDetail.saleId}</div>
+                </div>
+              </div>
+
+              <div className="border rounded-lg p-3">
+                <div className="text-xs text-gray-500">Note</div>
+                <div className="text-sm mt-1">{creditDetail.note || "-"}</div>
+              </div>
+
+              {/* DECIDE */}
+              {capabilities.canDecide ? (
+                <div className="border rounded-xl p-3">
+                  <div className="font-semibold">Approval</div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    You can approve or reject only when it is unpaid and not yet
+                    approved.
+                  </div>
+
+                  <textarea
+                    className="mt-3 w-full border rounded-lg px-3 py-2"
+                    placeholder="Optional note"
+                    value={decisionNote}
+                    onChange={(e) => setDecisionNote(e.target.value)}
+                    rows={2}
+                  />
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => doDecision("APPROVE")}
+                      disabled={!canApproveReject || actionLoading}
+                      className={
+                        "px-4 py-2 rounded-lg " +
+                        (canApproveReject
+                          ? "bg-black text-white"
+                          : "bg-gray-100 text-gray-400")
+                      }
+                    >
+                      Approve
+                    </button>
+
+                    <button
+                      onClick={() => doDecision("REJECT")}
+                      disabled={!canApproveReject || actionLoading}
+                      className={
+                        "px-4 py-2 rounded-lg border " +
+                        (canApproveReject
+                          ? "hover:bg-gray-50"
+                          : "bg-gray-100 text-gray-400 border-gray-100")
+                      }
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* SETTLE */}
+              {capabilities.canSettle ? (
+                <div className="border rounded-xl p-3">
+                  <div className="font-semibold">Record payment</div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Only after approval.
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <select
+                      className="border rounded-lg px-3 py-2"
+                      value={settleMethod}
+                      onChange={(e) => setSettleMethod(e.target.value)}
+                    >
+                      <option value="CASH">Cash</option>
+                      <option value="MOMO">MoMo</option>
+                      <option value="CARD">Card</option>
+                      <option value="BANK">Bank</option>
+                      <option value="OTHER">Other</option>
+                    </select>
+
+                    <button
+                      onClick={doSettle}
+                      disabled={!canSettleNow || actionLoading}
+                      className={
+                        "rounded-lg px-4 py-2 " +
+                        (canSettleNow
+                          ? "bg-black text-white"
+                          : "bg-gray-100 text-gray-400")
+                      }
+                    >
+                      Record payment
+                    </button>
+                  </div>
+
+                  <textarea
+                    className="mt-3 w-full border rounded-lg px-3 py-2"
+                    placeholder="Optional note"
+                    value={settleNote}
+                    onChange={(e) => setSettleNote(e.target.value)}
+                    rows={2}
+                  />
+                </div>
+              ) : null}
+            </div>
           ) : (
-            <div className="p-4 text-sm text-gray-600">No credit selected.</div>
+            <div className="p-4 text-sm text-gray-600">Select a credit.</div>
           )}
         </div>
       </div>
-
-      {/* Action modal */}
-      {actionOpen ? (
-        <div className="fixed inset-0 bg-black/40 flex items-end md:items-center justify-center p-4 z-50">
-          <div className="w-full max-w-lg bg-white rounded-xl shadow p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="font-semibold">
-                  {actionType === "APPROVE" ? "Approve credit" : null}
-                  {actionType === "REJECT" ? "Reject credit" : null}
-                  {actionType === "SETTLE" ? "Settle credit" : null}
-                </div>
-                <div className="text-xs text-gray-500 mt-1">
-                  Credit #{toStr(actionRow?.id)} • Sale{" "}
-                  {toStr(actionRow?.saleId)} • Amount {money(actionRow?.amount)}
-                </div>
-              </div>
-
-              <button
-                className="px-3 py-2 rounded-lg border text-sm hover:bg-gray-50"
-                onClick={closeAction}
-                disabled={actionLoading}
-              >
-                Close
-              </button>
-            </div>
-
-            {actionType === "SETTLE" ? (
-              <div className="mt-4">
-                <div className="text-xs text-gray-500 mb-1">Payment method</div>
-                <select
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  value={actionMethod}
-                  onChange={(e) => setActionMethod(e.target.value)}
-                  disabled={actionLoading}
-                >
-                  <option value="CASH">CASH</option>
-                  <option value="MOMO">MOMO</option>
-                  <option value="CARD">CARD</option>
-                  <option value="BANK">BANK</option>
-                  <option value="OTHER">OTHER</option>
-                </select>
-              </div>
-            ) : null}
-
-            <div className="mt-4">
-              <div className="text-xs text-gray-500 mb-1">Note (optional)</div>
-              <textarea
-                className="w-full border rounded-lg px-3 py-2 text-sm"
-                rows={3}
-                value={actionNote}
-                onChange={(e) => setActionNote(e.target.value)}
-                disabled={actionLoading}
-                placeholder={
-                  actionType === "REJECT"
-                    ? "Reason for rejection (recommended)"
-                    : "Add a note (optional)"
-                }
-              />
-            </div>
-
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
-                onClick={closeAction}
-                disabled={actionLoading}
-              >
-                Cancel
-              </button>
-
-              <button
-                className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
-                onClick={submitAction}
-                disabled={actionLoading}
-              >
-                {actionLoading ? "Working..." : "Confirm"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
 
-function CreditDetail({ credit }) {
-  return (
-    <div className="p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-sm text-gray-500">Credit #{credit.id}</div>
-          <div className="text-lg font-semibold mt-1">{credit.status}</div>
-          <div className="text-sm text-gray-600 mt-1">
-            Amount: <span className="font-medium">{money(credit.amount)}</span>
-          </div>
-        </div>
-
-        <div className="text-right text-xs text-gray-500">
-          <div>Created: {formatDate(credit.createdAt)}</div>
-          {credit.approvedAt ? (
-            <div>Approved: {formatDate(credit.approvedAt)}</div>
-          ) : null}
-          {credit.settledAt ? (
-            <div>Settled: {formatDate(credit.settledAt)}</div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div className="border rounded-lg p-3">
-          <div className="text-xs text-gray-500">Customer</div>
-          <div className="font-medium">{credit.customerName}</div>
-          <div className="text-sm text-gray-600">{credit.customerPhone}</div>
-        </div>
-
-        <div className="border rounded-lg p-3">
-          <div className="text-xs text-gray-500">Sale reference</div>
-          <div className="font-medium">Sale ID: {credit.saleId}</div>
-          <div className="text-xs text-gray-500 mt-1">
-            Customer ID: {credit.customerId}
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-4 border rounded-lg p-3">
-        <div className="text-xs text-gray-500">Note</div>
-        <div className="text-sm mt-1">{credit.note || "-"}</div>
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-        <Mini label="Created By" value={credit.createdBy} />
-        <Mini label="Approved By" value={credit.approvedBy || "-"} />
-        <Mini label="Settled By" value={credit.settledBy || "-"} />
-      </div>
-    </div>
-  );
-}
-
-function Mini({ label, value }) {
+function MiniStat({ label, value }) {
   return (
     <div className="border rounded-lg p-3">
       <div className="text-xs text-gray-500">{label}</div>
-      <div className="font-medium mt-1">{value}</div>
+      <div className="font-semibold mt-1">{value}</div>
     </div>
   );
 }

@@ -617,6 +617,7 @@ export default function ManagerPage() {
       <RoleBar
         title="Manager"
         subtitle={`User: ${me.email} • Location: ${me.locationId}`}
+        user={me}
       />
 
       <div className="max-w-6xl mx-auto p-6">
@@ -1221,10 +1222,12 @@ export default function ManagerPage() {
           <div className="mt-6">
             <CreditsPanel
               title="Credits (Manager)"
-              subtitle="Approve or reject credit requests."
-              defaultStatus="OPEN"
-              canDecide={true}
-              canSettle={false}
+              capabilities={{
+                canView: true,
+                canCreate: false,
+                canDecide: true,
+                canSettle: false,
+              }}
             />
           </div>
         ) : null}

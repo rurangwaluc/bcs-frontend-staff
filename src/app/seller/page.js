@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import CreditsPanel from "../../components/CreditsPanel";
 import RoleBar from "../../components/RoleBar";
 import { apiFetch } from "../../lib/api";
 import { getMe } from "../../lib/auth";
@@ -27,6 +28,9 @@ const ENDPOINTS = {
   SALES_LIST: "/sales",
   SALES_CREATE: "/sales",
   SALE_MARK: (id) => `/sales/${id}/mark`,
+  CUSTOMERS_SEARCH: (q) => `/customers/search?q=${encodeURIComponent(q)}`,
+  CUSTOMERS_CREATE: "/customers", // ✅ add this
+  CUSTOMER_HISTORY: (id) => `/customers/${id}/history`,
 };
 
 const MARK_OPTIONS = [
@@ -63,6 +67,17 @@ export default function SellerPage() {
   const [customerPhone, setCustomerPhone] = useState("");
   const [note, setNote] = useState("");
   const [saleCart, setSaleCart] = useState([]);
+
+  // customer selection
+  const [customerQ, setCustomerQ] = useState("");
+  const [customerResults, setCustomerResults] = useState([]);
+  const [customerLoading, setCustomerLoading] = useState(false);
+  const [selectedCustomer, setSelectedCustomer] = useState(null); // {id,name,phone}
+
+  const [histOpen, setHistOpen] = useState(false);
+  const [histLoading, setHistLoading] = useState(false);
+  const [histRows, setHistRows] = useState([]);
+  const [histTotals, setHistTotals] = useState(null);
 
   // sale-level discount
   const [saleDiscountPercent, setSaleDiscountPercent] = useState("");
@@ -113,6 +128,35 @@ export default function SellerPage() {
   }, [router]);
 
   const isAuthorized = !!me && String(me.role || "").toLowerCase() === "seller";
+
+  const searchCustomers = useCallback(async (q) => {
+    const qq = String(q || "").trim();
+    if (!qq) {
+      setCustomerResults([]);
+      return;
+    }
+
+    setCustomerLoading(true);
+    try {
+      const data = await apiFetch(ENDPOINTS.CUSTOMERS_SEARCH(qq), {
+        method: "GET",
+      });
+      setCustomerResults(Array.isArray(data?.customers) ? data.customers : []);
+    } catch (e) {
+      setCustomerResults([]);
+      setMsg(e?.data?.error || e?.message || "Failed to search customers");
+    } finally {
+      setCustomerLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      searchCustomers(customerQ);
+    }, 250);
+
+    return () => clearTimeout(t);
+  }, [customerQ, searchCustomers]);
 
   // ---------------- API LOADERS ----------------
   const loadProducts = useCallback(async () => {
@@ -250,10 +294,81 @@ export default function SellerPage() {
     return Math.max(0, base - disc);
   }
 
+  async function createCustomerFromInputs() {
+    setMsg("");
+
+    const name = String(customerName || "").trim();
+    const phone = String(customerPhone || "").trim();
+
+    if (name.length < 2) return setMsg("Customer name is required.");
+    if (phone.length < 6) return setMsg("Customer phone is required.");
+
+    try {
+      const data = await apiFetch(ENDPOINTS.CUSTOMERS_CREATE, {
+        method: "POST",
+        body: { name, phone },
+      });
+
+      const c = data?.customer || null;
+      if (!c?.id) return setMsg("Failed to create customer.");
+
+      // ✅ select immediately
+      setSelectedCustomer({ id: c.id, name: c.name, phone: c.phone });
+      setCustomerQ(`${c.name || ""} ${c.phone || ""}`.trim());
+      setCustomerResults([]);
+      setMsg("✅ Customer created & selected.");
+    } catch (e) {
+      setMsg(e?.data?.error || e?.message || "Failed to create customer");
+    }
+  }
+
+  async function openCustomerHistory(customerId) {
+    const id = Number(customerId);
+    if (!id) return setMsg("Select a customer first.");
+
+    setHistOpen(true);
+    setHistLoading(true);
+    setHistRows([]);
+    setHistTotals(null);
+
+    try {
+      const data = await apiFetch(ENDPOINTS.CUSTOMER_HISTORY(id), {
+        method: "GET",
+      });
+
+      // backend returns: { ok, customerId, sales: [...], totals: {...} }
+      const rows = Array.isArray(data?.sales) ? data.sales : [];
+      setHistRows(rows);
+      setHistTotals(data?.totals || null);
+    } catch (e) {
+      setMsg(e?.data?.error || e?.message || "Failed to load customer history");
+      setHistOpen(false);
+    } finally {
+      setHistLoading(false);
+    }
+  }
+
   // ---------------- CREATE SALE ----------------
   async function createSale(e) {
     e.preventDefault();
     setMsg("");
+
+    const typedName = String(customerName || "").trim();
+    const typedPhone = String(customerPhone || "").trim();
+
+    // If no selected customer, require typed details (so backend can auto-create)
+    if (!selectedCustomer?.id) {
+      if (!typedName || typedName.length < 2) {
+        return setMsg(
+          "Enter customer name (min 2 chars) or select from search.",
+        );
+      }
+      if (!typedPhone || typedPhone.length < 6) {
+        return setMsg(
+          "Enter customer phone (min 6 chars) or select from search.",
+        );
+      }
+    }
 
     if (saleCart.length === 0) {
       return setMsg("Cart empty. Add items from Products first.");
@@ -296,8 +411,14 @@ export default function SellerPage() {
     }
 
     const payload = {
-      customerName: customerName ? String(customerName).trim() : null,
-      customerPhone: customerPhone ? String(customerPhone).trim() : null,
+      customerId: selectedCustomer?.id
+        ? Number(selectedCustomer.id)
+        : undefined,
+
+      // send typed values (backend will normalize + create/reuse customer by phone)
+      customerName: typedName ? typedName : null,
+      customerPhone: typedPhone ? typedPhone : null,
+
       note: note ? String(note).slice(0, 200) : null,
 
       discountPercent: reqSaleDiscPct || undefined,
@@ -553,6 +674,7 @@ export default function SellerPage() {
       <RoleBar
         title="Seller"
         subtitle={`User: ${me.email} • Location: ${me.locationId}`}
+        user={me}
       />
 
       <div className="max-w-6xl mx-auto p-6">
@@ -582,6 +704,12 @@ export default function SellerPage() {
 
           <TabButton active={tab === "sales"} onClick={() => setTab("sales")}>
             My Sales
+          </TabButton>
+          <TabButton
+            active={tab === "credits"}
+            onClick={() => setTab("credits")}
+          >
+            Credits
           </TabButton>
         </div>
 
@@ -780,19 +908,142 @@ export default function SellerPage() {
                 Draft first → Store Keeper fulfills → then you mark Paid/Credit.
               </div>
 
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                <input
-                  className="border rounded-lg px-3 py-2"
-                  placeholder="Customer name (optional)"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                />
-                <input
-                  className="border rounded-lg px-3 py-2"
-                  placeholder="Customer phone (optional)"
-                  value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
-                />
+              <div className="mt-4">
+                <div className="font-medium text-sm">Customer</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Search by name or phone, then select.
+                </div>
+
+                <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <input
+                    className="border rounded-lg px-3 py-2 md:col-span-2"
+                    placeholder="Search customer (name or phone)"
+                    value={customerQ}
+                    onChange={(e) => setCustomerQ(e.target.value)}
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCustomer(null);
+                      setCustomerName("");
+                      setCustomerPhone("");
+                      setCustomerQ("");
+                      setCustomerResults([]);
+                      setMsg("");
+                    }}
+                    className="border rounded-lg px-3 py-2 text-sm hover:bg-gray-50"
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                {/* Results dropdown */}
+                {customerQ.trim() && !selectedCustomer ? (
+                  <div className="mt-2 border rounded-xl overflow-hidden bg-white">
+                    <div className="max-h-56 overflow-auto">
+                      {customerLoading ? (
+                        <div className="p-3 text-sm text-gray-600">
+                          Searching…
+                        </div>
+                      ) : customerResults.length ? (
+                        customerResults.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedCustomer(c);
+                              setCustomerName(c.name || "");
+                              setCustomerPhone(c.phone || "");
+                              setCustomerQ(
+                                `${c.name || ""} ${c.phone || ""}`.trim(),
+                              );
+                              setCustomerResults([]);
+                            }}
+                            className="w-full text-left p-3 hover:bg-gray-50 border-t first:border-t-0"
+                          >
+                            <div className="font-medium">{c.name || "-"}</div>
+                            <div className="text-xs text-gray-500">
+                              {c.phone || "-"}
+                            </div>
+                          </button>
+                        ))
+                      ) : (
+                        <div className="p-3 text-sm text-gray-600 space-y-2">
+                          <div>No customers found.</div>
+
+                          {customerQ.trim().length >= 3 ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                // use typed search text as customer name (seller can edit after)
+                                setCustomerName(customerQ.trim());
+                                setCustomerPhone("");
+                                setSelectedCustomer(null);
+                                setCustomerResults([]);
+                              }}
+                              className="px-3 py-1.5 rounded-lg border text-xs hover:bg-gray-50"
+                            >
+                              Use typed name to create new customer
+                            </button>
+                          ) : null}
+
+                          <div className="text-[11px] text-gray-400">
+                            If this is a new customer, enter name and phone
+                            below.
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Create new customer quick action */}
+                <div className="mt-2 flex gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={createCustomerFromInputs}
+                    className="px-3 py-2 rounded-lg bg-black text-white text-sm"
+                    disabled={!customerName.trim() || !customerPhone.trim()}
+                  >
+                    Create customer
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => openCustomerHistory(selectedCustomer?.id)}
+                    className="px-3 py-2 rounded-lg border text-sm hover:bg-gray-50"
+                    disabled={!selectedCustomer?.id}
+                  >
+                    View history
+                  </button>
+
+                  <div className="text-xs text-gray-500 self-center">
+                    If search returns none, type name + phone then create.
+                  </div>
+                </div>
+
+                {/* Selected customer preview */}
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <input
+                    className="border rounded-lg px-3 py-2"
+                    value={customerName}
+                    onChange={(e) => {
+                      setCustomerName(e.target.value);
+                      setSelectedCustomer(null);
+                    }}
+                    placeholder="Customer name"
+                  />
+                  <input
+                    className="border rounded-lg px-3 py-2"
+                    value={customerPhone}
+                    onChange={(e) => {
+                      setCustomerPhone(e.target.value);
+                      setSelectedCustomer(null);
+                    }}
+                    placeholder="Customer phone"
+                  />
+                </div>
               </div>
 
               <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1132,6 +1383,123 @@ export default function SellerPage() {
                 </table>
               </div>
             )}
+          </div>
+        ) : null}
+
+        {tab === "credits" ? (
+          <div className="mt-6">
+            <CreditsPanel
+              title="Credits (Seller)"
+              capabilities={{
+                canView: true,
+                canCreate: false,
+                canDecide: false,
+                canSettle: false,
+              }}
+            />
+          </div>
+        ) : null}
+
+        {histOpen ? (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
+            <div className="bg-white w-full max-w-3xl rounded-xl shadow overflow-hidden">
+              <div className="p-4 border-b flex items-center justify-between">
+                <div>
+                  <div className="font-semibold">Customer history</div>
+                  <div className="text-xs text-gray-500">
+                    {selectedCustomer?.name || "-"} •{" "}
+                    {selectedCustomer?.phone || "-"}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setHistOpen(false)}
+                  className="px-3 py-1.5 rounded-lg border text-sm hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="p-4">
+                {histLoading ? (
+                  <div className="text-sm text-gray-600">Loading…</div>
+                ) : (
+                  <>
+                    {histTotals ? (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                        <div className="border rounded-lg p-3">
+                          <div className="text-xs text-gray-500">
+                            Total purchases
+                          </div>
+                          <div className="text-lg font-semibold">
+                            {fmtMoney(histTotals.totalAmount || 0)} RWF
+                          </div>
+                        </div>
+                        <div className="border rounded-lg p-3">
+                          <div className="text-xs text-gray-500">
+                            Total paid
+                          </div>
+                          <div className="text-lg font-semibold">
+                            {fmtMoney(histTotals.totalPaid || 0)} RWF
+                          </div>
+                        </div>
+                        <div className="border rounded-lg p-3">
+                          <div className="text-xs text-gray-500">
+                            Open credit
+                          </div>
+                          <div className="text-lg font-semibold">
+                            {fmtMoney(histTotals.openCredit || 0)} RWF
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="border rounded-xl overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-50 text-gray-600">
+                            <tr>
+                              <th className="text-left p-3">Sale</th>
+                              <th className="text-left p-3">Status</th>
+                              <th className="text-right p-3">Total</th>
+                              <th className="text-left p-3">Created</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {histRows.map((r) => (
+                              <tr key={r.id} className="border-t">
+                                <td className="p-3 font-medium">#{r.id}</td>
+                                <td className="p-3">
+                                  {String(r.status || "-")}
+                                </td>
+                                <td className="p-3 text-right">
+                                  {fmtMoney(r.totalAmount || 0)}
+                                </td>
+                                <td className="p-3">
+                                  {fmt(r.createdAt || r.created_at)}
+                                </td>
+                              </tr>
+                            ))}
+
+                            {histRows.length === 0 ? (
+                              <tr>
+                                <td
+                                  colSpan={4}
+                                  className="p-4 text-sm text-gray-600"
+                                >
+                                  No history found.
+                                </td>
+                              </tr>
+                            ) : null}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         ) : null}
       </div>

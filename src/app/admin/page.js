@@ -497,7 +497,8 @@ export default function AdminPage() {
     <div>
       <RoleBar
         title="Admin"
-        subtitle={`User: ${me.email} • Location: ${locationId}`}
+        subtitle={`User: ${me.email} • Location: ${me.locationId}`}
+        user={me}
       />
 
       <div className="max-w-6xl mx-auto p-6">
@@ -1065,10 +1066,12 @@ export default function AdminPage() {
           <div className="mt-6">
             <CreditsPanel
               title="Credits (Admin)"
-              subtitle="Approve / Reject / Settle. Admin oversight."
-              defaultStatus="OPEN"
-              canDecide={true}
-              canSettle={true}
+              capabilities={{
+                canView: true,
+                canCreate: true,
+                canDecide: true,
+                canSettle: true,
+              }}
             />
           </div>
         ) : null}

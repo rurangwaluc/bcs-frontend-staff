@@ -777,7 +777,11 @@ export default function CashierPage() {
 
   return (
     <div>
-      <RoleBar title="Cashier" subtitle={subtitle} />
+      <RoleBar
+        title="Cashier"
+        subtitle={`User: ${me.email} • Location: ${me.locationId}`}
+        user={me}
+      />
 
       <div className="max-w-6xl mx-auto p-6">
         {/* Session banner */}
@@ -1285,10 +1289,12 @@ export default function CashierPage() {
           <div className="mt-6">
             <CreditsPanel
               title="Credits (Cashier)"
-              subtitle="Settle approved credits and record payment."
-              defaultStatus="OPEN"
-              canDecide={false}
-              canSettle={true}
+              capabilities={{
+                canView: true,
+                canCreate: false,
+                canDecide: false,
+                canSettle: true,
+              }}
             />
           </div>
         ) : null}

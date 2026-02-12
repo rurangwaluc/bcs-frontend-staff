@@ -444,6 +444,7 @@ export default function StoreKeeperPage() {
       <RoleBar
         title="Store Keeper"
         subtitle={`User: ${me.email} • Location: ${me.locationId}`}
+        user={me}
       />
 
       <div className="max-w-6xl mx-auto p-6">
