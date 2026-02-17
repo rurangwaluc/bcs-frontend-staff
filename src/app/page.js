@@ -154,35 +154,50 @@ export default function StaffLandingPage() {
           {/* Right */}
           <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 h-fit">
             <div className="text-sm font-semibold text-gray-900">
-              Operational notes
+              Inside the Business Control System
             </div>
 
-            <div className="mt-3 space-y-3 text-xs text-gray-700 leading-relaxed">
-              <div className="border border-gray-200 rounded-xl p-3 bg-gray-50">
-                <div className="font-semibold text-gray-900">Security</div>
+            <div className="mt-3 space-y-4 text-xs text-gray-700 leading-relaxed">
+              <div className="border border-gray-200 rounded-xl p-4 bg-gray-50">
+                <div className="font-semibold text-gray-900">
+                  Structured by Design
+                </div>
                 <div className="mt-1">
-                  Your role controls what you can do. All important actions are
-                  logged.
+                  This platform organizes your entire business into clearly
+                  defined roles. Every action from pricing to payments happens
+                  within controlled responsibility boundaries.
                 </div>
               </div>
 
-              <div className="border border-gray-200 rounded-xl p-3">
-                <div className="font-semibold text-gray-900">Stock flow</div>
+              <div className="border border-gray-200 rounded-xl p-4">
+                <div className="font-semibold text-gray-900">
+                  Operational Intelligence
+                </div>
                 <div className="mt-1">
-                  Arrival → documents → manager review → pricing → sales.
+                  Inventory enters the system, moves through documentation and
+                  review, receives pricing decisions, reaches sales, and flows
+                  into reports. Nothing skips a step. Nothing disappears.
                 </div>
               </div>
 
-              <div className="border border-gray-200 rounded-xl p-3">
-                <div className="font-semibold text-gray-900">Tip</div>
-                <div className="mt-1">
-                  If you pick the wrong role, go back and choose the correct
-                  one.
+              <div className="border border-gray-200 rounded-xl p-4">
+                <div className="font-semibold text-gray-900">
+                  Accountability Built In
                 </div>
+                <div className="mt-1">
+                  Approvals, stock adjustments, cash sessions, and performance
+                  indicators are recorded and traceable. Oversight is continuous
+                  not reactive.
+                </div>
+              </div>
+
+              <div className="text-[11px] text-gray-500 pt-2">
+                A unified system connecting stock, pricing, sales, cash, staff,
+                and reporting — in one controlled operational flow.
               </div>
             </div>
 
-            <div className="mt-5 text-[11px] text-gray-500">
+            <div className="mt-6 text-[11px] text-gray-500">
               © {new Date().getFullYear()} Business Control System • Staff
               Portal
             </div>
