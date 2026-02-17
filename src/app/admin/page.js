@@ -534,9 +534,9 @@ export default function AdminPage() {
             Credits
           </Tab>
 
-          <Tab active={tab === "customers"} onClick={() => setTab("customers")}>
+          {/* <Tab active={tab === "customers"} onClick={() => setTab("customers")}>
             Customers
-          </Tab>
+          </Tab> */}
           <Tab active={tab === "audit"} onClick={() => setTab("audit")}>
             Audit
           </Tab>
