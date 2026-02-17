@@ -26,7 +26,7 @@ const ENDPOINTS = {
   PRODUCTS_LIST: "/products",
   INVENTORY_LIST: "/inventory",
 
-  CREDITS_OPEN: "/credits/open",
+  // CREDITS_OPEN: "/credits/open",
   PAYMENTS_LIST: "/payments",
   PAYMENTS_SUMMARY: "/payments/summary",
   PAYMENTS_BREAKDOWN: "/payments/breakdown", // ✅ ADDED
@@ -45,21 +45,6 @@ function fmt(v) {
     return new Date(v).toLocaleString();
   } catch {
     return String(v);
-  }
-}
-
-function isToday(dateStr) {
-  if (!dateStr) return false;
-  try {
-    const d = new Date(dateStr);
-    const now = new Date();
-    return (
-      d.getFullYear() === now.getFullYear() &&
-      d.getMonth() === now.getMonth() &&
-      d.getDate() === now.getDate()
-    );
-  } catch {
-    return false;
   }
 }
 
@@ -193,10 +178,6 @@ export default function ManagerPage() {
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [loadingPaySummary, setLoadingPaySummary] = useState(false);
   const [loadingPayBreakdown, setLoadingPayBreakdown] = useState(false); // ✅ ADDED
-
-  // ---------- CREDITS ----------
-  const [openCredits, setOpenCredits] = useState([]);
-  const [loadingCredits, setLoadingCredits] = useState(false);
 
   // ---------- EVIDENCE ----------
   const [evEntity, setEvEntity] = useState("sale");
@@ -437,7 +418,7 @@ export default function ManagerPage() {
       loadPayments();
       loadPaymentsBreakdown(); // ✅ ADDED
     }
-    if (tab === "credits") loadCreditsOpen();
+
     if (tab === "arrivals") loadArrivals();
     if (tab === "payments") {
       loadPayments();
@@ -506,37 +487,6 @@ export default function ManagerPage() {
     [sales],
   );
 
-  const salesToday = useMemo(
-    () => (sales || []).filter((s) => isToday(s.createdAt)),
-    [sales],
-  );
-
-  const salesTodayTotal = useMemo(
-    () => salesToday.reduce((sum, s) => sum + Number(s.totalAmount || 0), 0),
-    [salesToday],
-  );
-
-  const awaitingPayment = useMemo(
-    () =>
-      (sales || []).filter(
-        (s) => String(s.status) === "AWAITING_PAYMENT_RECORD",
-      ),
-    [sales],
-  );
-
-  const draftSales = useMemo(
-    () => (sales || []).filter((s) => String(s.status) === "DRAFT"),
-    [sales],
-  );
-
-  const completedToday = useMemo(
-    () =>
-      (sales || []).filter(
-        (s) => String(s.status) === "COMPLETED" && isToday(s.createdAt),
-      ),
-    [sales],
-  );
-
   const filteredSales = useMemo(() => {
     const qq = String(salesQ || "")
       .trim()
@@ -582,31 +532,11 @@ export default function ManagerPage() {
     return price == null ? "-" : money(price);
   }
 
-  const paidToday = useMemo(() => {
-    const list = Array.isArray(payments) ? payments : [];
-    return list.filter((p) => isToday(p.createdAt));
-  }, [payments]);
-
-  const paidTodayTotal = useMemo(() => {
-    return paidToday.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-  }, [paidToday]);
-
   // ✅ Breakdown mapping for "today"
   const breakdownTodayTotals = useMemo(() => {
     const rows = paymentsBreakdown?.today || [];
     return sumBreakdown(rows);
   }, [paymentsBreakdown]);
-
-  const todayBreakdownTotalMoney = useMemo(() => {
-    const t = breakdownTodayTotals;
-    return (
-      Number(t.CASH.total || 0) +
-      Number(t.MOMO.total || 0) +
-      Number(t.BANK.total || 0) +
-      Number(t.CARD.total || 0) +
-      Number(t.OTHER.total || 0)
-    );
-  }, [breakdownTodayTotals]);
 
   if (!isAuthorized) {
     return <div className="p-6 text-sm text-gray-600">Redirecting...</div>;
@@ -694,7 +624,6 @@ export default function ManagerPage() {
               } else if (tab === "sales") loadSales();
               else if (tab === "inventory")
                 Promise.all([loadInventory(), loadProducts()]);
-              else if (tab === "credits") loadCreditsOpen();
               else if (tab === "arrivals") loadArrivals();
             }}
             className="ml-auto px-4 py-2 rounded-lg bg-black text-white"

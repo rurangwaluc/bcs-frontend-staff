@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import { apiFetch } from "../lib/api";
 
-const STATUSES = ["", "OPEN", "SETTLED"];
-
+// ✅ Match backend DB statuses exactly
+const STATUSES = ["", "PENDING", "APPROVED", "SETTLED", "REJECTED"];
 function money(n) {
   const x = Number(n || 0);
   return Number.isFinite(x) ? Math.round(x).toLocaleString() : "0";
@@ -27,10 +27,22 @@ function normalizeList(data) {
   return [];
 }
 
+// DB status label (what the record *is*)
 function creditStatusLabel(status) {
   const st = String(status || "").toUpperCase();
   if (st === "OPEN") return "UNPAID";
   if (st === "SETTLED") return "PAID";
+  if (st === "REJECTED") return "REJECTED";
+  return st || "-";
+}
+
+// Real-world lifecycle label (what staff *should understand*)
+function creditLifecycleLabel(row) {
+  const st = String(row?.status || "").toUpperCase();
+  if (st === "PENDING") return "Waiting approval";
+  if (st === "APPROVED") return "Approved (waiting payment)";
+  if (st === "SETTLED") return "Paid";
+  if (st === "REJECTED") return "Rejected";
   return st || "-";
 }
 
@@ -45,6 +57,7 @@ export default function CreditsPanel({
 
   /**
    * Prefill from parent (recommended real-world flow)
+   * Must include saleId + customerId for your current backend.
    * Example: { saleId: 123, customerId: 44, customerName, customerPhone, note }
    */
   prefillCreate = null,
@@ -58,7 +71,8 @@ export default function CreditsPanel({
   const [loadingMore, setLoadingMore] = useState(false);
   const [msg, setMsg] = useState("");
 
-  const [status, setStatus] = useState("OPEN");
+  // ✅ Default to OPEN because backend supports OPEN/SETTLED/REJECTED
+  const [status, setStatus] = useState("PENDING");
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(50);
 
@@ -68,10 +82,8 @@ export default function CreditsPanel({
 
   const [actionLoading, setActionLoading] = useState(false);
 
-  // ---------- CREATE (ID-less UX) ----------
-  // We only allow creating when prefillCreate exists (sale/customer picked elsewhere)
+  // ---------- CREATE ----------
   const [createNote, setCreateNote] = useState("");
-
   useEffect(() => {
     if (!prefillCreate) return;
     if (prefillCreate.note) {
@@ -161,7 +173,7 @@ export default function CreditsPanel({
   async function doCreateCredit() {
     if (!capabilities.canCreate) return;
 
-    // ✅ Real-world: create only from a selected sale/customer (no manual IDs)
+    // ✅ Your current backend requires saleId + customerId
     const sid = Number(prefillCreate?.saleId);
     const cid = Number(prefillCreate?.customerId);
 
@@ -179,10 +191,10 @@ export default function CreditsPanel({
     try {
       await apiFetch("/credits", {
         method: "POST",
-        body: { saleId: sid, customerId: cid, note: createNote || undefined },
+        body: { saleId: sid, note: createNote || undefined },
       });
 
-      setMsg("✅ Credit created.");
+      setMsg("✅ Credit created (waiting approval).");
       if (typeof onChanged === "function") onChanged({ type: "created" });
 
       await loadFirstPage();
@@ -306,15 +318,17 @@ export default function CreditsPanel({
     );
   }
 
-  const selectedIsOpen =
-    String(creditDetail?.status || "").toUpperCase() === "OPEN";
-  const selectedIsApproved = !!creditDetail?.approvedAt;
+  const selectedDbStatus = String(creditDetail?.status || "").toUpperCase();
+  const selectedApproved = !!creditDetail?.approvedAt;
 
+  // ✅ Backend truth:
+  // - Decide only when OPEN and not approved yet
   const canApproveReject =
-    capabilities.canDecide && selectedIsOpen && !selectedIsApproved;
+    capabilities.canDecide && selectedDbStatus === "PENDING";
 
+  // - Settle only when OPEN and approvedAt exists
   const canSettleNow =
-    capabilities.canSettle && selectedIsOpen && selectedIsApproved;
+    capabilities.canSettle && selectedDbStatus === "APPROVED";
 
   const createReady =
     capabilities.canCreate &&
@@ -359,7 +373,7 @@ export default function CreditsPanel({
         ) : null}
       </div>
 
-      {/* Customer quick lookup (non-developer) */}
+      {/* Customer quick lookup */}
       <div className="bg-white rounded-xl shadow p-4">
         <div className="font-semibold">Find customer</div>
         <div className="text-xs text-gray-500 mt-1">
@@ -391,6 +405,7 @@ export default function CreditsPanel({
               setSelectedId(null);
               setCreditDetail(null);
               setMsg("✅ Cleared.");
+              loadFirstPage();
             }}
             className="px-4 py-2 rounded-lg border hover:bg-gray-50"
           >
@@ -417,7 +432,6 @@ export default function CreditsPanel({
                       <button
                         className="px-3 py-1.5 rounded-lg bg-black text-white text-xs"
                         onClick={async () => {
-                          // filter credits by phone (simple, staff friendly)
                           setQ(c.phone || c.name || "");
                           await loadFirstPage();
                           await loadCustomerHistory(c.id);
@@ -458,7 +472,7 @@ export default function CreditsPanel({
         ) : null}
       </div>
 
-      {/* Create credit (no manual IDs) */}
+      {/* Create credit */}
       {capabilities.canCreate ? (
         <div className="bg-white rounded-xl shadow p-4">
           <div className="font-semibold">Request credit</div>
@@ -476,8 +490,8 @@ export default function CreditsPanel({
             <div className="mt-1">
               <span className="text-gray-500">Customer:</span>{" "}
               <span className="font-medium">
-                {prefillCreate?.customerName || "-"}{" "}
-              </span>
+                {prefillCreate?.customerName || "-"}
+              </span>{" "}
               <span className="text-gray-600">
                 {prefillCreate?.customerPhone
                   ? `(${prefillCreate.customerPhone})`
@@ -507,6 +521,7 @@ export default function CreditsPanel({
             >
               {actionLoading ? "Working..." : "Create credit"}
             </button>
+
             {!createReady ? (
               <div className="text-xs text-gray-500 mt-2">
                 Open a sale and choose “Credit” to auto-fill this section.
@@ -516,7 +531,7 @@ export default function CreditsPanel({
         </div>
       ) : null}
 
-      {/* Filters + Split */}
+      {/* Filters + split */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* LEFT */}
         <div className="space-y-4">
@@ -530,7 +545,7 @@ export default function CreditsPanel({
               >
                 {STATUSES.map((s) => (
                   <option key={s} value={s}>
-                    {s ? (s === "OPEN" ? "UNPAID" : "PAID") : "ALL"}
+                    {s ? creditStatusLabel(s) : "ALL"}
                   </option>
                 ))}
               </select>
@@ -565,8 +580,8 @@ export default function CreditsPanel({
             <div className="p-4 border-b">
               <div className="font-semibold">Credits list</div>
               <div className="text-xs text-gray-500 mt-1">
-                Showing {rows.length} rows
-                {nextCursor ? " (more available)" : " (end)"}
+                Showing {rows.length} rows{" "}
+                {nextCursor ? "(more available)" : "(end)"}
               </div>
             </div>
 
@@ -585,35 +600,24 @@ export default function CreditsPanel({
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((c) => {
-                      const approved = !!c.approvedAt;
-                      const stLabel = creditStatusLabel(c.status);
-                      const state =
-                        stLabel === "UNPAID"
-                          ? approved
-                            ? "Approved (waiting payment)"
-                            : "Waiting approval"
-                          : "Paid";
-
-                      return (
-                        <tr
-                          key={c.id}
-                          className={
-                            "border-t cursor-pointer hover:bg-gray-50 " +
-                            (selectedId === c.id ? "bg-gray-50" : "")
-                          }
-                          onClick={() => openCredit(c.id)}
-                        >
-                          <td className="p-3 font-medium">
-                            {c.customerName || "-"}
-                          </td>
-                          <td className="p-3">{c.customerPhone || "-"}</td>
-                          <td className="p-3 text-right">{money(c.amount)}</td>
-                          <td className="p-3">{state}</td>
-                          <td className="p-3">{formatDate(c.createdAt)}</td>
-                        </tr>
-                      );
-                    })}
+                    {rows.map((c) => (
+                      <tr
+                        key={c.id}
+                        className={
+                          "border-t cursor-pointer hover:bg-gray-50 " +
+                          (selectedId === c.id ? "bg-gray-50" : "")
+                        }
+                        onClick={() => openCredit(c.id)}
+                      >
+                        <td className="p-3 font-medium">
+                          {c.customerName || "-"}
+                        </td>
+                        <td className="p-3">{c.customerPhone || "-"}</td>
+                        <td className="p-3 text-right">{money(c.amount)}</td>
+                        <td className="p-3">{creditLifecycleLabel(c)}</td>
+                        <td className="p-3">{formatDate(c.createdAt)}</td>
+                      </tr>
+                    ))}
 
                     {rows.length === 0 ? (
                       <tr>
@@ -674,6 +678,12 @@ export default function CreditsPanel({
                       {money(creditDetail.amount)}
                     </span>
                   </div>
+                  <div className="text-sm text-gray-600 mt-1">
+                    State:{" "}
+                    <span className="font-medium">
+                      {creditLifecycleLabel(creditDetail)}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="text-right text-xs text-gray-500">
@@ -720,7 +730,7 @@ export default function CreditsPanel({
                 <div className="border rounded-xl p-3">
                   <div className="font-semibold">Approval</div>
                   <div className="text-xs text-gray-500 mt-1">
-                    You can approve or reject only when it is unpaid and not yet
+                    You can approve or reject only when it is UNPAID and not yet
                     approved.
                   </div>
 

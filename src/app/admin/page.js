@@ -1068,7 +1068,7 @@ export default function AdminPage() {
               title="Credits (Admin)"
               capabilities={{
                 canView: true,
-                canCreate: true,
+                canCreate: false,
                 canDecide: true,
                 canSettle: true,
               }}
