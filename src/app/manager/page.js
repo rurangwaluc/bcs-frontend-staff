@@ -1,6 +1,3 @@
-// ✅ PASTE THIS WHOLE FILE INTO:
-// frontend-staff/src/app/manager/page.js
-
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -26,26 +23,37 @@ const ENDPOINTS = {
   PRODUCTS_LIST: "/products",
   INVENTORY_LIST: "/inventory",
 
-  // CREDITS_OPEN: "/credits/open",
   PAYMENTS_LIST: "/payments",
   PAYMENTS_SUMMARY: "/payments/summary",
-  PAYMENTS_BREAKDOWN: "/payments/breakdown", // ✅ ADDED
+  PAYMENTS_BREAKDOWN: "/payments/breakdown",
 
   INVENTORY_ARRIVALS_LIST: "/inventory/arrivals",
+
+  PRODUCT_ARCHIVE: (id) => `/products/${id}/archive`,
+  PRODUCT_RESTORE: (id) => `/products/${id}/restore`,
 };
 
 function money(n) {
   const x = Number(n || 0);
+  if (!Number.isFinite(x)) return "0";
   return x.toLocaleString();
 }
 
 function fmt(v) {
   if (!v) return "-";
-  try {
-    return new Date(v).toLocaleString();
-  } catch {
-    return String(v);
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleString();
+}
+
+function normalizeList(data, keys = []) {
+  for (const k of keys) {
+    const v = data?.[k];
+    if (Array.isArray(v)) return v;
   }
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.rows)) return data.rows;
+  return [];
 }
 
 function normalizeMethodKey(method) {
@@ -57,7 +65,6 @@ function normalizeMethodKey(method) {
   if (m === "MOMO" || m === "MOBILEMONEY" || m === "MOBILE") return "MOMO";
   if (m === "BANK" || m === "TRANSFER") return "BANK";
   if (m === "CARD" || m === "POS") return "CARD";
-  if (m === "OTHER") return "OTHER";
   return "OTHER";
 }
 
@@ -77,6 +84,22 @@ function sumBreakdown(rows) {
     out[k].total += Number(r?.total || 0);
   }
   return out;
+}
+
+function isArchivedProduct(p) {
+  if (!p) return false;
+
+  // Your backend likely uses isActive
+  if (p.isActive === false) return true;
+  if (p.is_active === false) return true;
+
+  // Other possible shapes
+  if (p.isArchived === true) return true;
+  if (p.is_archived === true) return true;
+  if (p.archivedAt || p.archived_at) return true;
+  if (String(p.status || "").toUpperCase() === "ARCHIVED") return true;
+
+  return false;
 }
 
 function ArrivalDocCard({ doc }) {
@@ -142,7 +165,7 @@ export default function ManagerPage() {
   const [msg, setMsg] = useState("");
 
   const [tab, setTab] = useState("dashboard");
-  // dashboard | sales | arrivals | inventory | pricing | cash_reports | users | credits | customers | audit | evidence | inv_requests
+  // dashboard | sales | arrivals | inventory | pricing | cash_reports | users | credits | customers | audit | evidence | inv_requests | payments
 
   const [dash, setDash] = useState(null);
   const [dashLoading, setDashLoading] = useState(false);
@@ -164,6 +187,17 @@ export default function ManagerPage() {
   const [loadingProd, setLoadingProd] = useState(false);
   const [invQ, setInvQ] = useState("");
 
+  // ✅ NEW: show archived products toggle for product list
+  const [showArchivedProducts, setShowArchivedProducts] = useState(false);
+  const [prodQ, setProdQ] = useState("");
+
+  // ✅ Archive / restore modal state
+  const [archOpen, setArchOpen] = useState(false);
+  const [archBusy, setArchBusy] = useState(false);
+  const [archMode, setArchMode] = useState("archive"); // "archive" | "restore"
+  const [archProduct, setArchProduct] = useState(null);
+  const [archReason, setArchReason] = useState("");
+
   // ---------- ARRIVALS ----------
   const [arrivals, setArrivals] = useState([]);
   const [loadingArrivals, setLoadingArrivals] = useState(false);
@@ -171,13 +205,11 @@ export default function ManagerPage() {
   // ---------- PAYMENTS ----------
   const [payments, setPayments] = useState([]);
   const [paymentsSummary, setPaymentsSummary] = useState(null);
-  const [paymentsBreakdown, setPaymentsBreakdown] = useState(null); // ✅ ADDED
-
+  const [paymentsBreakdown, setPaymentsBreakdown] = useState(null);
   const [payQ, setPayQ] = useState("");
-
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [loadingPaySummary, setLoadingPaySummary] = useState(false);
-  const [loadingPayBreakdown, setLoadingPayBreakdown] = useState(false); // ✅ ADDED
+  const [loadingPayBreakdown, setLoadingPayBreakdown] = useState(false);
 
   // ---------- EVIDENCE ----------
   const [evEntity, setEvEntity] = useState("sale");
@@ -228,7 +260,6 @@ export default function ManagerPage() {
   const isAuthorized = !!me && me.role === "manager";
 
   // ---------------- LOADERS ----------------
-
   const loadDashboard = useCallback(async () => {
     setDashLoading(true);
     setMsg("");
@@ -250,10 +281,9 @@ export default function ManagerPage() {
     setMsg("");
     try {
       const data = await apiFetch(ENDPOINTS.SALES_LIST, { method: "GET" });
-      const items = data?.sales ?? data?.items ?? data?.rows ?? [];
-      setSales(Array.isArray(items) ? items : []);
+      setSales(normalizeList(data, ["sales"]));
     } catch (e) {
-      setMsg(e?.data?.error || e.message || "Failed to load sales");
+      setMsg(e?.data?.error || e?.message || "Failed to load sales");
       setSales([]);
     } finally {
       setLoadingSales(false);
@@ -265,56 +295,52 @@ export default function ManagerPage() {
     setMsg("");
     try {
       const data = await apiFetch(ENDPOINTS.INVENTORY_LIST, { method: "GET" });
-      const items = data?.inventory ?? data?.items ?? data?.rows ?? [];
-      setInventory(Array.isArray(items) ? items : []);
+      setInventory(normalizeList(data, ["inventory"]));
     } catch (e) {
-      setMsg(e?.data?.error || e.message || "Failed to load inventory");
+      setMsg(e?.data?.error || e?.message || "Failed to load inventory");
       setInventory([]);
     } finally {
       setLoadingInv(false);
     }
   }, []);
 
-  const loadProducts = useCallback(async () => {
-    setLoadingProd(true);
-    setMsg("");
-    try {
-      const data = await apiFetch(ENDPOINTS.PRODUCTS_LIST, { method: "GET" });
-      const items = data?.products ?? data?.items ?? data?.rows ?? [];
-      setProducts(Array.isArray(items) ? items : []);
-    } catch (e) {
-      setMsg(e?.data?.error || e.message || "Failed to load products");
-      setProducts([]);
-    } finally {
-      setLoadingProd(false);
-    }
-  }, []);
+  const loadProducts = useCallback(
+    async (opts = {}) => {
+      const includeInactive =
+        typeof opts.includeInactive === "boolean"
+          ? opts.includeInactive
+          : showArchivedProducts;
 
-  const loadCreditsOpen = useCallback(async () => {
-    setLoadingCredits(true);
-    try {
-      const data = await apiFetch(ENDPOINTS.CREDITS_OPEN, { method: "GET" });
-      const items =
-        data?.credits ?? data?.openCredits ?? data?.items ?? data?.rows ?? [];
-      setOpenCredits(Array.isArray(items) ? items : []);
-    } catch {
-      setOpenCredits([]);
-    } finally {
-      setLoadingCredits(false);
-    }
-  }, []);
+      setLoadingProd(true);
+      setMsg("");
+      try {
+        const path = includeInactive
+          ? `${ENDPOINTS.PRODUCTS_LIST}?includeInactive=true`
+          : ENDPOINTS.PRODUCTS_LIST;
+
+        const data = await apiFetch(path, { method: "GET" });
+        const items = normalizeList(data, ["products", "pricing"]);
+        setProducts(items);
+      } catch (e) {
+        setMsg(e?.data?.error || e?.message || "Failed to load products");
+        setProducts([]);
+      } finally {
+        setLoadingProd(false);
+      }
+    },
+    [showArchivedProducts],
+  );
 
   const loadPayments = useCallback(async () => {
     setLoadingPayments(true);
     try {
       const data = await apiFetch(ENDPOINTS.PAYMENTS_LIST, { method: "GET" });
-      const items = data?.payments ?? data?.items ?? data?.rows ?? [];
-      setPayments(Array.isArray(items) ? items : []);
+      setPayments(normalizeList(data, ["payments"]));
     } catch (e) {
       setPayments([]);
       const text = e?.data?.error || e?.message || "";
       if (String(text).toLowerCase().includes("not found")) return;
-      setMsg(e?.data?.error || e.message || "Failed to load payments");
+      setMsg(e?.data?.error || e?.message || "Failed to load payments");
     } finally {
       setLoadingPayments(false);
     }
@@ -326,12 +352,12 @@ export default function ManagerPage() {
       const data = await apiFetch(ENDPOINTS.PAYMENTS_SUMMARY, {
         method: "GET",
       });
-      setPaymentsSummary(data?.summary || null);
+      setPaymentsSummary(data?.summary || data || null);
     } catch (e) {
       setPaymentsSummary(null);
       const text = e?.data?.error || e?.message || "";
       if (String(text).toLowerCase().includes("not found")) return;
-      setMsg(e?.data?.error || e.message || "Failed to load payments summary");
+      setMsg(e?.data?.error || e?.message || "Failed to load payments summary");
     } finally {
       setLoadingPaySummary(false);
     }
@@ -343,49 +369,18 @@ export default function ManagerPage() {
       const data = await apiFetch(ENDPOINTS.PAYMENTS_BREAKDOWN, {
         method: "GET",
       });
-      setPaymentsBreakdown(data?.breakdown || null);
+      setPaymentsBreakdown(data?.breakdown || data || null);
     } catch (e) {
       setPaymentsBreakdown(null);
       const text = e?.data?.error || e?.message || "";
       if (String(text).toLowerCase().includes("not found")) return;
       setMsg(
-        e?.data?.error || e.message || "Failed to load payments breakdown",
+        e?.data?.error || e?.message || "Failed to load payments breakdown",
       );
     } finally {
       setLoadingPayBreakdown(false);
     }
   }, []);
-
-  const filteredPayments = useMemo(() => {
-    const qq = String(payQ || "")
-      .trim()
-      .toLowerCase();
-    const list = Array.isArray(payments) ? payments : [];
-    if (!qq) return list;
-
-    return list.filter((p) => {
-      const id = String(p?.id ?? "");
-      const saleId = String(p?.saleId ?? p?.sale_id ?? "");
-      const method = String(p?.method ?? "").toLowerCase();
-      const amount = String(p?.amount ?? "");
-      return (
-        id.includes(qq) ||
-        saleId.includes(qq) ||
-        method.includes(qq) ||
-        amount.includes(qq)
-      );
-    });
-  }, [payments, payQ]);
-
-  const breakdownAll = useMemo(() => {
-    const rows = paymentsBreakdown?.allTime || [];
-    return sumBreakdown(rows);
-  }, [paymentsBreakdown]);
-
-  const breakdownYesterday = useMemo(() => {
-    const rows = paymentsBreakdown?.yesterday || [];
-    return sumBreakdown(rows);
-  }, [paymentsBreakdown]);
 
   const loadArrivals = useCallback(async () => {
     setLoadingArrivals(true);
@@ -394,10 +389,9 @@ export default function ManagerPage() {
       const data = await apiFetch(ENDPOINTS.INVENTORY_ARRIVALS_LIST, {
         method: "GET",
       });
-      const list = data?.arrivals ?? data?.items ?? data?.rows ?? [];
-      setArrivals(Array.isArray(list) ? list : []);
+      setArrivals(normalizeList(data, ["arrivals"]));
     } catch (e) {
-      setMsg(e?.data?.error || e.message || "Failed to load arrivals");
+      setMsg(e?.data?.error || e?.message || "Failed to load arrivals");
       setArrivals([]);
     } finally {
       setLoadingArrivals(false);
@@ -408,18 +402,22 @@ export default function ManagerPage() {
     if (!isAuthorized) return;
 
     if (tab === "dashboard" || tab === "sales") loadSales();
+
     if (tab === "dashboard" || tab === "inventory") {
       loadInventory();
-      loadProducts();
+      // for inventory, we want products list too (active only by default)
+      loadProducts({ includeInactive: showArchivedProducts });
     }
+
     if (tab === "dashboard") {
       loadDashboard();
       loadPaymentsSummary();
       loadPayments();
-      loadPaymentsBreakdown(); // ✅ ADDED
+      loadPaymentsBreakdown();
     }
 
     if (tab === "arrivals") loadArrivals();
+
     if (tab === "payments") {
       loadPayments();
       loadPaymentsSummary();
@@ -432,12 +430,19 @@ export default function ManagerPage() {
     loadSales,
     loadInventory,
     loadProducts,
+    showArchivedProducts,
     loadPaymentsSummary,
     loadPayments,
     loadPaymentsBreakdown,
-    loadCreditsOpen,
     loadArrivals,
   ]);
+
+  // When toggle changes while on inventory tab, reload products accordingly
+  useEffect(() => {
+    if (!isAuthorized) return;
+    if (tab !== "inventory") return;
+    loadProducts({ includeInactive: showArchivedProducts });
+  }, [isAuthorized, tab, showArchivedProducts, loadProducts]);
 
   // ---------------- CANCEL SALE ----------------
   function openCancel(saleId) {
@@ -448,7 +453,7 @@ export default function ManagerPage() {
   }
 
   function canCancelSale(s) {
-    const st = String(s?.status || "");
+    const st = String(s?.status || "").toUpperCase();
     return st !== "COMPLETED";
   }
 
@@ -472,20 +477,70 @@ export default function ManagerPage() {
 
       await loadSales();
     } catch (e) {
-      setMsg(e?.data?.error || e.message || "Cancel failed");
+      setMsg(e?.data?.error || e?.message || "Cancel failed");
     } finally {
       setCanceling(false);
     }
   }
 
-  // ---------------- DERIVED KPI ----------------
-  const salesSorted = useMemo(
-    () =>
-      (sales || [])
-        .slice()
-        .sort((a, b) => Number(b.id || 0) - Number(a.id || 0)),
-    [sales],
-  );
+  // ---------------- ARCHIVE / RESTORE ----------------
+  function openArchiveProduct(prod) {
+    if (!prod?.id) return;
+    setArchMode("archive");
+    setArchProduct(prod);
+    setArchReason("");
+    setArchOpen(true);
+    setMsg("");
+  }
+
+  function openRestoreProduct(prod) {
+    if (!prod?.id) return;
+    setArchMode("restore");
+    setArchProduct(prod);
+    setArchReason("");
+    setArchOpen(true);
+    setMsg("");
+  }
+
+  async function confirmArchiveRestore() {
+    const pid = archProduct?.id;
+    if (!pid) return;
+
+    setArchBusy(true);
+    setMsg("");
+    try {
+      if (archMode === "archive") {
+        await apiFetch(ENDPOINTS.PRODUCT_ARCHIVE(pid), {
+          method: "PATCH",
+          // backend might accept reason; if it doesn't, it will still work if it ignores body
+          body: archReason?.trim() ? { reason: archReason.trim() } : undefined,
+        });
+        setMsg(`✅ Archived product #${pid}`);
+      } else {
+        await apiFetch(ENDPOINTS.PRODUCT_RESTORE(pid), { method: "PATCH" });
+        setMsg(`✅ Restored product #${pid}`);
+      }
+
+      setArchOpen(false);
+      setArchProduct(null);
+      setArchReason("");
+
+      await Promise.all([
+        loadProducts({ includeInactive: showArchivedProducts }),
+        loadInventory(),
+      ]);
+    } catch (e) {
+      setMsg(e?.data?.error || e?.message || "Action failed");
+    } finally {
+      setArchBusy(false);
+    }
+  }
+
+  // ---------------- DERIVED ----------------
+  const salesSorted = useMemo(() => {
+    const list = Array.isArray(sales) ? sales : [];
+    return list.slice().sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0));
+  }, [sales]);
 
   const filteredSales = useMemo(() => {
     const qq = String(salesQ || "")
@@ -494,10 +549,14 @@ export default function ManagerPage() {
     if (!qq) return salesSorted;
 
     return salesSorted.filter((s) => {
-      const id = String(s.id ?? "");
-      const status = String(s.status ?? "").toLowerCase();
-      const name = String(s.customerName ?? "").toLowerCase();
-      const phone = String(s.customerPhone ?? "").toLowerCase();
+      const id = String(s?.id ?? "");
+      const status = String(s?.status ?? "").toLowerCase();
+      const name = String(
+        s?.customerName ?? s?.customer_name ?? "",
+      ).toLowerCase();
+      const phone = String(
+        s?.customerPhone ?? s?.customer_phone ?? "",
+      ).toLowerCase();
       return (
         id.includes(qq) ||
         status.includes(qq) ||
@@ -515,28 +574,96 @@ export default function ManagerPage() {
     if (!qq) return list;
 
     return list.filter((p) => {
-      const name = String(p?.name || p?.productName || "").toLowerCase();
+      const name = String(
+        p?.name || p?.productName || p?.product_name || "",
+      ).toLowerCase();
       const sku = String(p?.sku || "").toLowerCase();
       return name.includes(qq) || sku.includes(qq);
     });
   }, [inventory, invQ]);
 
-  function priceFor(invRow) {
-    const pid = invRow?.productId ?? invRow?.id;
-    const sku = invRow?.sku;
-    const prod =
-      products.find((x) => String(x.id) === String(pid)) ||
-      (sku ? products.find((x) => String(x.sku) === String(sku)) : null);
+  const filteredProducts = useMemo(() => {
+    const list = Array.isArray(products) ? products : [];
+    const qq = String(prodQ || "")
+      .trim()
+      .toLowerCase();
 
-    const price = prod?.sellingPrice ?? prod?.price ?? prod?.unitPrice ?? null;
+    const byToggle = showArchivedProducts
+      ? list.filter((p) => isArchivedProduct(p))
+      : list.filter((p) => !isArchivedProduct(p));
+
+    if (!qq) return byToggle;
+
+    return byToggle.filter((p) => {
+      const id = String(p?.id ?? "");
+      const name = String(
+        p?.name || p?.productName || p?.title || "",
+      ).toLowerCase();
+      const sku = String(p?.sku || "").toLowerCase();
+      return id.includes(qq) || name.includes(qq) || sku.includes(qq);
+    });
+  }, [products, prodQ, showArchivedProducts]);
+
+  function priceFor(invRow) {
+    const pid = invRow?.productId ?? invRow?.product_id ?? invRow?.id;
+    const sku = invRow?.sku;
+
+    const prod =
+      (pid != null
+        ? (Array.isArray(products) ? products : []).find(
+            (x) => String(x?.id) === String(pid),
+          )
+        : null) ||
+      (sku
+        ? (Array.isArray(products) ? products : []).find(
+            (x) => String(x?.sku) === String(sku),
+          )
+        : null);
+
+    const price =
+      prod?.sellingPrice ??
+      prod?.selling_price ??
+      prod?.price ??
+      prod?.unitPrice ??
+      prod?.unit_price ??
+      null;
+
     return price == null ? "-" : money(price);
   }
 
-  // ✅ Breakdown mapping for "today"
-  const breakdownTodayTotals = useMemo(() => {
-    const rows = paymentsBreakdown?.today || [];
-    return sumBreakdown(rows);
-  }, [paymentsBreakdown]);
+  const filteredPayments = useMemo(() => {
+    const qq = String(payQ || "")
+      .trim()
+      .toLowerCase();
+    const list = Array.isArray(payments) ? payments : [];
+    if (!qq) return list;
+
+    return list.filter((p) => {
+      const id = String(p?.id ?? "");
+      const saleId = String(p?.saleId ?? p?.sale_id ?? "");
+      const method = String(p?.method ?? "").toLowerCase();
+      const amount = String(p?.amount ?? "");
+      return (
+        id.includes(qq) ||
+        saleId.includes(qq) ||
+        method.includes(qq) ||
+        amount.includes(qq)
+      );
+    });
+  }, [payments, payQ]);
+
+  const breakdownTodayTotals = useMemo(
+    () => sumBreakdown(paymentsBreakdown?.today || []),
+    [paymentsBreakdown],
+  );
+  const breakdownYesterday = useMemo(
+    () => sumBreakdown(paymentsBreakdown?.yesterday || []),
+    [paymentsBreakdown],
+  );
+  const breakdownAll = useMemo(
+    () => sumBreakdown(paymentsBreakdown?.allTime || []),
+    [paymentsBreakdown],
+  );
 
   if (!isAuthorized) {
     return <div className="p-6 text-sm text-gray-600">Redirecting...</div>;
@@ -616,15 +743,25 @@ export default function ManagerPage() {
                 Promise.all([
                   loadSales(),
                   loadInventory(),
-                  loadProducts(),
+                  loadProducts({ includeInactive: showArchivedProducts }),
                   loadPaymentsSummary(),
                   loadPayments(),
                   loadPaymentsBreakdown(),
+                  loadDashboard(),
                 ]);
               } else if (tab === "sales") loadSales();
               else if (tab === "inventory")
-                Promise.all([loadInventory(), loadProducts()]);
+                Promise.all([
+                  loadInventory(),
+                  loadProducts({ includeInactive: showArchivedProducts }),
+                ]);
               else if (tab === "arrivals") loadArrivals();
+              else if (tab === "payments")
+                Promise.all([
+                  loadPayments(),
+                  loadPaymentsSummary(),
+                  loadPaymentsBreakdown(),
+                ]);
             }}
             className="ml-auto px-4 py-2 rounded-lg bg-black text-white"
           >
@@ -632,6 +769,7 @@ export default function ManagerPage() {
           </button>
         </div>
 
+        {/* DASHBOARD */}
         {tab === "dashboard" ? (
           <div className="mt-6 space-y-4">
             {dashLoading ? (
@@ -644,88 +782,26 @@ export default function ManagerPage() {
               </div>
             ) : (
               <>
-                {/* ✅ Widget 2: Today payment mix (counts + totals + % share) */}
                 <TodayMixWidget
                   breakdown={dash?.payments?.breakdownToday || []}
                 />
 
-                {/* ✅ Widget 3: Low stock alerts */}
                 <LowStockWidget
                   lowStock={dash?.inventory?.lowStock || []}
                   threshold={dash?.inventory?.lowStockThreshold ?? 5}
                   products={products}
                 />
 
-                {/* ✅ Widget 4: Stuck pipeline */}
                 <StuckSalesWidget
                   stuck={dash?.sales?.stuck || []}
                   rule={dash?.sales?.stuckRule}
                 />
-                {/* ✅ Widget 1: Last 10 payments */}
-                <div className="bg-white rounded-xl shadow overflow-hidden">
-                  <div className="p-4 border-b flex items-center justify-between">
-                    <div>
-                      <div className="font-semibold">Last 10 payments</div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        Quick sanity check without opening Payments tab.
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() =>
-                        Promise.all([loadDashboard(), loadProducts()])
-                      }
-                      className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
-                    >
-                      Refresh
-                    </button>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 text-gray-600">
-                        <tr>
-                          <th className="text-left p-3">ID</th>
-                          <th className="text-left p-3">Sale</th>
-                          <th className="text-right p-3">Amount</th>
-                          <th className="text-left p-3">Method</th>
-                          <th className="text-left p-3">Time</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(dash?.payments?.last10 || []).map((p, idx) => (
-                          <tr key={p?.id || idx} className="border-t">
-                            <td className="p-3 font-medium">{p?.id ?? "-"}</td>
-                            <td className="p-3">#{p?.saleId ?? "-"}</td>
-                            <td className="p-3 text-right">
-                              {money(p?.amount ?? 0)}
-                            </td>
-                            <td className="p-3">{p?.method ?? "-"}</td>
-                            <td className="p-3">{fmt(p?.createdAt)}</td>
-                          </tr>
-                        ))}
-
-                        {(dash?.payments?.last10 || []).length === 0 ? (
-                          <tr>
-                            <td
-                              colSpan={5}
-                              className="p-4 text-sm text-gray-600"
-                            >
-                              No payments yet.
-                            </td>
-                          </tr>
-                        ) : null}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
               </>
             )}
           </div>
         ) : null}
 
-        {/* --- the rest of your tabs below are unchanged --- */}
-
+        {/* SALES */}
         {tab === "sales" ? (
           <div className="mt-6 bg-white rounded-xl shadow overflow-hidden">
             <div className="p-4 border-b">
@@ -765,15 +841,18 @@ export default function ManagerPage() {
                         <td className="p-3 font-medium">{s.id}</td>
                         <td className="p-3">{s.status}</td>
                         <td className="p-3 text-right">
-                          {money(s.totalAmount)}
+                          {money(s.totalAmount ?? s.total ?? 0)}
                         </td>
                         <td className="p-3">
-                          {(s.customerName || "").trim() ? s.customerName : "-"}
+                          {(s.customerName || s.customer_name || "").trim() ||
+                            "-"}
                           <div className="text-xs text-gray-500">
-                            {s.customerPhone || ""}
+                            {s.customerPhone || s.customer_phone || ""}
                           </div>
                         </td>
-                        <td className="p-3">{fmt(s.createdAt)}</td>
+                        <td className="p-3">
+                          {fmt(s.createdAt || s.created_at)}
+                        </td>
                         <td className="p-3 text-right">
                           <button
                             disabled={!canCancelSale(s)}
@@ -804,67 +883,195 @@ export default function ManagerPage() {
           </div>
         ) : null}
 
+        {/* INVENTORY (qty) + PRODUCTS (archive/restore) */}
         {tab === "inventory" ? (
-          <div className="mt-6 bg-white rounded-xl shadow overflow-hidden">
-            <div className="p-4 border-b">
-              <div className="font-semibold">Inventory</div>
-              <div className="text-xs text-gray-500 mt-1">
-                Qty from GET /inventory; selling price joined from GET
-                /products.
+          <div className="mt-6 space-y-4">
+            {/* Inventory list stays exactly for qty */}
+            <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="p-4 border-b">
+                <div className="font-semibold">Inventory (Qty)</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Qty from GET /inventory; selling price joined from GET
+                  /products.
+                </div>
               </div>
-            </div>
 
-            <div className="p-3 border-b">
-              <input
-                className="w-full border rounded-lg px-3 py-2 text-sm"
-                placeholder="Search by name or SKU"
-                value={invQ}
-                onChange={(e) => setInvQ(e.target.value)}
-              />
-            </div>
+              <div className="p-3 border-b">
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  placeholder="Search inventory by name or SKU"
+                  value={invQ}
+                  onChange={(e) => setInvQ(e.target.value)}
+                />
+              </div>
 
-            {loadingInv || loadingProd ? (
-              <div className="p-4 text-sm text-gray-600">Loading...</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-600">
-                    <tr>
-                      <th className="text-left p-3">ID</th>
-                      <th className="text-left p-3">Name</th>
-                      <th className="text-left p-3">SKU</th>
-                      <th className="text-right p-3">On hand</th>
-                      <th className="text-right p-3">Selling</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredInventory.map((p, idx) => {
-                      const pid = p.productId ?? p.id ?? "-";
-                      return (
-                        <tr key={p.id || `${pid}-${idx}`} className="border-t">
-                          <td className="p-3 font-medium">{pid}</td>
-                          <td className="p-3">
-                            {p.productName || p.name || "-"}
-                          </td>
-                          <td className="p-3 text-gray-600">{p.sku || "-"}</td>
-                          <td className="p-3 text-right">
-                            {p.qtyOnHand ?? p.qty ?? p.quantity ?? 0}
-                          </td>
-                          <td className="p-3 text-right">{priceFor(p)}</td>
-                        </tr>
-                      );
-                    })}
-                    {filteredInventory.length === 0 ? (
+              {loadingInv || loadingProd ? (
+                <div className="p-4 text-sm text-gray-600">Loading...</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
                       <tr>
-                        <td colSpan={5} className="p-4 text-sm text-gray-600">
-                          No inventory items.
-                        </td>
+                        <th className="text-left p-3">ID</th>
+                        <th className="text-left p-3">Name</th>
+                        <th className="text-left p-3">SKU</th>
+                        <th className="text-right p-3">On hand</th>
+                        <th className="text-right p-3">Selling</th>
                       </tr>
-                    ) : null}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {filteredInventory.map((p, idx) => {
+                        const pid = p.productId ?? p.product_id ?? p.id ?? "-";
+                        return (
+                          <tr
+                            key={p.id || `${pid}-${idx}`}
+                            className="border-t"
+                          >
+                            <td className="p-3 font-medium">{String(pid)}</td>
+                            <td className="p-3">
+                              {p.productName || p.product_name || p.name || "-"}
+                            </td>
+                            <td className="p-3 text-gray-600">
+                              {p.sku || "-"}
+                            </td>
+                            <td className="p-3 text-right">
+                              {p.qtyOnHand ??
+                                p.qty_on_hand ??
+                                p.qty ??
+                                p.quantity ??
+                                0}
+                            </td>
+                            <td className="p-3 text-right">{priceFor(p)}</td>
+                          </tr>
+                        );
+                      })}
+                      {filteredInventory.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-4 text-sm text-gray-600">
+                            No inventory items.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Products list is where archived products live */}
+            <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="p-4 border-b flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="font-semibold">
+                    Products ({showArchivedProducts ? "Archived" : "Active"})
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    This is where you archive/restore products.
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={showArchivedProducts}
+                      onChange={(e) =>
+                        setShowArchivedProducts(e.target.checked)
+                      }
+                    />
+                    Show archived
+                  </label>
+
+                  <button
+                    onClick={() =>
+                      loadProducts({ includeInactive: showArchivedProducts })
+                    }
+                    className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
+                  >
+                    Reload
+                  </button>
+                </div>
               </div>
-            )}
+
+              <div className="p-3 border-b">
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  placeholder="Search products by id / name / sku"
+                  value={prodQ}
+                  onChange={(e) => setProdQ(e.target.value)}
+                />
+              </div>
+
+              {loadingProd ? (
+                <div className="p-4 text-sm text-gray-600">Loading...</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        <th className="text-left p-3">ID</th>
+                        <th className="text-left p-3">Name</th>
+                        <th className="text-left p-3">SKU</th>
+                        <th className="text-right p-3">Selling</th>
+                        <th className="text-right p-3">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredProducts.map((p) => {
+                        const archived = isArchivedProduct(p);
+                        const selling =
+                          p?.sellingPrice ??
+                          p?.selling_price ??
+                          p?.price ??
+                          p?.unitPrice ??
+                          p?.unit_price ??
+                          null;
+
+                        return (
+                          <tr key={p?.id} className="border-t">
+                            <td className="p-3 font-medium">{p?.id ?? "-"}</td>
+                            <td className="p-3">
+                              {p?.name || p?.productName || p?.title || "-"}
+                            </td>
+                            <td className="p-3 text-gray-600">
+                              {p?.sku || "-"}
+                            </td>
+                            <td className="p-3 text-right">
+                              {selling == null ? "-" : money(selling)}
+                            </td>
+                            <td className="p-3 text-right">
+                              {archived ? (
+                                <button
+                                  onClick={() => openRestoreProduct(p)}
+                                  className="px-3 py-1.5 rounded-lg text-xs border hover:bg-gray-50"
+                                >
+                                  Restore
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => openArchiveProduct(p)}
+                                  className="px-3 py-1.5 rounded-lg text-xs border hover:bg-gray-50"
+                                >
+                                  Archive
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+
+                      {filteredProducts.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-4 text-sm text-gray-600">
+                            No products in this view.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         ) : null}
 
@@ -950,7 +1157,6 @@ export default function ManagerPage() {
 
         {tab === "payments" ? (
           <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* LEFT: Payments list */}
             <div className="bg-white rounded-xl shadow overflow-hidden">
               <div className="p-4 border-b flex items-center justify-between">
                 <div>
@@ -1010,7 +1216,6 @@ export default function ManagerPage() {
                           </td>
                         </tr>
                       ))}
-
                       {filteredPayments.length === 0 ? (
                         <tr>
                           <td colSpan={5} className="p-4 text-sm text-gray-600">
@@ -1024,7 +1229,6 @@ export default function ManagerPage() {
               )}
             </div>
 
-            {/* RIGHT: Summary + breakdown */}
             <div className="bg-white rounded-xl shadow p-4 space-y-4">
               <div>
                 <div className="font-semibold">Summary</div>
@@ -1037,24 +1241,27 @@ export default function ManagerPage() {
                 <Card
                   label="Today"
                   value={
-                    paymentsSummary?.today?.count ??
-                    (loadingPaySummary ? "…" : 0)
+                    loadingPaySummary
+                      ? "…"
+                      : (paymentsSummary?.today?.count ?? 0)
                   }
                   sub={`Total: ${money(paymentsSummary?.today?.total ?? 0)}`}
                 />
                 <Card
                   label="Yesterday"
                   value={
-                    paymentsSummary?.yesterday?.count ??
-                    (loadingPaySummary ? "…" : 0)
+                    loadingPaySummary
+                      ? "…"
+                      : (paymentsSummary?.yesterday?.count ?? 0)
                   }
                   sub={`Total: ${money(paymentsSummary?.yesterday?.total ?? 0)}`}
                 />
                 <Card
                   label="All time"
                   value={
-                    paymentsSummary?.allTime?.count ??
-                    (loadingPaySummary ? "…" : 0)
+                    loadingPaySummary
+                      ? "…"
+                      : (paymentsSummary?.allTime?.count ?? 0)
                   }
                   sub={`Total: ${money(paymentsSummary?.allTime?.total ?? 0)}`}
                 />
@@ -1339,6 +1546,7 @@ export default function ManagerPage() {
         ) : null}
       </div>
 
+      {/* CANCEL SALE MODAL */}
       {cancelOpen ? (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow max-w-md w-full p-4">
@@ -1375,6 +1583,60 @@ export default function ManagerPage() {
                 disabled={canceling}
               >
                 {canceling ? "Cancelling..." : "Confirm cancel"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ARCHIVE / RESTORE MODAL */}
+      {archOpen ? (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow max-w-md w-full p-4">
+            <div className="font-semibold">
+              {archMode === "archive" ? "Archive" : "Restore"} product #
+              {archProduct?.id}
+            </div>
+
+            {archMode === "archive" ? (
+              <div className="mt-3">
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  placeholder="Reason (optional)"
+                  value={archReason}
+                  onChange={(e) => setArchReason(e.target.value)}
+                />
+              </div>
+            ) : null}
+
+            <div className="mt-4 flex gap-2 justify-end">
+              <button
+                onClick={() => {
+                  setArchOpen(false);
+                  setArchProduct(null);
+                  setArchReason("");
+                }}
+                className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
+                disabled={archBusy}
+              >
+                Close
+              </button>
+
+              <button
+                onClick={confirmArchiveRestore}
+                className={
+                  "px-4 py-2 rounded-lg text-white text-sm " +
+                  (archMode === "archive"
+                    ? "bg-black hover:bg-gray-800"
+                    : "bg-green-600 hover:bg-green-700")
+                }
+                disabled={archBusy}
+              >
+                {archBusy
+                  ? "Working..."
+                  : archMode === "archive"
+                    ? "Confirm archive"
+                    : "Confirm restore"}
               </button>
             </div>
           </div>
@@ -1505,7 +1767,7 @@ function LowStockWidget({ lowStock, threshold, products }) {
                   </div>
                 </td>
                 <td className="p-3 text-right font-semibold">
-                  {Number(r?.qtyOnHand ?? 0)}
+                  {Number(r?.qtyOnHand ?? r?.qty_on_hand ?? 0)}
                 </td>
               </tr>
             ))}

@@ -53,10 +53,7 @@ export default function StoreKeeperPage() {
   const [pSku, setPSku] = useState("");
   const [pUnit, setPUnit] = useState("pcs");
   const [pNotes, setPNotes] = useState("");
-
-  // ✅ NEW: allow entering qty at creation time (creates arrival automatically)
-  const [pInitialQty, setPInitialQty] = useState("");
-  const [pInitialNotes, setPInitialNotes] = useState("");
+  const [pInitialQty, setPInitialQty] = useState(""); // ✅ optional initial stock
   const [creatingProduct, setCreatingProduct] = useState(false);
 
   // Arrivals form
@@ -66,11 +63,13 @@ export default function StoreKeeperPage() {
   const [arrFiles, setArrFiles] = useState([]);
   const [arrSubmitting, setArrSubmitting] = useState(false);
 
-  // Adjustment request form + list
+  // Adjustment request form + list (this DOES NOT change stock yet — it requests approval)
   const [adjProductId, setAdjProductId] = useState("");
-  const [adjQtyChange, setAdjQtyChange] = useState("");
+  const [adjDirection, setAdjDirection] = useState("ADD"); // ADD | REMOVE
+  const [adjQtyAbs, setAdjQtyAbs] = useState(""); // user types positive number here
   const [adjReason, setAdjReason] = useState("");
   const [adjLoading, setAdjLoading] = useState(false);
+
   const [myAdjRequests, setMyAdjRequests] = useState([]);
   const [myAdjLoading, setMyAdjLoading] = useState(false);
 
@@ -182,6 +181,7 @@ export default function StoreKeeperPage() {
     setSalesLoading(true);
     setMsg("");
     try {
+      // We filter by status via query if your backend supports it; if not, we still filter client-side.
       const qs =
         salesStatusFilter && salesStatusFilter !== "ALL"
           ? `?status=${encodeURIComponent(salesStatusFilter)}`
@@ -297,19 +297,30 @@ export default function StoreKeeperPage() {
   // ---------------- ACTIONS ----------------
   async function createProduct(e) {
     e.preventDefault();
+    if (creatingProduct) return;
+
     setMsg("");
 
-    if (creatingProduct) return; // ✅ block double clicks / multi submit
-    if (!pName.trim()) return setMsg("Enter product name.");
+    const name = String(pName || "").trim();
+    if (!name) return setMsg("Enter product name.");
+
+    const initialQty = Number(pInitialQty);
+    if (
+      pInitialQty !== "" &&
+      (!Number.isFinite(initialQty) || initialQty < 0)
+    ) {
+      return setMsg("Initial qty must be a valid number (0 or more).");
+    }
 
     setCreatingProduct(true);
 
     try {
       const payload = {
-        name: pName.trim(),
+        name,
         sku: pSku.trim() || undefined,
         unit: pUnit.trim() || "pcs",
         notes: pNotes.trim() || undefined,
+        // storekeeper does not set pricing in Phase 1
         sellingPrice: 0,
         costPrice: 0,
       };
@@ -321,35 +332,29 @@ export default function StoreKeeperPage() {
 
       const createdId = data?.product?.id;
 
-      // ✅ If user typed initial qty, auto-create an arrival for that product.
-      const qty = Number(pInitialQty);
-      if (createdId && Number.isFinite(qty) && qty > 0) {
+      // ✅ If user provided initial qty, record it as an arrival (real-world: stock-in event)
+      if (createdId && Number.isFinite(initialQty) && initialQty > 0) {
         await apiFetch(ENDPOINTS.INVENTORY_ARRIVALS_CREATE, {
           method: "POST",
           body: {
             productId: Number(createdId),
-            qtyReceived: qty,
-            notes: pInitialNotes
-              ? String(pInitialNotes).slice(0, 200)
-              : undefined,
+            qtyReceived: initialQty,
+            notes: "Initial stock",
             documentUrls: [],
           },
         });
       }
 
       setMsg("✅ Product created");
-
       setPName("");
       setPSku("");
       setPUnit("pcs");
       setPNotes("");
       setPInitialQty("");
-      setPInitialNotes("");
 
       await loadProducts();
       await loadInventory();
 
-      // Optional: preselect for arrivals tab
       if (createdId) setArrProductId(String(createdId));
     } catch (e2) {
       setMsg(e2?.data?.error || e2.message || "Create product failed");
@@ -406,11 +411,14 @@ export default function StoreKeeperPage() {
     setMsg("");
 
     const pid = Number(adjProductId);
-    const qtyChange = Number(adjQtyChange);
+    const qtyAbs = Number(adjQtyAbs);
 
     if (!pid) return setMsg("Select a product.");
-    if (!Number.isFinite(qtyChange) || qtyChange === 0)
-      return setMsg("qtyChange must be a non-zero number (e.g. -3 or 5).");
+    if (!Number.isFinite(qtyAbs) || qtyAbs <= 0)
+      return setMsg("Enter a valid quantity (example: 3).");
+
+    const signedQtyChange = adjDirection === "REMOVE" ? -qtyAbs : qtyAbs;
+
     if (!String(adjReason || "").trim()) return setMsg("Enter a reason.");
 
     setAdjLoading(true);
@@ -419,14 +427,15 @@ export default function StoreKeeperPage() {
         method: "POST",
         body: {
           productId: pid,
-          qtyChange,
+          qtyChange: signedQtyChange,
           reason: String(adjReason).slice(0, 200),
         },
       });
 
-      setMsg("✅ Adjustment request created (waiting for manager approval)");
+      setMsg("✅ Adjustment request created. Waiting for manager approval.");
       setAdjProductId("");
-      setAdjQtyChange("");
+      setAdjDirection("ADD");
+      setAdjQtyAbs("");
       setAdjReason("");
 
       await loadMyAdjustRequests();
@@ -454,6 +463,7 @@ export default function StoreKeeperPage() {
       await loadSales();
       await loadInventory();
 
+      // refresh modal if open
       if (viewSale?.id === id) {
         await openSaleDetails(id);
       }
@@ -546,7 +556,8 @@ export default function StoreKeeperPage() {
               <div className="font-semibold">Create product (no prices)</div>
               <div className="text-xs text-gray-500 mt-1">
                 Phase 1 rule: storekeeper creates item info only. Manager sets
-                prices later.
+                prices later. You may optionally record an <b>initial stock</b>{" "}
+                as an arrival event.
               </div>
 
               <form onSubmit={createProduct} className="mt-4 grid gap-3">
@@ -563,20 +574,6 @@ export default function StoreKeeperPage() {
                   onChange={(e) => setPSku(e.target.value)}
                 />
 
-                {/* ✅ NEW: initial qty in same screen (creates arrival automatically) */}
-                <input
-                  className="border rounded-lg px-3 py-2"
-                  placeholder="Initial qty (optional, adds stock now)"
-                  value={pInitialQty}
-                  onChange={(e) => setPInitialQty(e.target.value)}
-                />
-                <input
-                  className="border rounded-lg px-3 py-2"
-                  placeholder="Initial stock notes (optional)"
-                  value={pInitialNotes}
-                  onChange={(e) => setPInitialNotes(e.target.value)}
-                />
-
                 <div className="grid grid-cols-2 gap-3">
                   <input
                     className="border rounded-lg px-3 py-2"
@@ -585,13 +582,19 @@ export default function StoreKeeperPage() {
                     onChange={(e) => setPUnit(e.target.value)}
                   />
                   <button
-                    type="submit"
                     disabled={creatingProduct}
                     className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
                   >
                     {creatingProduct ? "Creating..." : "Create"}
                   </button>
                 </div>
+
+                <input
+                  className="border rounded-lg px-3 py-2"
+                  placeholder="Initial qty (optional, example: 10)"
+                  value={pInitialQty}
+                  onChange={(e) => setPInitialQty(e.target.value)}
+                />
 
                 <input
                   className="border rounded-lg px-3 py-2"
@@ -602,8 +605,7 @@ export default function StoreKeeperPage() {
               </form>
 
               <div className="mt-4 text-xs text-gray-500">
-                If you don’t enter initial qty here, you can add qty later in{" "}
-                <b>Stock arrivals</b>.
+                You can also add stock later in <b>Stock arrivals</b>.
               </div>
             </div>
 
@@ -652,7 +654,9 @@ export default function StoreKeeperPage() {
                           <td className="p-3 font-medium">{p.id}</td>
                           <td className="p-3">{p.name}</td>
                           <td className="p-3">{p.sku || "-"}</td>
-                          <td className="p-3 text-right">{p.qtyOnHand ?? 0}</td>
+                          <td className="p-3 text-right">
+                            {p.qtyOnHand ?? p.qty_on_hand ?? 0}
+                          </td>
                         </tr>
                       ))}
                       {filteredInventory.length === 0 ? (
@@ -793,13 +797,18 @@ export default function StoreKeeperPage() {
             <div className="bg-white rounded-xl shadow p-4">
               <div className="font-semibold">Request inventory adjustment</div>
               <div className="text-xs text-gray-500 mt-1">
-                Inventory changes ONLY when manager approves the request.
+                Inventory changes ONLY after manager/admin approves the request.
               </div>
 
               <form
                 onSubmit={createAdjustRequest}
                 className="mt-4 grid gap-3 max-w-xl"
               >
+                <div className="text-xs text-gray-600">
+                  This does <b>NOT</b> change stock immediately. It creates a
+                  request for manager/admin approval.
+                </div>
+
                 <select
                   className="border rounded-lg px-3 py-2"
                   value={adjProductId}
@@ -813,16 +822,61 @@ export default function StoreKeeperPage() {
                   ))}
                 </select>
 
-                <input
-                  className="border rounded-lg px-3 py-2"
-                  placeholder="qtyChange (e.g. -3 damaged, 5 found stock)"
-                  value={adjQtyChange}
-                  onChange={(e) => setAdjQtyChange(e.target.value)}
-                />
+                <div className="grid grid-cols-2 gap-3">
+                  <select
+                    className="border rounded-lg px-3 py-2"
+                    value={adjDirection}
+                    onChange={(e) => setAdjDirection(e.target.value)}
+                  >
+                    <option value="ADD">ADD stock (+)</option>
+                    <option value="REMOVE">REMOVE stock (-)</option>
+                  </select>
+
+                  <input
+                    className="border rounded-lg px-3 py-2"
+                    placeholder="Qty (example: 3)"
+                    value={adjQtyAbs}
+                    onChange={(e) => setAdjQtyAbs(e.target.value)}
+                  />
+                </div>
+
+                {/* Live preview */}
+                <div className="border rounded-lg p-3 bg-gray-50 text-sm">
+                  {(() => {
+                    const current = getQtyOnHandForProduct(
+                      inventory,
+                      adjProductId,
+                    );
+                    const qtyAbs = Number(adjQtyAbs);
+                    const signed = adjDirection === "REMOVE" ? -qtyAbs : qtyAbs;
+
+                    if (current === null) return <div>Current qty: -</div>;
+                    if (!Number.isFinite(qtyAbs) || qtyAbs <= 0)
+                      return (
+                        <div>
+                          Current qty: <b>{current}</b>
+                        </div>
+                      );
+
+                    const predicted = current + signed;
+                    return (
+                      <div>
+                        Current qty: <b>{current}</b> → After approval:{" "}
+                        <b>
+                          {predicted < 0 ? "❌ would be negative" : predicted}
+                        </b>
+                        <div className="text-xs text-gray-600 mt-1">
+                          Change requested:{" "}
+                          <b>{signed > 0 ? `+${signed}` : String(signed)}</b>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
 
                 <input
                   className="border rounded-lg px-3 py-2"
-                  placeholder="Reason"
+                  placeholder="Reason (example: damaged, found stock, recount)"
                   value={adjReason}
                   onChange={(e) => setAdjReason(e.target.value)}
                 />
@@ -831,7 +885,7 @@ export default function StoreKeeperPage() {
                   disabled={adjLoading}
                   className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
                 >
-                  {adjLoading ? "Saving..." : "Create request"}
+                  {adjLoading ? "Creating..." : "Create request"}
                 </button>
               </form>
             </div>
@@ -840,6 +894,9 @@ export default function StoreKeeperPage() {
               <div className="p-4 border-b flex items-center justify-between gap-3">
                 <div>
                   <div className="font-semibold">My adjustment requests</div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Pending = waiting for manager/admin decision.
+                  </div>
                 </div>
                 <button
                   onClick={loadMyAdjustRequests}
@@ -1079,7 +1136,19 @@ function safeDate(v) {
 function fmtMoney(n) {
   const x = Number(n ?? 0);
   if (!Number.isFinite(x)) return "0";
+  // RWF formatting (no cents)
   return Math.round(x).toLocaleString();
+}
+
+function getQtyOnHandForProduct(inventory, productId) {
+  const pid = Number(productId);
+  if (!pid) return null;
+  const row = (Array.isArray(inventory) ? inventory : []).find(
+    (r) => Number(r.id) === pid,
+  );
+  if (!row) return null;
+  const qty = Number(row.qtyOnHand ?? row.qty_on_hand ?? 0);
+  return Number.isFinite(qty) ? qty : 0;
 }
 
 function SaleModal({ open, sale, loading, onClose }) {

@@ -10,8 +10,8 @@ export async function apiFetch(path, options = {}) {
   // Ensure headers object exists
   opts.headers = { ...(opts.headers || {}) };
 
-  // Only set JSON headers if we actually have a body
-  const hasBody = "body" in opts;
+  // ✅ Only treat as "has body" when it's NOT undefined/null
+  const hasBody = opts.body !== undefined && opts.body !== null;
 
   if (hasBody) {
     // If body is a plain object, stringify it
@@ -22,6 +22,11 @@ export async function apiFetch(path, options = {}) {
     // Set JSON header unless we are sending FormData
     if (!(opts.body instanceof FormData)) {
       opts.headers["Content-Type"] = "application/json";
+    }
+  } else {
+    // ✅ If no body, make sure we don't accidentally send JSON content-type
+    if (opts.headers["Content-Type"] === "application/json") {
+      delete opts.headers["Content-Type"];
     }
   }
 
