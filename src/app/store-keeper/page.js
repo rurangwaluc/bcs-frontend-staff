@@ -54,6 +54,11 @@ export default function StoreKeeperPage() {
   const [pUnit, setPUnit] = useState("pcs");
   const [pNotes, setPNotes] = useState("");
 
+  // ✅ NEW: allow entering qty at creation time (creates arrival automatically)
+  const [pInitialQty, setPInitialQty] = useState("");
+  const [pInitialNotes, setPInitialNotes] = useState("");
+  const [creatingProduct, setCreatingProduct] = useState(false);
+
   // Arrivals form
   const [arrProductId, setArrProductId] = useState("");
   const [arrQty, setArrQty] = useState("");
@@ -177,7 +182,6 @@ export default function StoreKeeperPage() {
     setSalesLoading(true);
     setMsg("");
     try {
-      // We filter by status via query if your backend supports it; if not, we still filter client-side.
       const qs =
         salesStatusFilter && salesStatusFilter !== "ALL"
           ? `?status=${encodeURIComponent(salesStatusFilter)}`
@@ -295,7 +299,10 @@ export default function StoreKeeperPage() {
     e.preventDefault();
     setMsg("");
 
+    if (creatingProduct) return; // ✅ block double clicks / multi submit
     if (!pName.trim()) return setMsg("Enter product name.");
+
+    setCreatingProduct(true);
 
     try {
       const payload = {
@@ -312,19 +319,42 @@ export default function StoreKeeperPage() {
         body: payload,
       });
 
+      const createdId = data?.product?.id;
+
+      // ✅ If user typed initial qty, auto-create an arrival for that product.
+      const qty = Number(pInitialQty);
+      if (createdId && Number.isFinite(qty) && qty > 0) {
+        await apiFetch(ENDPOINTS.INVENTORY_ARRIVALS_CREATE, {
+          method: "POST",
+          body: {
+            productId: Number(createdId),
+            qtyReceived: qty,
+            notes: pInitialNotes
+              ? String(pInitialNotes).slice(0, 200)
+              : undefined,
+            documentUrls: [],
+          },
+        });
+      }
+
       setMsg("✅ Product created");
+
       setPName("");
       setPSku("");
       setPUnit("pcs");
       setPNotes("");
+      setPInitialQty("");
+      setPInitialNotes("");
 
       await loadProducts();
       await loadInventory();
 
-      const createdId = data?.product?.id;
+      // Optional: preselect for arrivals tab
       if (createdId) setArrProductId(String(createdId));
     } catch (e2) {
       setMsg(e2?.data?.error || e2.message || "Create product failed");
+    } finally {
+      setCreatingProduct(false);
     }
   }
 
@@ -424,7 +454,6 @@ export default function StoreKeeperPage() {
       await loadSales();
       await loadInventory();
 
-      // refresh modal if open
       if (viewSale?.id === id) {
         await openSaleDetails(id);
       }
@@ -533,6 +562,21 @@ export default function StoreKeeperPage() {
                   value={pSku}
                   onChange={(e) => setPSku(e.target.value)}
                 />
+
+                {/* ✅ NEW: initial qty in same screen (creates arrival automatically) */}
+                <input
+                  className="border rounded-lg px-3 py-2"
+                  placeholder="Initial qty (optional, adds stock now)"
+                  value={pInitialQty}
+                  onChange={(e) => setPInitialQty(e.target.value)}
+                />
+                <input
+                  className="border rounded-lg px-3 py-2"
+                  placeholder="Initial stock notes (optional)"
+                  value={pInitialNotes}
+                  onChange={(e) => setPInitialNotes(e.target.value)}
+                />
+
                 <div className="grid grid-cols-2 gap-3">
                   <input
                     className="border rounded-lg px-3 py-2"
@@ -540,10 +584,15 @@ export default function StoreKeeperPage() {
                     value={pUnit}
                     onChange={(e) => setPUnit(e.target.value)}
                   />
-                  <button className="px-4 py-2 rounded-lg bg-black text-white text-sm">
-                    Create
+                  <button
+                    type="submit"
+                    disabled={creatingProduct}
+                    className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
+                  >
+                    {creatingProduct ? "Creating..." : "Create"}
                   </button>
                 </div>
+
                 <input
                   className="border rounded-lg px-3 py-2"
                   placeholder="Notes (optional)"
@@ -553,8 +602,8 @@ export default function StoreKeeperPage() {
               </form>
 
               <div className="mt-4 text-xs text-gray-500">
-                After creating a product, go to <b>Stock arrivals</b> to add
-                qty.
+                If you don’t enter initial qty here, you can add qty later in{" "}
+                <b>Stock arrivals</b>.
               </div>
             </div>
 
@@ -1030,7 +1079,6 @@ function safeDate(v) {
 function fmtMoney(n) {
   const x = Number(n ?? 0);
   if (!Number.isFinite(x)) return "0";
-  // RWF formatting (no cents)
   return Math.round(x).toLocaleString();
 }
 

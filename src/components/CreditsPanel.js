@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import InternalNotesPanel from "./InternalNotesPanel";
 import { apiFetch } from "../lib/api";
 
 // ✅ Match backend DB statuses exactly
@@ -821,6 +822,22 @@ export default function CreditsPanel({
             <div className="p-4 text-sm text-gray-600">Select a credit.</div>
           )}
         </div>
+        {creditDetail?.id ? (
+          <InternalNotesPanel
+            title="Internal notes (Credit)"
+            entityType="credit"
+            entityId={creditDetail.id}
+            canCreate={
+              capabilities.canDecide ||
+              capabilities.canSettle ||
+              capabilities.canCreate
+            }
+          />
+        ) : (
+          <div className="text-sm text-gray-600">
+            Select a credit to view notes.
+          </div>
+        )}
       </div>
     </div>
   );

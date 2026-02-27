@@ -544,7 +544,7 @@ export default function AdminPage() {
             Evidence
           </Tab>
           <Tab active={tab === "users"} onClick={() => setTab("users")}>
-            Users
+            Staff
           </Tab>
           <Tab active={tab === "reports"} onClick={() => setTab("reports")}>
             Reports
