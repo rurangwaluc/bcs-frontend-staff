@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-
 import { apiFetch } from "../lib/api";
+import AsyncButton from "./AsyncButton";
 
 const ENDPOINTS = {
   LIST: "/inventory-adjust-requests",
@@ -10,33 +10,84 @@ const ENDPOINTS = {
   DECLINE: (id) => `/inventory-adjust-requests/${id}/decline`,
 };
 
-function fmt(v) {
-  if (!v) return "-";
+function cx(...classes) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function safeDate(v) {
+  if (!v) return "—";
   try {
-    return new Date(v).toLocaleString();
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return String(v);
+    return d.toLocaleString();
   } catch {
     return String(v);
   }
 }
 
-export default function InventoryAdjustRequestsPanel() {
+function Badge({ kind = "gray", children }) {
+  const cls =
+    kind === "green"
+      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+      : kind === "amber"
+        ? "bg-amber-50 text-amber-800 border-amber-200"
+        : kind === "red"
+          ? "bg-rose-50 text-rose-800 border-rose-200"
+          : "bg-slate-50 text-slate-700 border-slate-200";
+
+  return <span className={cx("inline-flex items-center rounded-xl border px-2.5 py-1 text-xs font-semibold", cls)}>{children}</span>;
+}
+
+function SkeletonCard() {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 animate-pulse">
+      <div className="h-4 w-56 bg-slate-200 rounded" />
+      <div className="mt-2 h-3 w-40 bg-slate-200 rounded" />
+      <div className="mt-3 h-3 w-full bg-slate-200 rounded" />
+      <div className="mt-3 h-8 w-40 bg-slate-200 rounded" />
+    </div>
+  );
+}
+
+function normalizeStatus(s) {
+  const x = String(s || "").toUpperCase();
+  if (x === "APPROVED") return { label: "Approved", kind: "green" };
+  if (x === "DECLINED") return { label: "Declined", kind: "red" };
+  return { label: "Pending", kind: "amber" };
+}
+
+function qtyLabel(n) {
+  const v = Number(n || 0);
+  if (!Number.isFinite(v)) return "0";
+  return v > 0 ? `+${v}` : `${v}`;
+}
+
+export default function InventoryAdjustRequestsPanel({ title = "Stock change requests" }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+
   const [msg, setMsg] = useState("");
+  const [msgKind, setMsgKind] = useState("info"); // info | success | danger
 
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("PENDING"); // ALL | PENDING | APPROVED | DECLINED
 
+  const [refreshState, setRefreshState] = useState("idle");
+  const [busyMap, setBusyMap] = useState({}); // { [id]: "loading"|"success"|... }
+
+  function toast(kind, text) {
+    setMsgKind(kind);
+    setMsg(text || "");
+  }
+
   const load = useCallback(async () => {
     setLoading(true);
-    setMsg("");
+    toast("info", "");
     try {
       const qs = new URLSearchParams();
       if (status !== "ALL") qs.set("status", status);
 
-      const data = await apiFetch(`${ENDPOINTS.LIST}?${qs.toString()}`, {
-        method: "GET",
-      });
+      const data = await apiFetch(`${ENDPOINTS.LIST}?${qs.toString()}`, { method: "GET" });
 
       const list =
         (Array.isArray(data?.requests) ? data.requests : null) ??
@@ -47,7 +98,7 @@ export default function InventoryAdjustRequestsPanel() {
       setRows(Array.isArray(list) ? list : []);
     } catch (e) {
       setRows([]);
-      setMsg(e?.data?.error || e?.message || "Failed to load requests");
+      toast("danger", e?.data?.error || e?.message || "Could not load requests.");
     } finally {
       setLoading(false);
     }
@@ -58,83 +109,91 @@ export default function InventoryAdjustRequestsPanel() {
   }, [load]);
 
   const filtered = useMemo(() => {
-    const qq = String(q || "")
-      .trim()
-      .toLowerCase();
+    const qq = String(q || "").trim().toLowerCase();
     if (!qq) return rows;
 
-    return rows.filter((r) => {
-      const id = String(r?.id ?? "");
-      const pid = String(r?.productId ?? "");
-      const name = String(r?.productName || "").toLowerCase();
+    return (rows || []).filter((r) => {
+      const name = String(r?.productName || r?.product_name || "").toLowerCase();
+      const sku = String(r?.sku || "").toLowerCase();
       const reason = String(r?.reason || "").toLowerCase();
       const st = String(r?.status || "").toLowerCase();
-      return (
-        id.includes(qq) ||
-        pid.includes(qq) ||
-        name.includes(qq) ||
-        reason.includes(qq) ||
-        st.includes(qq)
-      );
+      const who = String(r?.requestedByName || r?.requested_by_name || r?.requestedByEmail || "").toLowerCase();
+      return name.includes(qq) || sku.includes(qq) || reason.includes(qq) || st.includes(qq) || who.includes(qq);
     });
   }, [rows, q]);
 
-  async function act(id, decision) {
-    setMsg("");
+  async function onRefresh() {
+    setRefreshState("loading");
+    await load();
+    setRefreshState("success");
+    setTimeout(() => setRefreshState("idle"), 900);
+  }
+
+  async function act(row, decision) {
+    const id = row?.id;
+    if (id == null) return;
+
+    setBusyMap((m) => ({ ...m, [id]: "loading" }));
+    toast("info", "");
+
     try {
-      await apiFetch(
-        decision === "approve" ? ENDPOINTS.APPROVE(id) : ENDPOINTS.DECLINE(id),
-        { method: "POST" },
-      );
-      setMsg(`✅ Request #${id} ${decision}d`);
+      await apiFetch(decision === "approve" ? ENDPOINTS.APPROVE(id) : ENDPOINTS.DECLINE(id), { method: "POST" });
+
+      const product = row?.productName || "the item";
+      toast("success", decision === "approve" ? `Approved change for ${product}.` : `Declined change for ${product}.`);
+
+      setBusyMap((m) => ({ ...m, [id]: "success" }));
+      setTimeout(() => setBusyMap((m) => ({ ...m, [id]: "idle" })), 800);
+
       await load();
     } catch (e) {
-      setMsg(e?.data?.error || e?.message || "Action failed");
+      setBusyMap((m) => ({ ...m, [id]: "idle" }));
+      toast("danger", e?.data?.error || e?.message || "Action failed.");
     }
   }
 
+  const bannerStyle =
+    msgKind === "success"
+      ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+      : msgKind === "danger"
+        ? "bg-rose-50 text-rose-900 border-rose-200"
+        : "bg-slate-50 text-slate-800 border-slate-200";
+
   return (
-    <div className="bg-white rounded-xl shadow overflow-hidden">
-      <div className="p-4 border-b flex items-center justify-between gap-3">
-        <div>
-          <div className="font-semibold">Inventory adjustment requests</div>
-          <div className="text-xs text-gray-500 mt-1">
-            Manager approves/declines stock corrections.
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="p-4 border-b border-slate-200 flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-slate-900">{title}</div>
+          <div className="text-xs text-slate-600 mt-1">
+            Staff ask to correct stock numbers. You can approve or decline.
           </div>
         </div>
-        <button
-          onClick={load}
-          className="px-4 py-2 rounded-lg bg-black text-white text-sm"
-          disabled={loading}
-        >
-          {loading ? "Loading..." : "Refresh"}
-        </button>
+
+        <AsyncButton
+          state={refreshState}
+          text="Refresh"
+          loadingText="Loading…"
+          successText="Done"
+          onClick={onRefresh}
+          variant="secondary"
+        />
       </div>
 
-      {msg ? (
-        <div className="p-3 text-sm">
-          {msg.startsWith("✅") ? (
-            <div className="p-3 rounded-lg bg-green-50 text-green-800">
-              {msg}
-            </div>
-          ) : (
-            <div className="p-3 rounded-lg bg-red-50 text-red-700">{msg}</div>
-          )}
-        </div>
-      ) : null}
+      {msg ? <div className={cx("m-4 rounded-2xl border px-4 py-3 text-sm", bannerStyle)}>{msg}</div> : null}
 
-      <div className="p-3 border-b flex flex-col md:flex-row gap-2">
+      <div className="p-4 border-b border-slate-200 flex flex-col md:flex-row gap-2">
         <input
-          className="flex-1 border rounded-lg px-3 py-2 text-sm"
-          placeholder="Search id/product/reason/status"
+          className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+          placeholder="Search: item name, SKU, reason, staff…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
 
         <select
-          className="border rounded-lg px-3 py-2 text-sm"
+          className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-slate-300"
           value={status}
           onChange={(e) => setStatus(e.target.value)}
+          aria-label="Filter by status"
         >
           <option value="ALL">All</option>
           <option value="PENDING">Pending</option>
@@ -143,84 +202,97 @@ export default function InventoryAdjustRequestsPanel() {
         </select>
       </div>
 
-      {loading ? (
-        <div className="p-4 text-sm text-gray-600">Loading...</div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-600">
-              <tr>
-                <th className="text-left p-3">ID</th>
-                <th className="text-left p-3">Product</th>
-                <th className="text-right p-3">Qty change</th>
-                <th className="text-left p-3">Reason</th>
-                <th className="text-left p-3">Status</th>
-                <th className="text-left p-3">Created</th>
-                <th className="text-right p-3">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r, idx) => {
-                const rid = r?.id ?? idx;
-                const st = String(r?.status || "");
-                return (
-                  <tr key={rid} className="border-t">
-                    <td className="p-3 font-medium">{r?.id ?? "-"}</td>
-                    <td className="p-3">
-                      <div className="font-medium">
-                        {r?.productName || `Product #${r?.productId ?? "-"}`}
+      <div className="p-4">
+        {loading ? (
+          <div className="grid gap-3">
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-sm font-semibold text-slate-900">No requests</div>
+            <div className="mt-1 text-xs text-slate-600">Nothing to approve right now.</div>
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {filtered.map((r) => {
+              const productName = r?.productName || r?.product_name || "Unknown item";
+              const sku = r?.sku || null;
+              const change = qtyLabel(r?.qtyChange ?? r?.qty_change ?? 0);
+              const reason = r?.reason || "—";
+              const createdAt = safeDate(r?.createdAt || r?.created_at);
+              const stRaw = r?.status;
+              const st = normalizeStatus(stRaw);
+
+              const who =
+                r?.requestedByName ||
+                r?.requested_by_name ||
+                r?.requestedByEmail ||
+                r?.requested_by_email ||
+                null;
+
+              const pending = String(stRaw || "").toUpperCase() === "PENDING";
+              const actState = busyMap?.[r?.id] || "idle";
+              const busy = actState === "loading";
+
+              return (
+                <div key={r?.id ?? `${productName}-${createdAt}`} className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-bold text-slate-900 truncate">{productName}</div>
+
+                      <div className="mt-1 text-xs text-slate-600">
+                        Change: <b>{change}</b>
+                        {sku ? (
+                          <>
+                            {" "}
+                            • SKU: <b>{sku}</b>
+                          </>
+                        ) : null}
                       </div>
-                      <div className="text-xs text-gray-500">
-                        ID: {r?.productId ?? "-"}
+
+                      <div className="mt-2 text-xs text-slate-700">
+                        <b>Reason:</b> {reason}
                       </div>
-                    </td>
-                    <td className="p-3 text-right">
-                      {Number(r?.qtyChange || 0)}
-                    </td>
-                    <td className="p-3">{r?.reason || "-"}</td>
-                    <td className="p-3 font-medium">{st || "-"}</td>
-                    <td className="p-3">{fmt(r?.createdAt)}</td>
-                    <td className="p-3 text-right">
-                      {st === "PENDING" ? (
-                        <div className="flex gap-2 justify-end">
-                          <button
-                            onClick={() => act(r.id, "approve")}
-                            className="px-3 py-1.5 rounded-lg bg-black text-white text-xs"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => act(r.id, "decline")}
-                            className="px-3 py-1.5 rounded-lg border text-xs hover:bg-gray-50"
-                          >
-                            Decline
-                          </button>
+
+                      <div className="mt-2 text-xs text-slate-500">
+                        {who ? `Requested by: ${who} • ` : ""}
+                        {createdAt}
+                      </div>
+                    </div>
+
+                    <div className="shrink-0 flex flex-col items-end gap-2">
+                      <Badge kind={st.kind}>{st.label}</Badge>
+
+                      {pending ? (
+                        <div className="flex gap-2">
+                          <AsyncButton
+                            state={actState}
+                            text="Approve"
+                            loadingText="Working…"
+                            successText="Approved"
+                            onClick={() => act(r, "approve")}
+                            disabled={busy}
+                          />
+                          <AsyncButton
+                            state={busy ? "loading" : "idle"}
+                            text="Decline"
+                            loadingText="Working…"
+                            successText="Done"
+                            variant="secondary"
+                            onClick={() => act(r, "decline")}
+                            disabled={busy}
+                          />
                         </div>
-                      ) : (
-                        <span className="text-gray-500 text-xs">—</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="p-4 text-sm text-gray-600">
-                    No requests found.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <div className="p-3 text-xs text-gray-500 border-t">
-        Backend routes expected:
-        <b className="mx-1">GET /inventory-adjust-requests</b>,
-        <b className="mx-1">POST /inventory-adjust-requests/:id/approve</b>,
-        <b className="mx-1">POST /inventory-adjust-requests/:id/decline</b>.
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

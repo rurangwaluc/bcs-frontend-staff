@@ -1,7 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+// frontend-staff/src/app/store-keeper/page.js
 
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import AsyncButton from "../../components/AsyncButton";
 import RoleBar from "../../components/RoleBar";
 import { apiFetch } from "../../lib/api";
 import { apiUpload } from "../../lib/apiUpload";
@@ -9,85 +12,571 @@ import { getMe } from "../../lib/auth";
 import { useRouter } from "next/navigation";
 
 /**
- * ✅ LOCKED BACKEND ENDPOINTS (only change here)
- *
- * Option B (NEW):
- * - Seller creates sale as DRAFT (POST /sales)
- * - Storekeeper fulfills sale (POST /sales/:id/fulfill)  ✅ must exist in backend
- * - Seller later finalizes (mark PAID/PENDING)
+ * Option B:
+ * - Seller creates DRAFT sale
+ * - Store keeper fulfills sale (POST /sales/:id/fulfill)
+ * - Seller finalizes later (mark PAID / CREDIT)
  */
 const ENDPOINTS = {
   PRODUCTS_LIST: "/products",
   PRODUCT_CREATE: "/products",
   INVENTORY_LIST: "/inventory",
-
   INVENTORY_ARRIVALS_CREATE: "/inventory/arrivals",
-
   INV_ADJ_REQ_CREATE: "/inventory-adjust-requests",
   INV_ADJ_REQ_MINE: "/inventory-adjust-requests/mine",
-
-  // ✅ Option B: sales
   SALES_LIST: "/sales",
   SALE_GET: (id) => `/sales/${id}`,
-  SALE_FULFILL: (id) => `/sales/${id}/fulfill`, // ✅ backend must implement
+  SALE_FULFILL: (id) => `/sales/${id}/fulfill`,
+
+  // notifications
+  NOTIFS_LIST: "/notifications",
+  NOTIFS_UNREAD: "/notifications/unread-count",
+  NOTIFS_READ_ONE: (id) => `/notifications/${id}/read`,
+  NOTIFS_READ_ALL: "/notifications/read-all",
+  NOTIFS_STREAM: "/notifications/stream",
 };
+
+const SECTIONS = [
+  { key: "dashboard", label: "Dashboard" },
+  { key: "inventory", label: "Inventory" },
+  { key: "arrivals", label: "Stock arrivals" },
+  { key: "adjustments", label: "Correction requests" },
+  { key: "sales", label: "Release stock" },
+];
+
+function cx(...classes) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function money(n) {
+  const x = Number(n ?? 0);
+  if (!Number.isFinite(x)) return "0";
+  return Math.round(x).toLocaleString();
+}
+
+function safeDate(v) {
+  if (!v) return "—";
+  try {
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return String(v);
+    return d.toLocaleString();
+  } catch {
+    return String(v);
+  }
+}
+
+function numOrNull(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function toStr(v) {
+  if (v === undefined || v === null) return "";
+  return String(v).trim();
+}
+
+function locationLabel(me) {
+  const loc = me?.location || null;
+
+  const name =
+    (loc?.name != null ? String(loc.name).trim() : "") ||
+    (me?.locationName != null ? String(me.locationName).trim() : "") ||
+    "";
+
+  const code =
+    (loc?.code != null ? String(loc.code).trim() : "") ||
+    (me?.locationCode != null ? String(me.locationCode).trim() : "") ||
+    "";
+
+  if (name && code) return `${name} (${code})`;
+  if (name) return name;
+  return "Store —";
+}
+
+/* ---------- UI atoms ---------- */
+
+function Skeleton({ className = "" }) {
+  return (
+    <div
+      className={cx("animate-pulse rounded-xl bg-slate-200/70", className)}
+    />
+  );
+}
+
+function PageSkeleton() {
+  return (
+    <div className="min-h-screen bg-slate-50 overflow-x-hidden">
+      <div className="mx-auto max-w-7xl px-4 sm:px-5 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <Skeleton className="h-6 w-44" />
+            <Skeleton className="mt-3 h-4 w-52" />
+            <div className="mt-6 grid gap-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          </div>
+
+          <div>
+            <Skeleton className="h-12 w-full rounded-2xl" />
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+              <Skeleton className="h-24 w-full rounded-2xl" />
+              <Skeleton className="h-24 w-full rounded-2xl" />
+              <Skeleton className="h-24 w-full rounded-2xl" />
+              <Skeleton className="h-24 w-full rounded-2xl" />
+            </div>
+            <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <Skeleton className="h-80 w-full rounded-2xl" />
+              <Skeleton className="h-80 w-full rounded-2xl" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Banner({ kind = "info", children }) {
+  const styles =
+    kind === "success"
+      ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+      : kind === "warn"
+        ? "bg-amber-50 text-amber-900 border-amber-200"
+        : kind === "danger"
+          ? "bg-rose-50 text-rose-900 border-rose-200"
+          : "bg-slate-50 text-slate-800 border-slate-200";
+
+  return (
+    <div className={cx("rounded-2xl border px-4 py-3 text-sm", styles)}>
+      {children}
+    </div>
+  );
+}
+
+function Card({ label, value, sub }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="text-xs font-semibold text-slate-600">{label}</div>
+      <div className="mt-1 text-2xl font-bold text-slate-900">{value}</div>
+      {sub ? <div className="mt-1 text-xs text-slate-600">{sub}</div> : null}
+    </div>
+  );
+}
+
+function Input({ className = "", ...props }) {
+  return (
+    <input
+      {...props}
+      className={cx(
+        "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none",
+        "focus:ring-2 focus:ring-slate-300",
+        className,
+      )}
+    />
+  );
+}
+
+function Select({ className = "", ...props }) {
+  return (
+    <select
+      {...props}
+      className={cx(
+        "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none",
+        "focus:ring-2 focus:ring-slate-300",
+        className,
+      )}
+    />
+  );
+}
+
+function SectionCard({ title, hint, right, children }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-4">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-slate-900">{title}</div>
+          {hint ? (
+            <div className="mt-1 text-xs text-slate-600">{hint}</div>
+          ) : null}
+        </div>
+        {right ? <div className="shrink-0">{right}</div> : null}
+      </div>
+      <div className="p-4">{children}</div>
+    </div>
+  );
+}
+
+function NavItem({ active, label, onClick, badge }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cx(
+        "w-full text-left rounded-xl px-3 py-2.5 text-sm font-semibold transition flex items-center justify-between gap-2",
+        active ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50",
+      )}
+    >
+      <span className="truncate">{label}</span>
+      {badge ? (
+        <span
+          className={cx(
+            "shrink-0 rounded-full px-2 py-0.5 text-xs font-bold",
+            active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-700",
+          )}
+        >
+          {badge}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+function PillTabs({ value, onChange, tabs = [] }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {tabs.map((t) => {
+        const active = value === t.value;
+        return (
+          <button
+            key={t.value}
+            type="button"
+            onClick={() => onChange(t.value)}
+            className={cx(
+              "rounded-full px-3 py-1.5 text-sm font-semibold border transition",
+              active
+                ? "bg-slate-900 text-white border-slate-900"
+                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50",
+            )}
+          >
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function PillTabsWithBadges({ value, onChange, tabs = [] }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {tabs.map((t) => {
+        const active = value === t.value;
+        const badge = Number(t.badge || 0);
+
+        return (
+          <button
+            key={t.value}
+            type="button"
+            onClick={() => onChange(t.value)}
+            className={cx(
+              "rounded-full px-3 py-1.5 text-sm font-bold border transition inline-flex items-center gap-2",
+              active
+                ? "bg-slate-900 text-white border-slate-900"
+                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50",
+            )}
+          >
+            <span>{t.label}</span>
+
+            {/* badge ALWAYS visible */}
+            <span
+              className={cx(
+                "rounded-full px-2 py-0.5 text-xs font-extrabold",
+                active
+                  ? "bg-white/20 text-white"
+                  : "bg-slate-100 text-slate-700",
+              )}
+            >
+              {badge}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function StatusBadge({ status }) {
+  const s = String(status || "").toUpperCase();
+  const cls =
+    s === "DRAFT"
+      ? "bg-slate-50 text-slate-700 border-slate-200"
+      : s === "FULFILLED"
+        ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+        : s === "PENDING"
+          ? "bg-amber-50 text-amber-800 border-amber-200"
+          : s === "COMPLETED"
+            ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+            : s === "CANCELLED"
+              ? "bg-rose-50 text-rose-800 border-rose-200"
+              : "bg-slate-50 text-slate-700 border-slate-200";
+
+  return (
+    <span
+      className={cx(
+        "inline-flex items-center rounded-xl border px-2.5 py-1 text-xs font-bold",
+        cls,
+      )}
+    >
+      {s || "—"}
+    </span>
+  );
+}
+
+/**
+ * 3-state release button:
+ * - Release
+ * - Releasing...
+ * - Released
+ */
+function ReleaseButton({ state, disabled, onClick }) {
+  const s = state || "idle"; // idle | loading | success
+  const label =
+    s === "loading" ? "Releasing…" : s === "success" ? "Released" : "Release";
+
+  const cls =
+    s === "success"
+      ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+      : s === "loading"
+        ? "bg-amber-600 text-white"
+        : "bg-slate-900 hover:bg-slate-800 text-white";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled || s === "loading" || s === "success"}
+      className={cx(
+        "rounded-xl px-4 py-2.5 text-sm font-bold transition disabled:opacity-60 disabled:cursor-not-allowed",
+        cls,
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
+/* ---------- Notifications (SSE + modal + urgent toast) ---------- */
+
+function useBeep() {
+  return useCallback(() => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+
+      o.type = "sine";
+      o.frequency.value = 880;
+      g.gain.value = 0.06;
+
+      o.connect(g);
+      g.connect(ctx.destination);
+
+      o.start();
+      setTimeout(() => {
+        o.stop();
+        ctx.close().catch(() => {});
+      }, 180);
+    } catch {
+      // ignore
+    }
+  }, []);
+}
+
+function UrgentToast({ open, title, body, onClose }) {
+  if (!open) return null;
+  return (
+    <div className="fixed top-4 right-4 z-[9999] w-[92vw] max-w-sm">
+      <div className="rounded-2xl border border-rose-200 bg-rose-50 shadow-lg p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-bold text-rose-900 truncate">
+              {title || "Urgent alert"}
+            </div>
+            {body ? (
+              <div className="mt-1 text-sm text-rose-900/90">{body}</div>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-xl border border-rose-200 bg-white px-3 py-1.5 text-xs font-bold text-rose-800 hover:bg-rose-100"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AlertsModal({
+  open,
+  onClose,
+  unreadCount,
+  loading,
+  rows,
+  onReadOne,
+  onReadAll,
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-start justify-center p-4 sm:p-6">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+
+      <div className="relative w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden mt-10">
+        <div className="p-4 border-b border-slate-200 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-bold text-slate-900">Alerts</div>
+            <div className="mt-1 text-xs text-slate-600">
+              {unreadCount ? <b>{unreadCount}</b> : 0} unread
+            </div>
+          </div>
+
+          <div className="shrink-0 flex gap-2">
+            <button
+              type="button"
+              onClick={onReadAll}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50"
+              disabled={loading}
+            >
+              Read all
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl bg-slate-900 text-white px-3 py-2 text-sm font-semibold hover:bg-slate-800"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div className="p-4 max-h-[70vh] overflow-y-auto">
+          {loading ? (
+            <div className="grid gap-3">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="text-sm text-slate-600">No alerts yet.</div>
+          ) : (
+            <div className="grid gap-2">
+              {rows.map((n) => {
+                const isUnread = n?.isRead === false || n?.is_read === false;
+                const priority = String(n?.priority || "normal").toLowerCase();
+                const title = toStr(n?.title) || "Alert";
+                const body = toStr(n?.body);
+
+                return (
+                  <div
+                    key={String(n?.id)}
+                    className={cx(
+                      "rounded-2xl border p-3",
+                      isUnread
+                        ? "border-amber-200 bg-amber-50"
+                        : "border-slate-200 bg-white",
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="text-sm font-bold text-slate-900 truncate">
+                            {title}
+                          </div>
+                          {priority === "high" ? (
+                            <span className="rounded-full bg-rose-600 text-white px-2 py-0.5 text-xs font-bold">
+                              URGENT
+                            </span>
+                          ) : null}
+                          {isUnread ? (
+                            <span className="rounded-full bg-slate-900 text-white px-2 py-0.5 text-xs font-bold">
+                              NEW
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {body ? (
+                          <div className="mt-1 text-sm text-slate-700">
+                            {body}
+                          </div>
+                        ) : null}
+                        <div className="mt-2 text-xs text-slate-500">
+                          {safeDate(n?.createdAt || n?.created_at)}
+                        </div>
+                      </div>
+
+                      <div className="shrink-0">
+                        {isUnread ? (
+                          <button
+                            type="button"
+                            onClick={() => onReadOne(n?.id)}
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold hover:bg-slate-50"
+                          >
+                            Mark read
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-500">Read</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="p-4 border-t border-slate-200 text-xs text-slate-600">
+          Tip: urgent alerts also show a red popup and sound.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Helpers ---------- */
+
+function getQtyOnHandForProduct(inventory, productId) {
+  const pid = Number(productId);
+  if (!pid) return null;
+  const row = (Array.isArray(inventory) ? inventory : []).find(
+    (r) => Number(r.id) === pid,
+  );
+  if (!row) return null;
+  const qty = Number(row.qtyOnHand ?? row.qty_on_hand ?? 0);
+  return Number.isFinite(qty) ? qty : 0;
+}
+
+/* ---------- Page ---------- */
 
 export default function StoreKeeperPage() {
   const router = useRouter();
+  const beep = useBeep();
 
+  const [bootLoading, setBootLoading] = useState(true);
   const [me, setMe] = useState(null);
+
   const [msg, setMsg] = useState("");
+  const [msgKind, setMsgKind] = useState("info");
 
-  const [tab, setTab] = useState("inventory"); // inventory | arrivals | adjustments | sales
+  const [section, setSection] = useState("dashboard");
 
-  // Products + inventory
-  const [products, setProducts] = useState([]);
-  const [productsLoading, setProductsLoading] = useState(false);
+  function toast(kind, text) {
+    setMsgKind(kind);
+    setMsg(text || "");
+  }
 
-  const [inventory, setInventory] = useState([]);
-  const [inventoryLoading, setInventoryLoading] = useState(false);
-  const [q, setQ] = useState("");
-
-  // Create product (NO prices in Phase 1 for storekeeper)
-  const [pName, setPName] = useState("");
-  const [pSku, setPSku] = useState("");
-  const [pUnit, setPUnit] = useState("pcs");
-  const [pNotes, setPNotes] = useState("");
-  const [pInitialQty, setPInitialQty] = useState(""); // ✅ optional initial stock
-  const [creatingProduct, setCreatingProduct] = useState(false);
-
-  // Arrivals form
-  const [arrProductId, setArrProductId] = useState("");
-  const [arrQty, setArrQty] = useState("");
-  const [arrNotes, setArrNotes] = useState("");
-  const [arrFiles, setArrFiles] = useState([]);
-  const [arrSubmitting, setArrSubmitting] = useState(false);
-
-  // Adjustment request form + list (this DOES NOT change stock yet — it requests approval)
-  const [adjProductId, setAdjProductId] = useState("");
-  const [adjDirection, setAdjDirection] = useState("ADD"); // ADD | REMOVE
-  const [adjQtyAbs, setAdjQtyAbs] = useState(""); // user types positive number here
-  const [adjReason, setAdjReason] = useState("");
-  const [adjLoading, setAdjLoading] = useState(false);
-
-  const [myAdjRequests, setMyAdjRequests] = useState([]);
-  const [myAdjLoading, setMyAdjLoading] = useState(false);
-
-  // ✅ Option B: Draft sales for fulfillment
-  const [sales, setSales] = useState([]);
-  const [salesLoading, setSalesLoading] = useState(false);
-  const [salesQ, setSalesQ] = useState("");
-  const [salesStatusFilter, setSalesStatusFilter] = useState("DRAFT"); // default: incoming work
-  const [saleActionLoadingId, setSaleActionLoadingId] = useState(null);
-
-  const [viewSale, setViewSale] = useState(null);
-  const [viewSaleLoading, setViewSaleLoading] = useState(false);
-
-  // ---------------- ROLE GUARD ----------------
+  // role guard + skeleton
   useEffect(() => {
     let alive = true;
 
     async function run() {
+      setBootLoading(true);
       try {
         const data = await getMe();
         if (!alive) return;
@@ -95,9 +584,10 @@ export default function StoreKeeperPage() {
         const user = data?.user || null;
         setMe(user);
 
-        if (!user?.role) return router.replace("/login");
+        const role = String(user?.role || "").toLowerCase();
+        if (!role) return router.replace("/login");
 
-        if (user.role !== "store_keeper") {
+        if (role !== "store_keeper") {
           const map = {
             cashier: "/cashier",
             seller: "/seller",
@@ -105,11 +595,16 @@ export default function StoreKeeperPage() {
             admin: "/admin",
             owner: "/owner",
           };
-          router.replace(map[user.role] || "/");
+          router.replace(map[role] || "/");
+          return;
         }
       } catch {
         if (!alive) return;
         router.replace("/login");
+        return;
+      } finally {
+        if (!alive) return;
+        setBootLoading(false);
       }
     }
 
@@ -119,12 +614,209 @@ export default function StoreKeeperPage() {
     };
   }, [router]);
 
-  const isAuthorized = !!me && me.role === "store_keeper";
+  const isAuthorized =
+    !!me && String(me?.role || "").toLowerCase() === "store_keeper";
 
-  // ---------------- LOADERS ----------------
+  /* ---------- Notifications state ---------- */
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [notifsLoading, setNotifsLoading] = useState(false);
+  const [notifs, setNotifs] = useState([]);
+  const [unread, setUnread] = useState(0);
+
+  const [urgentOpen, setUrgentOpen] = useState(false);
+  const [urgentTitle, setUrgentTitle] = useState("");
+  const [urgentBody, setUrgentBody] = useState("");
+
+  const sseRef = useRef(null);
+
+  const loadUnread = useCallback(async () => {
+    try {
+      const data = await apiFetch(ENDPOINTS.NOTIFS_UNREAD, { method: "GET" });
+      const n = Number(data?.count ?? data?.unread ?? 0);
+      setUnread(Number.isFinite(n) ? n : 0);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const loadNotifs = useCallback(async () => {
+    setNotifsLoading(true);
+    try {
+      const data = await apiFetch(`${ENDPOINTS.NOTIFS_LIST}?limit=50`, {
+        method: "GET",
+      });
+      const list = Array.isArray(data?.notifications)
+        ? data.notifications
+        : Array.isArray(data?.rows)
+          ? data.rows
+          : [];
+      setNotifs(list);
+    } catch {
+      setNotifs([]);
+    } finally {
+      setNotifsLoading(false);
+    }
+  }, []);
+
+  async function markReadOne(id) {
+    const nid = Number(id);
+    if (!Number.isFinite(nid) || nid <= 0) return;
+
+    try {
+      await apiFetch(ENDPOINTS.NOTIFS_READ_ONE(nid), { method: "PATCH" });
+      setNotifs((prev) =>
+        (Array.isArray(prev) ? prev : []).map((x) =>
+          String(x?.id) === String(nid)
+            ? { ...x, isRead: true, is_read: true }
+            : x,
+        ),
+      );
+      await loadUnread();
+    } catch {
+      // ignore
+    }
+  }
+
+  async function markAllRead() {
+    try {
+      await apiFetch(ENDPOINTS.NOTIFS_READ_ALL, { method: "PATCH" });
+      setNotifs((prev) =>
+        (Array.isArray(prev) ? prev : []).map((x) => ({
+          ...x,
+          isRead: true,
+          is_read: true,
+        })),
+      );
+      setUnread(0);
+    } catch {
+      // ignore
+    }
+  }
+
+  // SSE connect (real-time)
+  useEffect(() => {
+    if (!isAuthorized) return;
+
+    // initial fetch
+    loadUnread();
+
+    // connect stream
+    try {
+      if (sseRef.current) {
+        sseRef.current.close();
+        sseRef.current = null;
+      }
+
+      const es = new EventSource(ENDPOINTS.NOTIFS_STREAM);
+      sseRef.current = es;
+
+      es.onmessage = (evt) => {
+        if (!evt?.data) return;
+
+        let payload = null;
+        try {
+          payload = JSON.parse(evt.data);
+        } catch {
+          return;
+        }
+
+        // expected: { type: "notification", notification: {...} } or direct notification
+        const n = payload?.notification || payload;
+        if (!n) return;
+
+        // prepend list
+        setNotifs((prev) => {
+          const arr = Array.isArray(prev) ? prev : [];
+          const id = n?.id == null ? null : String(n.id);
+          if (id && arr.some((x) => String(x?.id) === id)) return arr;
+          return [n, ...arr].slice(0, 80);
+        });
+
+        // unread refresh
+        loadUnread();
+
+        // urgent behavior
+        const priority = String(n?.priority || "normal").toLowerCase();
+        if (priority === "high") {
+          setUrgentTitle(toStr(n?.title) || "Urgent alert");
+          setUrgentBody(toStr(n?.body) || "");
+          setUrgentOpen(true);
+          beep();
+        }
+      };
+
+      es.onerror = () => {
+        // browser auto-retries; keep silent
+      };
+    } catch {
+      // ignore
+    }
+
+    return () => {
+      try {
+        if (sseRef.current) sseRef.current.close();
+      } catch {
+        // ignore
+      }
+      sseRef.current = null;
+    };
+  }, [isAuthorized, loadUnread, beep]);
+
+  function openAlerts() {
+    setAlertsOpen(true);
+    loadNotifs();
+    loadUnread();
+  }
+
+  /* ---------- data ---------- */
+
+  const [products, setProducts] = useState([]);
+  const [productsLoading, setProductsLoading] = useState(false);
+
+  const [inventory, setInventory] = useState([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [invQ, setInvQ] = useState("");
+
+  // create product
+  const [pName, setPName] = useState("");
+  const [pSku, setPSku] = useState("");
+  const [pUnit, setPUnit] = useState("pcs");
+  const [pNotes, setPNotes] = useState("");
+  const [pInitialQty, setPInitialQty] = useState("");
+  const [createProductBtn, setCreateProductBtn] = useState("idle");
+
+  // arrivals
+  const [arrProductId, setArrProductId] = useState("");
+  const [arrQty, setArrQty] = useState("");
+  const [arrNotes, setArrNotes] = useState("");
+  const [arrFiles, setArrFiles] = useState([]);
+  const [arrivalBtn, setArrivalBtn] = useState("idle");
+
+  // adjustments
+  const [adjProductId, setAdjProductId] = useState("");
+  const [adjDirection, setAdjDirection] = useState("ADD");
+  const [adjQtyAbs, setAdjQtyAbs] = useState("");
+  const [adjReason, setAdjReason] = useState("");
+  const [adjBtn, setAdjBtn] = useState("idle");
+
+  const [myAdjRequests, setMyAdjRequests] = useState([]);
+  const [myAdjLoading, setMyAdjLoading] = useState(false);
+
+  // sales release
+  const [sales, setSales] = useState([]);
+  const [salesLoading, setSalesLoading] = useState(false);
+  const [salesQ, setSalesQ] = useState("");
+
+  // tab filter instead of dropdown
+  const [salesTab, setSalesTab] = useState("TO_RELEASE"); // TO_RELEASE | RELEASED | ALL
+
+  const [releaseBtnState, setReleaseBtnState] = useState({}); // per sale: idle/loading/success
+
+  const [viewSale, setViewSale] = useState(null);
+  const [viewSaleLoading, setViewSaleLoading] = useState(false);
+
   const loadProducts = useCallback(async () => {
     setProductsLoading(true);
-    setMsg("");
     try {
       const data = await apiFetch(ENDPOINTS.PRODUCTS_LIST, { method: "GET" });
       const list = Array.isArray(data?.products)
@@ -132,7 +824,7 @@ export default function StoreKeeperPage() {
         : data?.items || data?.rows || [];
       setProducts(Array.isArray(list) ? list : []);
     } catch (e) {
-      setMsg(e?.data?.error || e.message || "Failed to load products");
+      toast("danger", e?.data?.error || e?.message || "Cannot load products");
       setProducts([]);
     } finally {
       setProductsLoading(false);
@@ -141,7 +833,6 @@ export default function StoreKeeperPage() {
 
   const loadInventory = useCallback(async () => {
     setInventoryLoading(true);
-    setMsg("");
     try {
       const data = await apiFetch(ENDPOINTS.INVENTORY_LIST, { method: "GET" });
       const list = Array.isArray(data?.inventory)
@@ -149,7 +840,7 @@ export default function StoreKeeperPage() {
         : data?.items || data?.rows || [];
       setInventory(Array.isArray(list) ? list : []);
     } catch (e) {
-      setMsg(e?.data?.error || e.message || "Failed to load inventory");
+      toast("danger", e?.data?.error || e?.message || "Cannot load inventory");
       setInventory([]);
     } finally {
       setInventoryLoading(false);
@@ -158,7 +849,6 @@ export default function StoreKeeperPage() {
 
   const loadMyAdjustRequests = useCallback(async () => {
     setMyAdjLoading(true);
-    setMsg("");
     try {
       const data = await apiFetch(ENDPOINTS.INV_ADJ_REQ_MINE, {
         method: "GET",
@@ -168,9 +858,10 @@ export default function StoreKeeperPage() {
         : data?.items || data?.rows || [];
       setMyAdjRequests(Array.isArray(list) ? list : []);
     } catch (e) {
-      const err =
-        e?.data?.error || e.message || "Failed to load adjustment requests";
-      setMsg(err);
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Cannot load correction requests",
+      );
       setMyAdjRequests([]);
     } finally {
       setMyAdjLoading(false);
@@ -179,84 +870,59 @@ export default function StoreKeeperPage() {
 
   const loadSales = useCallback(async () => {
     setSalesLoading(true);
-    setMsg("");
     try {
-      // We filter by status via query if your backend supports it; if not, we still filter client-side.
-      const qs =
-        salesStatusFilter && salesStatusFilter !== "ALL"
-          ? `?status=${encodeURIComponent(salesStatusFilter)}`
-          : "";
-      const data = await apiFetch(`${ENDPOINTS.SALES_LIST}${qs}`, {
-        method: "GET",
-      });
-
+      const data = await apiFetch(ENDPOINTS.SALES_LIST, { method: "GET" });
       const list = Array.isArray(data?.sales)
         ? data.sales
         : data?.items || data?.rows || [];
       setSales(Array.isArray(list) ? list : []);
     } catch (e) {
-      setMsg(e?.data?.error || e.message || "Failed to load sales");
+      toast("danger", e?.data?.error || e?.message || "Cannot load sales");
       setSales([]);
     } finally {
       setSalesLoading(false);
     }
-  }, [salesStatusFilter]);
+  }, []);
 
   async function openSaleDetails(saleId) {
     const id = Number(saleId);
     if (!id) return;
 
     setViewSaleLoading(true);
-    setMsg("");
     try {
       const data = await apiFetch(ENDPOINTS.SALE_GET(id), { method: "GET" });
       setViewSale(data?.sale || null);
     } catch (e) {
-      setMsg(e?.data?.error || e.message || "Failed to load sale details");
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Cannot load sale details",
+      );
       setViewSale(null);
     } finally {
       setViewSaleLoading(false);
     }
   }
 
-  // Load base data after login + on tab switch
+  // initial load + per section
   useEffect(() => {
     if (!isAuthorized) return;
 
     loadProducts();
     loadInventory();
 
-    if (tab === "adjustments") loadMyAdjustRequests();
-    if (tab === "sales") loadSales();
+    if (section === "adjustments") loadMyAdjustRequests();
+    if (section === "sales") loadSales();
   }, [
     isAuthorized,
-    tab,
+    section,
     loadProducts,
     loadInventory,
     loadMyAdjustRequests,
     loadSales,
   ]);
 
-  // ---------------- KPIs ----------------
-  const filteredInventory = useMemo(() => {
-    const qq = String(q || "")
-      .trim()
-      .toLowerCase();
-    if (!qq) return Array.isArray(inventory) ? inventory : [];
-    return (Array.isArray(inventory) ? inventory : []).filter((x) => {
-      const id = String(x.id || "");
-      const name = String(x.name || "").toLowerCase();
-      const sku = String(x.sku || "").toLowerCase();
-      return id.includes(qq) || name.includes(qq) || sku.includes(qq);
-    });
-  }, [inventory, q]);
-
-  const totalQty = useMemo(() => {
-    return (Array.isArray(inventory) ? inventory : []).reduce(
-      (sum, r) => sum + Number(r.qtyOnHand ?? r.qty_on_hand ?? 0),
-      0,
-    );
-  }, [inventory]);
+  // KPIs
+  const totalProducts = products.length;
 
   const pendingAdjRequests = useMemo(() => {
     return (Array.isArray(myAdjRequests) ? myAdjRequests : []).filter(
@@ -270,57 +936,112 @@ export default function StoreKeeperPage() {
     ).length;
   }, [sales]);
 
-  // ---------------- SALES FILTERS ----------------
+  // Dashboard stock snapshot (meaningful, per product)
+  const stockSnapshot = useMemo(() => {
+    const list = Array.isArray(inventory) ? inventory : [];
+    // sort: highest qty first
+    const sorted = list
+      .map((x) => ({
+        id: x?.id,
+        name: x?.name,
+        sku: x?.sku,
+        qty: Number(x?.qtyOnHand ?? x?.qty_on_hand ?? 0) || 0,
+      }))
+      .sort((a, b) => b.qty - a.qty);
+
+    return sorted.slice(0, 10);
+  }, [inventory]);
+
+  const filteredInventory = useMemo(() => {
+    const qq = String(invQ || "")
+      .trim()
+      .toLowerCase();
+    const list = Array.isArray(inventory) ? inventory : [];
+    if (!qq) return list;
+    return list.filter((x) => {
+      const id = String(x.id || "");
+      const name = String(x.name || "").toLowerCase();
+      const sku = String(x.sku || "").toLowerCase();
+      return id.includes(qq) || name.includes(qq) || sku.includes(qq);
+    });
+  }, [inventory, invQ]);
+
   const filteredSales = useMemo(() => {
     const list = Array.isArray(sales) ? sales : [];
     const qq = String(salesQ || "")
       .trim()
       .toLowerCase();
-    if (!qq) return list;
 
-    return list.filter((s) => {
+    let base = list;
+
+    if (salesTab === "TO_RELEASE")
+      base = base.filter(
+        (s) => String(s?.status || "").toUpperCase() === "DRAFT",
+      );
+    if (salesTab === "RELEASED")
+      base = base.filter(
+        (s) => String(s?.status || "").toUpperCase() === "FULFILLED",
+      );
+
+    if (!qq) return base;
+
+    return base.filter((s) => {
       const id = String(s?.id ?? "").toLowerCase();
       const status = String(s?.status ?? "").toLowerCase();
-      const sellerId = String(s?.sellerId ?? s?.seller_id ?? "").toLowerCase();
+      const seller = String(
+        s?.sellerName ?? s?.sellerId ?? s?.seller_id ?? "",
+      ).toLowerCase();
       const customerName = String(s?.customerName ?? "").toLowerCase();
       const customerPhone = String(s?.customerPhone ?? "").toLowerCase();
       return (
         id.includes(qq) ||
         status.includes(qq) ||
-        sellerId.includes(qq) ||
+        seller.includes(qq) ||
         customerName.includes(qq) ||
         customerPhone.includes(qq)
       );
     });
-  }, [sales, salesQ]);
+  }, [sales, salesQ, salesTab]);
 
-  // ---------------- ACTIONS ----------------
+  const releasedCount = useMemo(() => {
+    const list = Array.isArray(sales) ? sales : [];
+    return list.filter(
+      (s) => String(s?.status || "").toUpperCase() === "FULFILLED",
+    ).length;
+  }, [sales]);
+
+  const lastTenCount = useMemo(() => {
+    // always show "10" if there are many, else show actual count
+    const n = Array.isArray(sales) ? sales.length : 0;
+    return Math.min(10, n);
+  }, [sales]);
+
+  const filteredSalesLastTen = useMemo(() => {
+    const list = Array.isArray(filteredSales) ? filteredSales : [];
+    // IMPORTANT: assume backend already returns latest first
+    return list.slice(0, 10);
+  }, [filteredSales]);
+  /* ---------- Actions ---------- */
+
   async function createProduct(e) {
     e.preventDefault();
-    if (creatingProduct) return;
-
-    setMsg("");
+    if (createProductBtn === "loading") return;
 
     const name = String(pName || "").trim();
-    if (!name) return setMsg("Enter product name.");
+    if (!name) return toast("warn", "Write product name.");
 
-    const initialQty = Number(pInitialQty);
-    if (
-      pInitialQty !== "" &&
-      (!Number.isFinite(initialQty) || initialQty < 0)
-    ) {
-      return setMsg("Initial qty must be a valid number (0 or more).");
+    const initialQty = numOrNull(pInitialQty);
+    if (pInitialQty !== "" && (initialQty == null || initialQty < 0)) {
+      return toast("warn", "Initial qty must be 0 or more.");
     }
 
-    setCreatingProduct(true);
-
+    setCreateProductBtn("loading");
     try {
       const payload = {
         name,
-        sku: pSku.trim() || undefined,
-        unit: pUnit.trim() || "pcs",
-        notes: pNotes.trim() || undefined,
-        // storekeeper does not set pricing in Phase 1
+        sku: String(pSku || "").trim() || undefined,
+        unit: String(pUnit || "").trim() || "pcs",
+        notes: String(pNotes || "").trim() || undefined,
         sellingPrice: 0,
         costPrice: 0,
       };
@@ -329,23 +1050,22 @@ export default function StoreKeeperPage() {
         method: "POST",
         body: payload,
       });
-
       const createdId = data?.product?.id;
 
-      // ✅ If user provided initial qty, record it as an arrival (real-world: stock-in event)
-      if (createdId && Number.isFinite(initialQty) && initialQty > 0) {
+      // optional: create initial arrival
+      if (createdId && initialQty != null && initialQty > 0) {
         await apiFetch(ENDPOINTS.INVENTORY_ARRIVALS_CREATE, {
           method: "POST",
           body: {
             productId: Number(createdId),
-            qtyReceived: initialQty,
+            qtyReceived: Math.round(initialQty),
             notes: "Initial stock",
             documentUrls: [],
           },
         });
       }
 
-      setMsg("✅ Product created");
+      toast("success", "Product created.");
       setPName("");
       setPSku("");
       setPUnit("pcs");
@@ -356,28 +1076,31 @@ export default function StoreKeeperPage() {
       await loadInventory();
 
       if (createdId) setArrProductId(String(createdId));
+
+      setCreateProductBtn("success");
+      setTimeout(() => setCreateProductBtn("idle"), 900);
     } catch (e2) {
-      setMsg(e2?.data?.error || e2.message || "Create product failed");
-    } finally {
-      setCreatingProduct(false);
+      setCreateProductBtn("idle");
+      toast(
+        "danger",
+        e2?.data?.error || e2?.message || "Create product failed",
+      );
     }
   }
 
   async function createArrival(e) {
     e.preventDefault();
-    setMsg("");
+    if (arrivalBtn === "loading") return;
 
     const pid = Number(arrProductId);
-    const qty = Number(arrQty);
+    const qty = numOrNull(arrQty);
 
-    if (!pid) return setMsg("Select a product.");
-    if (!Number.isFinite(qty) || qty <= 0) return setMsg("Enter a valid qty.");
+    if (!pid) return toast("warn", "Pick a product.");
+    if (qty == null || qty <= 0) return toast("warn", "Write a correct qty.");
 
-    setArrSubmitting(true);
-
+    setArrivalBtn("loading");
     try {
       let documentUrls = [];
-
       if (arrFiles.length > 0) {
         const up = await apiUpload(arrFiles);
         documentUrls = up.urls || [];
@@ -387,792 +1110,984 @@ export default function StoreKeeperPage() {
         method: "POST",
         body: {
           productId: pid,
-          qtyReceived: qty,
-          notes: arrNotes ? String(arrNotes).slice(0, 200) : undefined,
+          qtyReceived: Math.round(qty),
+          notes: arrNotes?.trim()
+            ? String(arrNotes).trim().slice(0, 200)
+            : undefined,
           documentUrls,
         },
       });
 
-      setMsg("✅ Stock arrival recorded");
+      toast("success", "Arrival saved.");
       setArrQty("");
       setArrNotes("");
       setArrFiles([]);
 
       await loadInventory();
+
+      setArrivalBtn("success");
+      setTimeout(() => setArrivalBtn("idle"), 900);
     } catch (e2) {
-      setMsg(e2?.data?.error || e2.message || "Failed to record arrival");
-    } finally {
-      setArrSubmitting(false);
+      setArrivalBtn("idle");
+      toast("danger", e2?.data?.error || e2?.message || "Save arrival failed");
     }
   }
 
   async function createAdjustRequest(e) {
     e.preventDefault();
-    setMsg("");
+    if (adjBtn === "loading") return;
 
     const pid = Number(adjProductId);
-    const qtyAbs = Number(adjQtyAbs);
+    const qtyAbs = numOrNull(adjQtyAbs);
 
-    if (!pid) return setMsg("Select a product.");
-    if (!Number.isFinite(qtyAbs) || qtyAbs <= 0)
-      return setMsg("Enter a valid quantity (example: 3).");
+    if (!pid) return toast("warn", "Pick a product.");
+    if (qtyAbs == null || qtyAbs <= 0)
+      return toast("warn", "Write a correct qty.");
+    if (!String(adjReason || "").trim())
+      return toast("warn", "Write a reason.");
 
-    const signedQtyChange = adjDirection === "REMOVE" ? -qtyAbs : qtyAbs;
+    const signedQtyChange =
+      adjDirection === "REMOVE" ? -Math.round(qtyAbs) : Math.round(qtyAbs);
 
-    if (!String(adjReason || "").trim()) return setMsg("Enter a reason.");
-
-    setAdjLoading(true);
+    setAdjBtn("loading");
     try {
       await apiFetch(ENDPOINTS.INV_ADJ_REQ_CREATE, {
         method: "POST",
         body: {
           productId: pid,
           qtyChange: signedQtyChange,
-          reason: String(adjReason).slice(0, 200),
+          reason: String(adjReason).trim().slice(0, 200),
         },
       });
 
-      setMsg("✅ Adjustment request created. Waiting for manager approval.");
+      toast("success", "Correction request sent. Wait for approval.");
       setAdjProductId("");
       setAdjDirection("ADD");
       setAdjQtyAbs("");
       setAdjReason("");
 
       await loadMyAdjustRequests();
+
+      setAdjBtn("success");
+      setTimeout(() => setAdjBtn("idle"), 900);
     } catch (e2) {
-      setMsg(e2?.data?.error || e2.message || "Failed to create request");
-    } finally {
-      setAdjLoading(false);
+      setAdjBtn("idle");
+      toast(
+        "danger",
+        e2?.data?.error || e2?.message || "Create request failed",
+      );
     }
   }
 
-  async function fulfillSale(saleId) {
+  async function releaseStock(saleId) {
     const id = Number(saleId);
-    if (!id) return setMsg("Invalid sale id.");
+    if (!id) return toast("warn", "Bad sale id.");
+    if (releaseBtnState[id] === "loading") return;
 
-    setMsg("");
-    setSaleActionLoadingId(id);
-
+    setReleaseBtnState((p) => ({ ...p, [id]: "loading" }));
     try {
-      await apiFetch(ENDPOINTS.SALE_FULFILL(id), {
-        method: "POST",
-        body: {}, // safe
-      });
+      await apiFetch(ENDPOINTS.SALE_FULFILL(id), { method: "POST", body: {} });
 
-      setMsg(`✅ Sale #${id} fulfilled`);
+      toast("success", `Sale #${id} released.`);
       await loadSales();
       await loadInventory();
 
-      // refresh modal if open
-      if (viewSale?.id === id) {
-        await openSaleDetails(id);
-      }
+      if (viewSale?.id === id) await openSaleDetails(id);
+
+      setReleaseBtnState((p) => ({ ...p, [id]: "success" }));
+      setTimeout(
+        () => setReleaseBtnState((p) => ({ ...p, [id]: "idle" })),
+        900,
+      );
     } catch (e) {
-      setMsg(e?.data?.error || e.message || "Fulfill failed");
-    } finally {
-      setSaleActionLoadingId(null);
+      setReleaseBtnState((p) => ({ ...p, [id]: "idle" }));
+      toast("danger", e?.data?.error || e?.message || "Release failed");
     }
   }
 
-  if (!isAuthorized) {
-    return <div className="p-6 text-sm text-gray-600">Redirecting...</div>;
-  }
+  if (bootLoading) return <PageSkeleton />;
+  if (!isAuthorized)
+    return <div className="p-6 text-sm text-slate-600">Redirecting…</div>;
+
+  const subtitle = `User: ${me?.email || "—"} • ${locationLabel(me)}`;
 
   return (
-    <div>
-      <RoleBar
-        title="Store Keeper"
-        subtitle={`User: ${me.email} • Location: ${me.locationId}`}
-        user={me}
+    <div className="min-h-screen bg-slate-50 overflow-x-hidden">
+      <UrgentToast
+        open={urgentOpen}
+        title={urgentTitle}
+        body={urgentBody}
+        onClose={() => setUrgentOpen(false)}
       />
 
-      <div className="max-w-6xl mx-auto p-6">
+      <AlertsModal
+        open={alertsOpen}
+        onClose={() => setAlertsOpen(false)}
+        unreadCount={unread}
+        loading={notifsLoading}
+        rows={Array.isArray(notifs) ? notifs : []}
+        onReadOne={markReadOne}
+        onReadAll={markAllRead}
+      />
+
+      <RoleBar title="Store keeper" subtitle={subtitle} user={me} />
+
+      <div className="mx-auto max-w-7xl px-4 sm:px-5 py-6">
+        {/* Top actions bar (Alerts always on top, never behind) */}
+        <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={openAlerts}
+            className="relative rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold hover:bg-slate-50"
+            title="Alerts"
+          >
+            🔔 Alerts
+            {unread > 0 ? (
+              <span className="absolute -top-2 -right-2 rounded-full bg-rose-600 text-white text-xs font-bold px-2 py-0.5">
+                {unread}
+              </span>
+            ) : null}
+          </button>
+        </div>
+
         {msg ? (
-          <div className="mt-4 text-sm">
-            {String(msg).startsWith("✅") ? (
-              <div className="p-3 rounded-lg bg-green-50 text-green-800">
-                {msg}
-              </div>
-            ) : (
-              <div className="p-3 rounded-lg bg-red-50 text-red-700">{msg}</div>
-            )}
+          <div className="mb-4">
+            <Banner kind={msgKind}>{msg}</Banner>
           </div>
         ) : null}
 
-        {/* KPI cards */}
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card
-            label="Products"
-            value={productsLoading ? "…" : String(products.length)}
-            sub="Catalog items"
-          />
-          <Card
-            label="Total qty on hand"
-            value={inventoryLoading ? "…" : String(totalQty)}
-            sub="Warehouse stock"
-          />
-          <Card
-            label="Draft sales"
-            value={salesLoading ? "…" : String(draftSalesCount)}
-            sub="Need fulfillment"
-          />
-          <Card
-            label="Pending adjustment requests"
-            value={myAdjLoading ? "…" : String(pendingAdjRequests)}
-            sub="Waiting approval"
-          />
-        </div>
-
-        {/* Tabs */}
-        <div className="mt-6 flex gap-2 text-sm flex-wrap">
-          <TabButton
-            active={tab === "inventory"}
-            onClick={() => setTab("inventory")}
-          >
-            Inventory
-          </TabButton>
-          <TabButton
-            active={tab === "arrivals"}
-            onClick={() => setTab("arrivals")}
-          >
-            Stock arrivals
-          </TabButton>
-          <TabButton
-            active={tab === "adjustments"}
-            onClick={() => setTab("adjustments")}
-          >
-            Adjustment requests
-          </TabButton>
-          <TabButton active={tab === "sales"} onClick={() => setTab("sales")}>
-            Sales fulfillment
-          </TabButton>
-        </div>
-
-        {/* INVENTORY TAB */}
-        {tab === "inventory" ? (
-          <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Products create */}
-            <div className="bg-white rounded-xl shadow p-4">
-              <div className="font-semibold">Create product (no prices)</div>
-              <div className="text-xs text-gray-500 mt-1">
-                Phase 1 rule: storekeeper creates item info only. Manager sets
-                prices later. You may optionally record an <b>initial stock</b>{" "}
-                as an arrival event.
-              </div>
-
-              <form onSubmit={createProduct} className="mt-4 grid gap-3">
-                <input
-                  className="border rounded-lg px-3 py-2"
-                  placeholder="Name"
-                  value={pName}
-                  onChange={(e) => setPName(e.target.value)}
-                />
-                <input
-                  className="border rounded-lg px-3 py-2"
-                  placeholder="SKU (optional)"
-                  value={pSku}
-                  onChange={(e) => setPSku(e.target.value)}
-                />
-
-                <div className="grid grid-cols-2 gap-3">
-                  <input
-                    className="border rounded-lg px-3 py-2"
-                    placeholder="Unit (e.g. pcs, kg)"
-                    value={pUnit}
-                    onChange={(e) => setPUnit(e.target.value)}
-                  />
-                  <button
-                    disabled={creatingProduct}
-                    className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
-                  >
-                    {creatingProduct ? "Creating..." : "Create"}
-                  </button>
-                </div>
-
-                <input
-                  className="border rounded-lg px-3 py-2"
-                  placeholder="Initial qty (optional, example: 10)"
-                  value={pInitialQty}
-                  onChange={(e) => setPInitialQty(e.target.value)}
-                />
-
-                <input
-                  className="border rounded-lg px-3 py-2"
-                  placeholder="Notes (optional)"
-                  value={pNotes}
-                  onChange={(e) => setPNotes(e.target.value)}
-                />
-              </form>
-
-              <div className="mt-4 text-xs text-gray-500">
-                You can also add stock later in <b>Stock arrivals</b>.
-              </div>
+        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
+          {/* Sidebar */}
+          <aside className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4 h-fit">
+            <div className="text-sm font-bold text-slate-900">Store keeper</div>
+            <div className="mt-1 text-xs text-slate-600">
+              {locationLabel(me)}
             </div>
 
-            {/* Inventory list */}
-            <div className="bg-white rounded-xl shadow overflow-hidden">
-              <div className="p-4 border-b flex items-center justify-between gap-3">
-                <div>
-                  <div className="font-semibold">Inventory (qty only)</div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Storekeeper does not see prices.
-                  </div>
-                </div>
-                <button
-                  onClick={loadInventory}
-                  className="px-4 py-2 rounded-lg bg-black text-white text-sm"
-                >
-                  Refresh
-                </button>
+            <div className="mt-4 lg:hidden">
+              <div className="text-xs font-semibold text-slate-600 mb-2">
+                Section
               </div>
-
-              <div className="p-3 border-b">
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Search id/name/sku"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                />
-              </div>
-
-              {inventoryLoading ? (
-                <div className="p-4 text-sm text-gray-600">Loading...</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left p-3">ID</th>
-                        <th className="text-left p-3">Name</th>
-                        <th className="text-left p-3">SKU</th>
-                        <th className="text-right p-3">Qty</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredInventory.map((p) => (
-                        <tr key={p.id} className="border-t">
-                          <td className="p-3 font-medium">{p.id}</td>
-                          <td className="p-3">{p.name}</td>
-                          <td className="p-3">{p.sku || "-"}</td>
-                          <td className="p-3 text-right">
-                            {p.qtyOnHand ?? p.qty_on_hand ?? 0}
-                          </td>
-                        </tr>
-                      ))}
-                      {filteredInventory.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="p-4 text-sm text-gray-600">
-                            No inventory items.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : null}
-
-        {/* ARRIVALS TAB */}
-        {tab === "arrivals" ? (
-          <div className="mt-4 bg-white rounded-xl shadow p-4">
-            <div className="font-semibold">Record stock arrival</div>
-            <div className="text-xs text-gray-500 mt-1">
-              Adds qty to warehouse inventory and stores document URLs.
-            </div>
-
-            <form
-              onSubmit={createArrival}
-              className="mt-4 grid grid-cols-1 gap-3 max-w-xl"
-            >
-              <select
-                className="border rounded-lg px-3 py-2"
-                value={arrProductId}
-                onChange={(e) => setArrProductId(e.target.value)}
+              <Select
+                value={section}
+                onChange={(e) => setSection(e.target.value)}
               >
-                <option value="">Select product...</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    #{p.id} • {p.name} {p.sku ? `(${p.sku})` : ""}
+                {SECTIONS.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.label}
                   </option>
                 ))}
-              </select>
+              </Select>
+            </div>
 
-              <input
-                className="border rounded-lg px-3 py-2"
-                placeholder="Qty received"
-                value={arrQty}
-                onChange={(e) => setArrQty(e.target.value)}
-              />
-              <input
-                className="border rounded-lg px-3 py-2"
-                placeholder="Notes (optional)"
-                value={arrNotes}
-                onChange={(e) => setArrNotes(e.target.value)}
-              />
-
-              <div className="border rounded-lg p-3">
-                <label className="block text-sm font-medium mb-2">
-                  Attach documents (PDF/images)
-                </label>
-
-                <input
-                  id="arrival-files"
-                  type="file"
-                  multiple
-                  accept=".pdf,image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const files = Array.from(e.target.files || []);
-                    setArrFiles(files);
-                  }}
+            <div className="mt-4 hidden lg:grid gap-2">
+              {SECTIONS.map((s) => (
+                <NavItem
+                  key={s.key}
+                  active={section === s.key}
+                  label={s.label}
+                  onClick={() => setSection(s.key)}
+                  badge={
+                    s.key === "sales" && draftSalesCount > 0
+                      ? String(draftSalesCount)
+                      : null
+                  }
                 />
+              ))}
+            </div>
 
-                <label
-                  htmlFor="arrival-files"
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-black text-white text-sm cursor-pointer hover:bg-gray-800 transition"
-                >
-                  📎 Choose files
-                </label>
+            <div className="mt-6 pt-4 border-t border-slate-200 text-xs text-slate-600">
+              Rule: You manage stock only. Prices belong to manager/admin.
+            </div>
+          </aside>
 
-                {arrFiles.length > 0 ? (
-                  <ul className="mt-3 space-y-1 text-sm">
-                    {arrFiles.map((file, i) => (
-                      <li
-                        key={i}
-                        className="flex items-center justify-between bg-gray-50 border rounded-md px-3 py-1"
-                      >
-                        <span className="truncate max-w-[220px]">
-                          {file.name}
-                        </span>
-                        <button
-                          type="button"
-                          className="text-xs text-red-600 hover:underline"
-                          onClick={() =>
-                            setArrFiles((prev) =>
-                              prev.filter((_, idx) => idx !== i),
-                            )
-                          }
-                        >
-                          Remove
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="mt-2 text-xs text-gray-500">
-                    No files selected
-                  </div>
-                )}
-              </div>
-
-              <div className="flex gap-2 flex-wrap">
-                <button
-                  disabled={arrSubmitting}
-                  className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
-                >
-                  {arrSubmitting ? "Uploading..." : "Save arrival"}
-                </button>
-
-                <button
-                  type="button"
-                  className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
-                  onClick={() => {
-                    setArrQty("");
-                    setArrNotes("");
-                    setArrFiles([]);
-                  }}
-                >
-                  Clear
-                </button>
-              </div>
-            </form>
-          </div>
-        ) : null}
-
-        {/* ADJUSTMENTS TAB */}
-        {tab === "adjustments" ? (
-          <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-white rounded-xl shadow p-4">
-              <div className="font-semibold">Request inventory adjustment</div>
-              <div className="text-xs text-gray-500 mt-1">
-                Inventory changes ONLY after manager/admin approves the request.
-              </div>
-
-              <form
-                onSubmit={createAdjustRequest}
-                className="mt-4 grid gap-3 max-w-xl"
-              >
-                <div className="text-xs text-gray-600">
-                  This does <b>NOT</b> change stock immediately. It creates a
-                  request for manager/admin approval.
-                </div>
-
-                <select
-                  className="border rounded-lg px-3 py-2"
-                  value={adjProductId}
-                  onChange={(e) => setAdjProductId(e.target.value)}
-                >
-                  <option value="">Select product...</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      #{p.id} • {p.name} {p.sku ? `(${p.sku})` : ""}
-                    </option>
-                  ))}
-                </select>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <select
-                    className="border rounded-lg px-3 py-2"
-                    value={adjDirection}
-                    onChange={(e) => setAdjDirection(e.target.value)}
-                  >
-                    <option value="ADD">ADD stock (+)</option>
-                    <option value="REMOVE">REMOVE stock (-)</option>
-                  </select>
-
-                  <input
-                    className="border rounded-lg px-3 py-2"
-                    placeholder="Qty (example: 3)"
-                    value={adjQtyAbs}
-                    onChange={(e) => setAdjQtyAbs(e.target.value)}
+          {/* Main */}
+          <main className="grid gap-4">
+            {/* DASHBOARD */}
+            {section === "dashboard" ? (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                  <Card
+                    label="Products"
+                    value={productsLoading ? "…" : String(totalProducts)}
+                    sub="Items in catalog"
+                  />
+                  <Card
+                    label="To release"
+                    value={salesLoading ? "…" : String(draftSalesCount)}
+                    sub="Draft sales waiting"
+                  />
+                  <Card
+                    label="My correction requests"
+                    value={myAdjLoading ? "…" : String(myAdjRequests.length)}
+                    sub="All requests you sent"
+                  />
+                  <Card
+                    label="Pending decisions"
+                    value={myAdjLoading ? "…" : String(pendingAdjRequests)}
+                    sub="Waiting approval"
                   />
                 </div>
 
-                {/* Live preview */}
-                <div className="border rounded-lg p-3 bg-gray-50 text-sm">
-                  {(() => {
-                    const current = getQtyOnHandForProduct(
-                      inventory,
-                      adjProductId,
-                    );
-                    const qtyAbs = Number(adjQtyAbs);
-                    const signed = adjDirection === "REMOVE" ? -qtyAbs : qtyAbs;
-
-                    if (current === null) return <div>Current qty: -</div>;
-                    if (!Number.isFinite(qtyAbs) || qtyAbs <= 0)
-                      return (
-                        <div>
-                          Current qty: <b>{current}</b>
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  <SectionCard
+                    title="Today focus"
+                    hint="These actions protect sales and reduce mistakes."
+                    right={
+                      <AsyncButton
+                        variant="secondary"
+                        size="sm"
+                        state={
+                          productsLoading || inventoryLoading
+                            ? "loading"
+                            : "idle"
+                        }
+                        text="Refresh"
+                        loadingText="Refreshing…"
+                        successText="Done"
+                        onClick={() => {
+                          loadProducts();
+                          loadInventory();
+                          loadSales();
+                          loadUnread();
+                        }}
+                      />
+                    }
+                  >
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setSection("sales")}
+                        className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                      >
+                        <div className="text-sm font-bold text-slate-900">
+                          Release stock
                         </div>
-                      );
+                        <div className="mt-1 text-xs text-slate-600">
+                          Release stock for draft sales.
+                        </div>
+                      </button>
 
-                    const predicted = current + signed;
-                    return (
+                      <button
+                        type="button"
+                        onClick={() => setSection("arrivals")}
+                        className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                      >
+                        <div className="text-sm font-bold text-slate-900">
+                          Record arrivals
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          Add new stock with documents.
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSection("adjustments")}
+                        className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                      >
+                        <div className="text-sm font-bold text-slate-900">
+                          Request correction
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          Fix wrong stock via approval.
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSection("inventory")}
+                        className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                      >
+                        <div className="text-sm font-bold text-slate-900">
+                          Check inventory
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          Search qty by product.
+                        </div>
+                      </button>
+                    </div>
+                  </SectionCard>
+
+                  <SectionCard
+                    title="Stock snapshot"
+                    hint="Top items by qty on hand (quick check)."
+                  >
+                    {inventoryLoading ? (
+                      <div className="grid gap-3">
+                        <Skeleton className="h-14 w-full" />
+                        <Skeleton className="h-14 w-full" />
+                        <Skeleton className="h-14 w-full" />
+                      </div>
+                    ) : stockSnapshot.length === 0 ? (
+                      <div className="text-sm text-slate-600">
+                        No inventory yet.
+                      </div>
+                    ) : (
+                      <div className="grid gap-2">
+                        {stockSnapshot.map((x) => (
+                          <div
+                            key={String(x.id)}
+                            className="rounded-2xl border border-slate-200 bg-white p-3 flex items-center justify-between gap-3"
+                          >
+                            <div className="min-w-0">
+                              <div className="text-sm font-bold text-slate-900 truncate">
+                                {toStr(x.name) || "—"}
+                              </div>
+                              <div className="text-xs text-slate-500">
+                                #{x.id}
+                                {x.sku ? ` • ${x.sku}` : ""}
+                              </div>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <div className="text-lg font-extrabold text-slate-900">
+                                {money(x.qty)}
+                              </div>
+                              <div className="text-xs text-slate-500">
+                                on hand
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </SectionCard>
+                </div>
+              </>
+            ) : null}
+
+            {/* INVENTORY */}
+            {section === "inventory" ? (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <SectionCard
+                  title="Create product"
+                  hint="No prices here. Manager sets prices later."
+                >
+                  <form onSubmit={createProduct} className="grid gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <Input
+                        placeholder="Product name"
+                        value={pName}
+                        onChange={(e) => setPName(e.target.value)}
+                      />
+                      <Input
+                        placeholder="SKU (optional)"
+                        value={pSku}
+                        onChange={(e) => setPSku(e.target.value)}
+                      />
+                      <Input
+                        placeholder="Unit (pcs, kg)"
+                        value={pUnit}
+                        onChange={(e) => setPUnit(e.target.value)}
+                      />
+                      <Input
+                        placeholder="Initial qty (optional)"
+                        value={pInitialQty}
+                        onChange={(e) => setPInitialQty(e.target.value)}
+                      />
+                      <div className="sm:col-span-2">
+                        <Input
+                          placeholder="Notes (optional)"
+                          value={pNotes}
+                          onChange={(e) => setPNotes(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="sm:max-w-sm">
+                      <AsyncButton
+                        type="submit"
+                        variant="primary"
+                        state={createProductBtn}
+                        text="Create product"
+                        loadingText="Creating…"
+                        successText="Created"
+                      />
+                    </div>
+                  </form>
+                </SectionCard>
+
+                <SectionCard
+                  title="Inventory"
+                  hint="Search by name or SKU."
+                  right={
+                    <AsyncButton
+                      variant="secondary"
+                      size="sm"
+                      state={inventoryLoading ? "loading" : "idle"}
+                      text="Refresh"
+                      loadingText="Refreshing…"
+                      successText="Done"
+                      onClick={loadInventory}
+                    />
+                  }
+                >
+                  <Input
+                    placeholder="Search inventory…"
+                    value={invQ}
+                    onChange={(e) => setInvQ(e.target.value)}
+                  />
+
+                  <div className="mt-3 grid gap-2">
+                    {inventoryLoading ? (
+                      <>
+                        <Skeleton className="h-16 w-full" />
+                        <Skeleton className="h-16 w-full" />
+                        <Skeleton className="h-16 w-full" />
+                      </>
+                    ) : filteredInventory.length === 0 ? (
+                      <div className="text-sm text-slate-600">
+                        No inventory items.
+                      </div>
+                    ) : (
+                      filteredInventory.map((p) => {
+                        const qty =
+                          Number(p?.qtyOnHand ?? p?.qty_on_hand ?? 0) || 0;
+                        return (
+                          <div
+                            key={String(p?.id)}
+                            className="rounded-2xl border border-slate-200 bg-white p-3 flex items-center justify-between gap-3"
+                          >
+                            <div className="min-w-0">
+                              <div className="text-sm font-bold text-slate-900 truncate">
+                                {toStr(p?.name) || "—"}
+                              </div>
+                              <div className="text-xs text-slate-500">
+                                #{p?.id}
+                                {p?.sku ? ` • ${p.sku}` : ""}
+                              </div>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <div className="text-lg font-extrabold text-slate-900">
+                                {money(qty)}
+                              </div>
+                              <div className="text-xs text-slate-500">
+                                on hand
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </SectionCard>
+              </div>
+            ) : null}
+
+            {/* ARRIVALS */}
+            {section === "arrivals" ? (
+              <SectionCard
+                title="Record stock arrival"
+                hint="Adds qty and saves documents (invoice, receipt, etc.)."
+              >
+                <form onSubmit={createArrival} className="grid gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="sm:col-span-2">
+                      <div className="text-xs font-semibold text-slate-600 mb-1">
+                        Product
+                      </div>
+                      <Select
+                        value={arrProductId}
+                        onChange={(e) => setArrProductId(e.target.value)}
+                      >
+                        <option value="">Select product…</option>
+                        {products.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            #{p.id} • {p.name} {p.sku ? `(${p.sku})` : ""}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+
+                    <div>
+                      <div className="text-xs font-semibold text-slate-600 mb-1">
+                        Qty received
+                      </div>
+                      <Input
+                        placeholder="Example: 20"
+                        value={arrQty}
+                        onChange={(e) => setArrQty(e.target.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <div className="text-xs font-semibold text-slate-600 mb-1">
+                        Notes
+                      </div>
+                      <Input
+                        placeholder="Optional"
+                        value={arrNotes}
+                        onChange={(e) => setArrNotes(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <div className="rounded-2xl border border-slate-200 p-4 bg-white">
+                        <div className="text-sm font-bold text-slate-900">
+                          Documents
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          PDF or images.
+                        </div>
+
+                        <input
+                          id="arrival-files"
+                          type="file"
+                          multiple
+                          accept=".pdf,image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const files = Array.from(e.target.files || []);
+                            setArrFiles(files);
+                          }}
+                        />
+
+                        <label
+                          htmlFor="arrival-files"
+                          className="mt-3 inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold hover:bg-slate-50 cursor-pointer"
+                        >
+                          Choose files
+                        </label>
+
+                        {arrFiles.length > 0 ? (
+                          <div className="mt-3 grid gap-2">
+                            {arrFiles.map((f, i) => (
+                              <div
+                                key={i}
+                                className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+                              >
+                                <div className="text-sm text-slate-700 truncate">
+                                  {f.name}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="text-xs font-bold text-rose-700 hover:underline"
+                                  onClick={() =>
+                                    setArrFiles((prev) =>
+                                      prev.filter((_, idx) => idx !== i),
+                                    )
+                                  }
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-xs text-slate-500">
+                            No files selected.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 flex-wrap">
+                    <AsyncButton
+                      type="submit"
+                      variant="primary"
+                      state={arrivalBtn}
+                      text="Save arrival"
+                      loadingText="Saving…"
+                      successText="Saved"
+                    />
+
+                    <button
+                      type="button"
+                      className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                      onClick={() => {
+                        setArrQty("");
+                        setArrNotes("");
+                        setArrFiles([]);
+                      }}
+                    >
+                      Clear form
+                    </button>
+                  </div>
+                </form>
+              </SectionCard>
+            ) : null}
+
+            {/* ADJUSTMENTS */}
+            {section === "adjustments" ? (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <SectionCard
+                  title="Request correction"
+                  hint="This does NOT change stock now. It needs approval."
+                >
+                  <form onSubmit={createAdjustRequest} className="grid gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="sm:col-span-2">
+                        <div className="text-xs font-semibold text-slate-600 mb-1">
+                          Product
+                        </div>
+                        <Select
+                          value={adjProductId}
+                          onChange={(e) => setAdjProductId(e.target.value)}
+                        >
+                          <option value="">Select product…</option>
+                          {products.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              #{p.id} • {p.name} {p.sku ? `(${p.sku})` : ""}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+
                       <div>
-                        Current qty: <b>{current}</b> → After approval:{" "}
-                        <b>
-                          {predicted < 0 ? "❌ would be negative" : predicted}
-                        </b>
-                        <div className="text-xs text-gray-600 mt-1">
-                          Change requested:{" "}
-                          <b>{signed > 0 ? `+${signed}` : String(signed)}</b>
+                        <div className="text-xs font-semibold text-slate-600 mb-1">
+                          Direction
+                        </div>
+                        <Select
+                          value={adjDirection}
+                          onChange={(e) => setAdjDirection(e.target.value)}
+                        >
+                          <option value="ADD">Increase (+)</option>
+                          <option value="REMOVE">Decrease (-)</option>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-semibold text-slate-600 mb-1">
+                          Qty
+                        </div>
+                        <Input
+                          placeholder="Example: 3"
+                          value={adjQtyAbs}
+                          onChange={(e) => setAdjQtyAbs(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                          {(() => {
+                            const current = getQtyOnHandForProduct(
+                              inventory,
+                              adjProductId,
+                            );
+                            const qtyAbs = Number(adjQtyAbs);
+                            const signed =
+                              adjDirection === "REMOVE" ? -qtyAbs : qtyAbs;
+
+                            if (current === null)
+                              return <div>Current qty: —</div>;
+                            if (!Number.isFinite(qtyAbs) || qtyAbs <= 0)
+                              return (
+                                <div>
+                                  Current qty: <b>{current}</b>
+                                </div>
+                              );
+
+                            const predicted = current + signed;
+                            return (
+                              <div>
+                                Current qty: <b>{current}</b> → After approval:{" "}
+                                <b>
+                                  {predicted < 0
+                                    ? "❌ would be negative"
+                                    : predicted}
+                                </b>
+                                <div className="mt-1 text-xs text-slate-600">
+                                  Change:{" "}
+                                  <b>
+                                    {signed > 0 ? `+${signed}` : String(signed)}
+                                  </b>
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
-                    );
-                  })()}
-                </div>
 
-                <input
-                  className="border rounded-lg px-3 py-2"
-                  placeholder="Reason (example: damaged, found stock, recount)"
-                  value={adjReason}
-                  onChange={(e) => setAdjReason(e.target.value)}
-                />
+                      <div className="sm:col-span-2">
+                        <div className="text-xs font-semibold text-slate-600 mb-1">
+                          Reason
+                        </div>
+                        <Input
+                          placeholder="Damaged, recount, found stock…"
+                          value={adjReason}
+                          onChange={(e) => setAdjReason(e.target.value)}
+                        />
+                      </div>
+                    </div>
 
-                <button
-                  disabled={adjLoading}
-                  className="px-4 py-2 rounded-lg bg-black text-white text-sm disabled:opacity-60"
+                    <div className="sm:max-w-sm">
+                      <AsyncButton
+                        type="submit"
+                        variant="primary"
+                        state={adjBtn}
+                        text="Send request"
+                        loadingText="Sending…"
+                        successText="Sent"
+                      />
+                    </div>
+                  </form>
+                </SectionCard>
+
+                <SectionCard
+                  title="My requests"
+                  hint="Pending = waiting decision."
+                  right={
+                    <AsyncButton
+                      variant="secondary"
+                      size="sm"
+                      state={myAdjLoading ? "loading" : "idle"}
+                      text="Refresh"
+                      loadingText="Refreshing…"
+                      successText="Done"
+                      onClick={loadMyAdjustRequests}
+                    />
+                  }
                 >
-                  {adjLoading ? "Creating..." : "Create request"}
-                </button>
-              </form>
-            </div>
+                  {myAdjLoading ? (
+                    <div className="grid gap-3">
+                      <Skeleton className="h-16 w-full" />
+                      <Skeleton className="h-16 w-full" />
+                      <Skeleton className="h-16 w-full" />
+                    </div>
+                  ) : (Array.isArray(myAdjRequests) ? myAdjRequests : [])
+                      .length === 0 ? (
+                    <div className="text-sm text-slate-600">
+                      No requests yet.
+                    </div>
+                  ) : (
+                    <div className="grid gap-2">
+                      {(Array.isArray(myAdjRequests) ? myAdjRequests : []).map(
+                        (r) => {
+                          const qty =
+                            Number(r?.qtyChange ?? r?.qty_change ?? 0) || 0;
+                          const st = String(r?.status || "").toUpperCase();
+                          const badge =
+                            st === "PENDING"
+                              ? "bg-amber-50 text-amber-800 border-amber-200"
+                              : st === "APPROVED"
+                                ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                : "bg-rose-50 text-rose-800 border-rose-200";
 
-            <div className="bg-white rounded-xl shadow overflow-hidden">
-              <div className="p-4 border-b flex items-center justify-between gap-3">
-                <div>
-                  <div className="font-semibold">My adjustment requests</div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Pending = waiting for manager/admin decision.
-                  </div>
-                </div>
-                <button
-                  onClick={loadMyAdjustRequests}
-                  className="px-4 py-2 rounded-lg bg-black text-white text-sm"
-                >
-                  Refresh
-                </button>
-              </div>
+                          return (
+                            <div
+                              key={String(r?.id)}
+                              className="rounded-2xl border border-slate-200 bg-white p-3 flex items-start justify-between gap-3"
+                            >
+                              <div className="min-w-0">
+                                <div className="text-sm font-bold text-slate-900 truncate">
+                                  {toStr(r?.productName) || "Unknown product"}
+                                </div>
+                                <div className="mt-1 text-xs text-slate-500">
+                                  Request #{r?.id} •{" "}
+                                  {safeDate(r?.createdAt ?? r?.created_at)}
+                                </div>
+                                <div className="mt-2 text-sm text-slate-700">
+                                  Qty change:{" "}
+                                  <b>{qty > 0 ? `+${qty}` : String(qty)}</b>
+                                </div>
+                              </div>
 
-              {myAdjLoading ? (
-                <div className="p-4 text-sm text-gray-600">Loading...</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left p-3">ID</th>
-                        <th className="text-left p-3">Product</th>
-                        <th className="text-right p-3">Qty change</th>
-                        <th className="text-left p-3">Status</th>
-                        <th className="text-left p-3">Time</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Array.isArray(myAdjRequests) &&
-                      myAdjRequests.length > 0 ? (
-                        myAdjRequests.map((r) => (
-                          <tr key={r.id} className="border-t">
-                            <td className="p-3 font-medium">{r.id}</td>
-                            <td className="p-3">
-                              {r.productName ?? "Unknown Product"}
-                            </td>
-                            <td className="p-3 text-right">
-                              {r.qtyChange ?? r.qty_change}
-                            </td>
-                            <td className="p-3">{r.status}</td>
-                            <td className="p-3">
-                              {safeDate(r.createdAt ?? r.created_at)}
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={5} className="p-4 text-sm text-gray-600">
-                            No adjustment requests found.
-                          </td>
-                        </tr>
+                              <div className="shrink-0 text-right">
+                                <span
+                                  className={cx(
+                                    "inline-flex items-center rounded-xl border px-2.5 py-1 text-xs font-bold",
+                                    badge,
+                                  )}
+                                >
+                                  {st || "—"}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        },
                       )}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : null}
-
-        {/* SALES TAB (Option B) */}
-        {tab === "sales" ? (
-          <div className="mt-4 bg-white rounded-xl shadow overflow-hidden">
-            <div className="p-4 border-b flex items-center justify-between gap-3">
-              <div>
-                <div className="font-semibold">
-                  Sales fulfillment (Option B)
-                </div>
-                <div className="text-xs text-gray-500 mt-1">
-                  Sellers create <b>DRAFT</b> sales. You fulfill by deducting
-                  warehouse inventory. Seller finalizes later.
-                </div>
+                    </div>
+                  )}
+                </SectionCard>
               </div>
-              <button
-                onClick={loadSales}
-                className="px-4 py-2 rounded-lg bg-black text-white text-sm"
+            ) : null}
+
+            {/* SALES */}
+            {section === "sales" ? (
+              <SectionCard
+                title="Release stock"
+                hint="Release only draft sales. This removes stock."
+                right={
+                  <AsyncButton
+                    variant="secondary"
+                    size="sm"
+                    state={salesLoading ? "loading" : "idle"}
+                    text="Refresh"
+                    loadingText="Refreshing…"
+                    successText="Done"
+                    onClick={loadSales}
+                  />
+                }
               >
-                Refresh
-              </button>
-            </div>
+                <div className="grid gap-3">
+                  {/* Tabs + Search */}
+                  <div className="grid gap-2">
+                    <PillTabsWithBadges
+                      value={salesTab}
+                      onChange={setSalesTab}
+                      tabs={[
+                        {
+                          value: "TO_RELEASE",
+                          label: "To release",
+                          badge: draftSalesCount,
+                        },
+                        {
+                          value: "RELEASED",
+                          label: "Released",
+                          badge: releasedCount,
+                        },
+                        { value: "ALL", label: "All", badge: lastTenCount },
+                      ]}
+                    />
 
-            <div className="p-3 border-b flex gap-2 flex-wrap">
-              <input
-                className="flex-1 border rounded-lg px-3 py-2 text-sm"
-                placeholder="Search id/status/seller/customer"
-                value={salesQ}
-                onChange={(e) => setSalesQ(e.target.value)}
-              />
-              <select
-                className="border rounded-lg px-3 py-2 text-sm"
-                value={salesStatusFilter}
-                onChange={(e) => setSalesStatusFilter(e.target.value)}
-              >
-                <option value="ALL">All</option>
-                <option value="DRAFT">DRAFT (incoming)</option>
-                <option value="FULFILLED">FULFILLED</option>
-                <option value="PENDING">PENDING</option>
-                <option value="AWAITING_PAYMENT_RECORD">
-                  AWAITING_PAYMENT_RECORD
-                </option>
-                <option value="COMPLETED">COMPLETED</option>
-                <option value="CANCELLED">CANCELLED</option>
-              </select>
-            </div>
+                    <Input
+                      placeholder="Search by customer, phone, sale id…"
+                      value={salesQ}
+                      onChange={(e) => setSalesQ(e.target.value)}
+                    />
 
-            {salesLoading ? (
-              <div className="p-4 text-sm text-gray-600">Loading...</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-600">
-                    <tr>
-                      <th className="text-left p-3">ID</th>
-                      <th className="text-left p-3">Status</th>
-                      <th className="text-right p-3">Total</th>
-                      <th className="text-left p-3">Seller</th>
-                      <th className="text-left p-3">Customer</th>
-                      <th className="text-left p-3">Created</th>
-                      <th className="text-right p-3">Action</th>
-                      <th className="text-right p-3">View</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredSales.map((s) => {
-                      const status = String(s.status || "").toUpperCase();
-                      const canFulfill = status === "DRAFT";
-                      const loading = saleActionLoadingId === s.id;
+                    <div className="text-xs text-slate-500">
+                      Showing latest <b>10</b> results (most recent first).
+                    </div>
+                  </div>
 
-                      const sellerLabel = String(
-                        s.sellerEmail ||
-                          s.sellerName ||
-                          s.sellerId ||
-                          s.seller_id ||
-                          "-",
-                      );
+                  {/* Content */}
+                  {salesLoading ? (
+                    <div className="grid gap-3">
+                      <Skeleton className="h-24 w-full" />
+                      <Skeleton className="h-24 w-full" />
+                      <Skeleton className="h-24 w-full" />
+                    </div>
+                  ) : filteredSalesLastTen.length === 0 ? (
+                    <div className="text-sm text-slate-600">
+                      No sales found.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                      {filteredSalesLastTen.map((s) => {
+                        const status = String(s?.status || "").toUpperCase();
+                        const canRelease = status === "DRAFT";
 
-                      const customerLabel = [
-                        s.customerName || "-",
-                        s.customerPhone || "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ");
+                        const sellerLabel =
+                          toStr(s?.sellerName) ||
+                          toStr(s?.sellerEmail) ||
+                          `Staff #${toStr(s?.sellerId || s?.seller_id) || "—"}`;
 
-                      return (
-                        <tr key={s.id} className="border-t">
-                          <td className="p-3 font-medium">{s.id}</td>
-                          <td className="p-3">{status}</td>
-                          <td className="p-3 text-right">
-                            {fmtMoney(s.totalAmount ?? 0)}
-                          </td>
-                          <td className="p-3">{sellerLabel}</td>
-                          <td className="p-3">{customerLabel}</td>
-                          <td className="p-3">{safeDate(s.createdAt)}</td>
-                          <td className="p-3 text-right">
-                            <button
-                              disabled={!canFulfill || loading}
-                              className={`px-3 py-1.5 rounded-lg text-xs ${
-                                canFulfill && !loading
-                                  ? "bg-green-600 text-white hover:bg-green-700"
-                                  : "bg-gray-200 text-gray-500"
-                              }`}
-                              onClick={() => fulfillSale(s.id)}
-                            >
-                              {loading ? "..." : "Fulfill"}
-                            </button>
-                          </td>
-                          <td className="p-3 text-right">
-                            <button
-                              className="px-3 py-1.5 rounded-lg border text-xs hover:bg-gray-50"
-                              onClick={async () => {
-                                await openSaleDetails(s.id);
-                              }}
-                            >
-                              View
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {filteredSales.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} className="p-4 text-sm text-gray-600">
-                          No sales found.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        ) : null}
+                        const customerName =
+                          toStr(s?.customerName) || "Walk-in";
+                        const customerPhone = toStr(s?.customerPhone);
+                        const customerLabel = [customerName, customerPhone]
+                          .filter(Boolean)
+                          .join(" • ");
 
-        <SaleModal
-          open={!!viewSale}
-          sale={viewSale}
-          loading={viewSaleLoading}
-          onClose={() => setViewSale(null)}
-        />
+                        const created = safeDate(s?.createdAt || s?.created_at);
+                        const total = money(s?.totalAmount ?? s?.total ?? 0);
+
+                        return (
+                          <div
+                            key={String(s?.id)}
+                            className="rounded-2xl border border-slate-200 bg-white p-4"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <div className="text-sm font-extrabold text-slate-900">
+                                    Sale ID: {s?.id ?? "—"}
+                                  </div>
+                                  <StatusBadge status={status} />
+                                </div>
+
+                                <div className="mt-2 text-sm text-slate-700">
+                                  Customer:{" "}
+                                  <b className="break-words">{customerLabel}</b>
+                                </div>
+
+                                <div className="mt-1 text-sm text-slate-700">
+                                  Seller:{" "}
+                                  <b className="break-words">{sellerLabel}</b>
+                                </div>
+
+                                <div className="mt-2 text-xs text-slate-500">
+                                  Created: {created}
+                                </div>
+                              </div>
+
+                              <div className="shrink-0 text-right">
+                                <div className="text-lg font-extrabold text-slate-900">
+                                  {total}
+                                </div>
+                                <div className="text-xs text-slate-500">
+                                  total
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 flex flex-wrap gap-2 items-center">
+                              <ReleaseButton
+                                state={releaseBtnState[s?.id] || "idle"}
+                                disabled={!canRelease}
+                                onClick={() => releaseStock(s?.id)}
+                              />
+
+                              <button
+                                type="button"
+                                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                                onClick={() => openSaleDetails(s?.id)}
+                              >
+                                View items
+                              </button>
+
+                              {!canRelease ? (
+                                <span className="text-xs text-slate-500">
+                                  Release allowed only for <b>DRAFT</b>.
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </SectionCard>
+            ) : null}
+          </main>
+        </div>
       </div>
+
+      <SaleModal
+        open={!!viewSale}
+        sale={viewSale}
+        loading={viewSaleLoading}
+        onClose={() => setViewSale(null)}
+      />
     </div>
   );
-}
-
-function TabButton({ active, onClick, children }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={
-        "px-3 py-2 rounded-lg border text-sm " +
-        (active
-          ? "bg-black text-white border-black"
-          : "bg-white text-gray-700 hover:bg-gray-100")
-      }
-    >
-      {children}
-    </button>
-  );
-}
-
-function Card({ label, value, sub }) {
-  return (
-    <div className="bg-white rounded-xl shadow p-4">
-      <div className="text-sm text-gray-500">{label}</div>
-      <div className="text-2xl font-semibold mt-1">{value}</div>
-      {sub ? <div className="text-sm text-gray-600 mt-1">{sub}</div> : null}
-    </div>
-  );
-}
-
-function safeDate(v) {
-  if (!v) return "-";
-  try {
-    return new Date(v).toLocaleString();
-  } catch {
-    return String(v);
-  }
-}
-
-function fmtMoney(n) {
-  const x = Number(n ?? 0);
-  if (!Number.isFinite(x)) return "0";
-  // RWF formatting (no cents)
-  return Math.round(x).toLocaleString();
-}
-
-function getQtyOnHandForProduct(inventory, productId) {
-  const pid = Number(productId);
-  if (!pid) return null;
-  const row = (Array.isArray(inventory) ? inventory : []).find(
-    (r) => Number(r.id) === pid,
-  );
-  if (!row) return null;
-  const qty = Number(row.qtyOnHand ?? row.qty_on_hand ?? 0);
-  return Number.isFinite(qty) ? qty : 0;
 }
 
 function SaleModal({ open, sale, loading, onClose }) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 
-      <div className="relative w-full max-w-2xl bg-white rounded-xl shadow-lg overflow-hidden">
-        <div className="p-4 border-b flex items-center justify-between gap-3">
-          <div>
-            <div className="font-semibold">
-              Sale #{sale?.id ?? "-"} {loading ? "…" : ""}
+      <div className="relative w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
+        <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-bold text-slate-900">
+              Sale #{sale?.id ?? "—"} {loading ? "…" : ""}
             </div>
-            <div className="text-xs text-gray-500 mt-1">
-              Status: {String(sale?.status || "-").toUpperCase()} • Seller:{" "}
-              {String(sale?.sellerId ?? "-")} • Total:{" "}
-              {fmtMoney(sale?.totalAmount ?? 0)}
+            <div className="text-xs text-slate-600 mt-1 truncate">
+              Status: {String(sale?.status || "—").toUpperCase()} • Total:{" "}
+              {money(sale?.totalAmount ?? 0)}
             </div>
           </div>
 
           <button
-            className="px-3 py-1.5 rounded-lg border text-xs hover:bg-gray-50"
+            type="button"
+            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
             onClick={onClose}
           >
             Close
@@ -1181,48 +2096,49 @@ function SaleModal({ open, sale, loading, onClose }) {
 
         <div className="p-4">
           {loading ? (
-            <div className="text-sm text-gray-600">Loading...</div>
+            <div className="grid gap-3">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+            </div>
           ) : (
             <>
-              <div className="text-sm font-semibold">Items</div>
-              <div className="mt-3 overflow-x-auto border rounded-lg">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-600">
-                    <tr>
-                      <th className="text-left p-3">Product</th>
-                      <th className="text-left p-3">SKU</th>
-                      <th className="text-right p-3">Qty</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(Array.isArray(sale?.items) ? sale.items : []).map(
-                      (it, idx) => (
-                        <tr key={it.id || idx} className="border-t">
-                          <td className="p-3 font-medium">
-                            {it.productName ||
-                              it.name ||
-                              `#${it.productId ?? "-"}`}
-                          </td>
-                          <td className="p-3 text-gray-600">{it.sku || "-"}</td>
-                          <td className="p-3 text-right">{it.qty ?? 0}</td>
-                        </tr>
-                      ),
-                    )}
-                    {(Array.isArray(sale?.items) ? sale.items : []).length ===
-                    0 ? (
-                      <tr>
-                        <td colSpan={3} className="p-4 text-sm text-gray-600">
-                          No items.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
+              <div className="text-sm font-bold text-slate-900">Items</div>
+
+              <div className="mt-3 grid gap-2">
+                {(Array.isArray(sale?.items) ? sale.items : []).map(
+                  (it, idx) => (
+                    <div
+                      key={it?.id || idx}
+                      className="rounded-2xl border border-slate-200 bg-white p-3 flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-bold text-slate-900 truncate">
+                          {it?.productName ||
+                            it?.name ||
+                            `#${it?.productId ?? "—"}`}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {it?.sku ? `SKU: ${it.sku}` : "SKU: —"}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="text-lg font-extrabold text-slate-900">
+                          {Number(it?.qty ?? 0)}
+                        </div>
+                        <div className="text-xs text-slate-500">qty</div>
+                      </div>
+                    </div>
+                  ),
+                )}
+
+                {(Array.isArray(sale?.items) ? sale.items : []).length === 0 ? (
+                  <div className="text-sm text-slate-600">No items.</div>
+                ) : null}
               </div>
 
-              <div className="mt-4 text-xs text-gray-500">
-                Storekeeper action is <b>Fulfill</b> from the list (deducts
-                warehouse stock). Seller finalizes after fulfillment.
+              <div className="mt-4 text-xs text-slate-600">
+                Store keeper releases stock. Seller finishes payment later.
               </div>
             </>
           )}

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-
 import { apiFetch } from "../lib/api";
+import AsyncButton from "./AsyncButton";
 
 const ENDPOINTS = {
   PRODUCTS_LIST: "/products",
@@ -21,26 +21,61 @@ function normalizeNumberInput(v) {
 
 function fmtMoney(v) {
   const n = Number(v);
-  if (!Number.isFinite(n)) return "-";
+  if (!Number.isFinite(n)) return "—";
   return n.toLocaleString();
 }
 
-function formatApiError(e, fallback) {
-  const status = e?.status != null ? `HTTP ${e.status}` : "";
-  const url = e?.url ? `• ${e.url}` : "";
-  const apiErr = e?.data?.error ? `• ${e.data.error}` : "";
-  const fieldErrors = e?.data?.details?.fieldErrors
-    ? `• ${JSON.stringify(e.data.details.fieldErrors)}`
-    : "";
-  const message = e?.message ? `• ${e.message}` : "";
-  return [fallback, status, url, apiErr, fieldErrors, message]
-    .filter(Boolean)
-    .join(" ");
+function cx(...classes) {
+  return classes.filter(Boolean).join(" ");
 }
 
-export default function ProductPricingPanel() {
+function Banner({ kind = "info", children }) {
+  const cls =
+    kind === "success"
+      ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+      : kind === "danger"
+        ? "bg-rose-50 text-rose-900 border-rose-200"
+        : "bg-slate-50 text-slate-800 border-slate-200";
+
+  return <div className={cx("rounded-2xl border px-4 py-3 text-sm", cls)}>{children}</div>;
+}
+
+function Input(props) {
+  return (
+    <input
+      {...props}
+      className={cx(
+        "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none",
+        "focus:ring-2 focus:ring-slate-300",
+        props.className || "",
+      )}
+    />
+  );
+}
+
+// ✅ VALID inside <tbody>: must be <tr><td/></tr>
+function SkeletonTableRow() {
+  return (
+    <tr className="border-b border-slate-100">
+      <td className="p-3" colSpan={6}>
+        <div className="animate-pulse grid grid-cols-12 gap-3">
+          <div className="col-span-5 h-4 bg-slate-200 rounded" />
+          <div className="col-span-2 h-4 bg-slate-200 rounded" />
+          <div className="col-span-2 h-4 bg-slate-200 rounded" />
+          <div className="col-span-2 h-4 bg-slate-200 rounded" />
+          <div className="col-span-1 h-8 bg-slate-200 rounded" />
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+export default function ProductPricingPanel({ title = "Pricing" }) {
   const [msg, setMsg] = useState("");
+  const [msgKind, setMsgKind] = useState("info"); // info | success | danger
+
   const [loading, setLoading] = useState(false);
+  const [reloadState, setReloadState] = useState("idle"); // AsyncButton
 
   const [products, setProducts] = useState([]);
   const [q, setQ] = useState("");
@@ -54,18 +89,23 @@ export default function ProductPricingPanel() {
   const [sellingPrice, setSellingPrice] = useState("");
   const [maxDiscountPercent, setMaxDiscountPercent] = useState("0");
 
-  const [saving, setSaving] = useState(false);
+  const [saveState, setSaveState] = useState("idle"); // AsyncButton
+
+  function toast(kind, text) {
+    setMsgKind(kind);
+    setMsg(text || "");
+  }
 
   async function load() {
     setLoading(true);
-    setMsg("");
+    toast("info", "");
     try {
       const data = await apiFetch(ENDPOINTS.PRODUCTS_LIST, { method: "GET" });
       const list = data?.products ?? data?.items ?? data?.rows ?? [];
       setProducts(Array.isArray(list) ? list : []);
     } catch (e) {
       setProducts([]);
-      setMsg(formatApiError(e, "Failed to load products"));
+      toast("danger", e?.data?.error || e?.message || "Could not load products.");
     } finally {
       setLoading(false);
     }
@@ -81,18 +121,15 @@ export default function ProductPricingPanel() {
     if (!qq) return products;
 
     return (products || []).filter((p) => {
-      const id = String(p?.id ?? "");
-      const name = safe(p?.name).toLowerCase();
-      const sku = safe(p?.sku).toLowerCase();
-      return id.includes(qq) || name.includes(qq) || sku.includes(qq);
+      const name = safe(p?.name || p?.productName || "").toLowerCase();
+      const sku = safe(p?.sku || "").toLowerCase();
+      return name.includes(qq) || sku.includes(qq);
     });
   }, [products, q]);
 
   function openEdit(p) {
     setActive(p);
 
-    // Backend stores purchase price in products.costPrice.
-    // Many APIs also expose it as purchasePrice; handle both safely.
     const pp = p?.purchasePrice ?? p?.costPrice ?? null;
     const sp = p?.sellingPrice ?? null;
     const md = p?.maxDiscountPercent ?? 0;
@@ -101,7 +138,8 @@ export default function ProductPricingPanel() {
     setSellingPrice(sp == null ? "" : String(sp));
     setMaxDiscountPercent(String(md));
 
-    setMsg("");
+    setSaveState("idle");
+    toast("info", "");
     setOpen(true);
   }
 
@@ -111,171 +149,141 @@ export default function ProductPricingPanel() {
     setPurchasePrice("");
     setSellingPrice("");
     setMaxDiscountPercent("0");
+    setSaveState("idle");
+  }
+
+  async function onReload() {
+    setReloadState("loading");
+    await load();
+    setReloadState("success");
+    setTimeout(() => setReloadState("idle"), 900);
   }
 
   async function save() {
     if (!active?.id) return;
 
-    setSaving(true);
-    setMsg("");
+    setSaveState("loading");
+    toast("info", "");
 
     const ppRaw = normalizeNumberInput(purchasePrice);
     const spRaw = normalizeNumberInput(sellingPrice);
     const mdRaw = normalizeNumberInput(maxDiscountPercent);
 
-    if (ppRaw === "") {
-      setSaving(false);
-      setMsg("Purchase price is required.");
-      return;
-    }
-    if (spRaw === "") {
-      setSaving(false);
-      setMsg("Selling price is required.");
-      return;
-    }
-    if (mdRaw === "") {
-      setSaving(false);
-      setMsg("Max discount % is required (use 0 if none).");
-      return;
-    }
+    if (ppRaw === "") return setSaveState("idle"), toast("danger", "Purchase price is required.");
+    if (spRaw === "") return setSaveState("idle"), toast("danger", "Selling price is required.");
+    if (mdRaw === "") return setSaveState("idle"), toast("danger", "Max discount is required (use 0 if none).");
 
     const pp = Number(ppRaw);
     const sp = Number(spRaw);
     const md = Number(mdRaw);
 
-    if (!Number.isFinite(pp) || pp < 0) {
-      setSaving(false);
-      setMsg("Purchase price must be a number >= 0.");
-      return;
-    }
-    if (!Number.isFinite(sp) || sp <= 0) {
-      setSaving(false);
-      setMsg("Selling price must be a number > 0.");
-      return;
-    }
-    if (!Number.isFinite(md) || md < 0 || md > 100) {
-      setSaving(false);
-      setMsg("Max discount % must be between 0 and 100.");
-      return;
-    }
-    if (sp < pp) {
-      setSaving(false);
-      setMsg("Selling price cannot be below purchase price.");
-      return;
-    }
+    if (!Number.isFinite(pp) || pp < 0) return setSaveState("idle"), toast("danger", "Purchase price must be 0 or more.");
+    if (!Number.isFinite(sp) || sp <= 0) return setSaveState("idle"), toast("danger", "Selling price must be more than 0.");
+    if (!Number.isFinite(md) || md < 0 || md > 100) return setSaveState("idle"), toast("danger", "Max discount must be between 0 and 100.");
+    if (sp < pp) return setSaveState("idle"), toast("danger", "Selling price cannot be lower than purchase price.");
 
-    const body = {
-      purchasePrice: pp,
-      sellingPrice: sp,
-      maxDiscountPercent: md, // ✅ REQUIRED BY YOUR SERVICE
-    };
+    const body = { purchasePrice: pp, sellingPrice: sp, maxDiscountPercent: md };
 
     try {
-      await apiFetch(ENDPOINTS.PRODUCT_PRICING_UPDATE(active.id), {
-        method: "PATCH",
-        body,
-      });
-
-      setMsg("✅ Pricing updated");
+      await apiFetch(ENDPOINTS.PRODUCT_PRICING_UPDATE(active.id), { method: "PATCH", body });
+      toast("success", "Pricing saved.");
+      setSaveState("success");
+      setTimeout(() => setSaveState("idle"), 900);
       closeEdit();
       await load();
     } catch (e) {
-      setMsg(formatApiError(e, "Update failed"));
-      // eslint-disable-next-line no-console
-      console.error("Pricing update error:", {
-        status: e?.status,
-        url: e?.url,
-        data: e?.data,
-        message: e?.message,
-        sentBody: body,
-        productId: active?.id,
-      });
-    } finally {
-      setSaving(false);
+      setSaveState("idle");
+      toast("danger", e?.data?.error || e?.message || "Update failed.");
     }
   }
 
+  const activeName = active?.name || active?.productName || "Product";
+  const activeSku = active?.sku ? String(active.sku) : "";
+
+  const profitPreview = (() => {
+    const pp = Number(normalizeNumberInput(purchasePrice));
+    const sp = Number(normalizeNumberInput(sellingPrice));
+    if (!Number.isFinite(pp) || !Number.isFinite(sp)) return null;
+    return sp - pp;
+  })();
+
   return (
-    <div className="mt-6 bg-white rounded-xl shadow overflow-hidden">
-      <div className="p-4 border-b flex items-center justify-between gap-3">
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="p-4 border-b border-slate-200 flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <div className="font-semibold">Product pricing</div>
-          <div className="text-xs text-gray-500 mt-1">
-            Set purchase price, selling price, and max discount.
-          </div>
+          <div className="text-sm font-semibold text-slate-900">{title}</div>
+          <div className="text-xs text-slate-600 mt-1">Change selling prices and allowed discounts.</div>
         </div>
 
-        <button
-          onClick={load}
-          className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
-        >
-          {loading ? "Loading..." : "Reload"}
-        </button>
+        <AsyncButton
+          state={reloadState}
+          text="Reload"
+          loadingText="Loading…"
+          successText="Done"
+          onClick={onReload}
+          variant="secondary"
+        />
       </div>
 
       {msg ? (
-        <div className="px-4 pt-4 text-sm">
-          {String(msg).startsWith("✅") ? (
-            <div className="p-3 rounded-lg bg-green-50 text-green-800">
-              {msg}
-            </div>
-          ) : (
-            <div className="p-3 rounded-lg bg-red-50 text-red-700">{msg}</div>
-          )}
+        <div className="p-4">
+          <Banner kind={msgKind === "success" ? "success" : msgKind === "danger" ? "danger" : "info"}>{msg}</Banner>
         </div>
       ) : null}
 
-      <div className="p-4 border-b">
-        <input
-          className="w-full border rounded-lg px-3 py-2 text-sm"
-          placeholder="Search by id / name / SKU"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
+      <div className="p-4 border-b border-slate-200">
+        <Input placeholder="Search by product name or SKU" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600">
-            <tr>
-              <th className="text-left p-3">ID</th>
-              <th className="text-left p-3">Name</th>
-              <th className="text-left p-3">SKU</th>
-              <th className="text-right p-3">Purchase</th>
-              <th className="text-right p-3">Selling</th>
-              <th className="text-right p-3">Max discount %</th>
-              <th className="text-right p-3">Action</th>
+          <thead className="bg-slate-50 text-slate-600">
+            <tr className="border-b border-slate-200">
+              <th className="text-left p-3 text-xs font-semibold">Product</th>
+              <th className="text-left p-3 text-xs font-semibold">SKU</th>
+              <th className="text-right p-3 text-xs font-semibold">Purchase</th>
+              <th className="text-right p-3 text-xs font-semibold">Selling</th>
+              <th className="text-right p-3 text-xs font-semibold">Max discount</th>
+              <th className="text-right p-3 text-xs font-semibold">Action</th>
             </tr>
           </thead>
-          <tbody>
-            {(filtered || []).map((p) => (
-              <tr key={p.id} className="border-t">
-                <td className="p-3 font-medium">{p.id}</td>
-                <td className="p-3">{p.name || "-"}</td>
-                <td className="p-3 text-gray-600">{p.sku || "-"}</td>
-                <td className="p-3 text-right">
-                  {fmtMoney(p.purchasePrice ?? p.costPrice)}
-                </td>
-                <td className="p-3 text-right">{fmtMoney(p.sellingPrice)}</td>
-                <td className="p-3 text-right">{p.maxDiscountPercent ?? 0}</td>
-                <td className="p-3 text-right">
-                  <button
-                    className="px-3 py-1.5 rounded-lg border text-xs hover:bg-gray-50"
-                    onClick={() => openEdit(p)}
-                  >
-                    Set pricing
-                  </button>
-                </td>
-              </tr>
-            ))}
 
-            {(filtered || []).length === 0 ? (
-              <tr>
-                <td colSpan={7} className="p-4 text-sm text-gray-600">
-                  No products found.
-                </td>
-              </tr>
-            ) : null}
+          <tbody>
+            {loading ? (
+              <>
+                <SkeletonTableRow />
+                <SkeletonTableRow />
+                <SkeletonTableRow />
+              </>
+            ) : (
+              <>
+                {(filtered || []).map((p) => (
+                  <tr key={p?.id ?? `${p?.sku}-${p?.name}`} className="border-b border-slate-100 hover:bg-slate-50">
+                    <td className="p-3 font-semibold text-slate-900">{p?.name || p?.productName || "—"}</td>
+                    <td className="p-3 text-slate-600">{p?.sku || "—"}</td>
+                    <td className="p-3 text-right">{fmtMoney(p?.purchasePrice ?? p?.costPrice)}</td>
+                    <td className="p-3 text-right">{fmtMoney(p?.sellingPrice)}</td>
+                    <td className="p-3 text-right">{Number(p?.maxDiscountPercent ?? 0)}%</td>
+                    <td className="p-3 text-right">
+                      <button
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50"
+                        onClick={() => openEdit(p)}
+                      >
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+
+                {(filtered || []).length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-4 text-sm text-slate-600">
+                      No products found.
+                    </td>
+                  </tr>
+                ) : null}
+              </>
+            )}
           </tbody>
         </table>
       </div>
@@ -283,67 +291,55 @@ export default function ProductPricingPanel() {
       {/* Modal */}
       {open && active ? (
         <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow max-w-md w-full p-4">
-            <div className="font-semibold">
-              Pricing — #{active.id} {active.name ? `• ${active.name}` : ""}
-            </div>
-
-            <div className="mt-4 grid gap-3">
-              <div>
-                <div className="text-xs text-gray-500 mb-1">Purchase price</div>
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="e.g. 900"
-                  value={purchasePrice}
-                  onChange={(e) => setPurchasePrice(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <div className="text-xs text-gray-500 mb-1">
-                  Selling price (&gt; 0)
-                </div>
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="e.g. 1500"
-                  value={sellingPrice}
-                  onChange={(e) => setSellingPrice(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <div className="text-xs text-gray-500 mb-1">
-                  Max discount percent (0 - 100)
-                </div>
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="e.g. 10"
-                  value={maxDiscountPercent}
-                  onChange={(e) => setMaxDiscountPercent(e.target.value)}
-                />
-              </div>
-
-              <div className="text-xs text-gray-500">
-                Sends: <b>purchasePrice</b>, <b>sellingPrice</b>,{" "}
-                <b>maxDiscountPercent</b>
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm max-w-md w-full overflow-hidden">
+            <div className="p-4 border-b border-slate-200">
+              <div className="text-sm font-semibold text-slate-900">Edit pricing</div>
+              <div className="mt-1 text-xs text-slate-600">
+                {activeName}
+                {activeSku ? ` • SKU ${activeSku}` : ""}
               </div>
             </div>
 
-            <div className="mt-5 flex gap-2 justify-end">
+            <div className="p-4 grid gap-3">
+              <div>
+                <div className="text-xs font-semibold text-slate-600 mb-1">Purchase price</div>
+                <Input inputMode="numeric" placeholder="Example: 900" value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} />
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold text-slate-600 mb-1">Selling price</div>
+                <Input inputMode="numeric" placeholder="Example: 1500" value={sellingPrice} onChange={(e) => setSellingPrice(e.target.value)} />
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold text-slate-600 mb-1">Max discount (%)</div>
+                <Input inputMode="numeric" placeholder="Example: 10" value={maxDiscountPercent} onChange={(e) => setMaxDiscountPercent(e.target.value)} />
+                <div className="mt-1 text-xs text-slate-500">Set 0 if you don’t allow discounts.</div>
+              </div>
+
+              {profitPreview != null ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800">
+                  Profit check: <b>{fmtMoney(profitPreview)}</b> (selling − purchase)
+                </div>
+              ) : null}
+            </div>
+
+            <div className="p-4 border-t border-slate-200 flex gap-2 justify-end">
               <button
-                className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
+                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"
                 onClick={closeEdit}
-                disabled={saving}
+                disabled={saveState === "loading"}
               >
                 Cancel
               </button>
-              <button
-                className="px-4 py-2 rounded-lg bg-black text-white text-sm hover:bg-gray-800 disabled:opacity-60"
+
+              <AsyncButton
+                state={saveState}
+                text="Save"
+                loadingText="Saving…"
+                successText="Saved"
                 onClick={save}
-                disabled={saving}
-              >
-                {saving ? "Saving..." : "Save"}
-              </button>
+              />
             </div>
           </div>
         </div>

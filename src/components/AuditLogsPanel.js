@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-
 import { apiFetch } from "../lib/api";
 
 function safeDate(v) {
-  if (!v) return "-";
+  if (!v) return "—";
   try {
-    return new Date(v).toLocaleString();
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return String(v);
+    return d.toLocaleString();
   } catch {
     return String(v);
   }
@@ -40,30 +41,54 @@ function isPresent(v) {
   return v !== undefined && v !== null && String(v) !== "";
 }
 
+function cx(...classes) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function Badge({ kind = "gray", children }) {
+  const cls =
+    kind === "green"
+      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+      : kind === "amber"
+        ? "bg-amber-50 text-amber-800 border-amber-200"
+        : kind === "red"
+          ? "bg-rose-50 text-rose-800 border-rose-200"
+          : "bg-slate-50 text-slate-700 border-slate-200";
+
+  return (
+    <span className={cx("inline-flex items-center rounded-xl border px-2.5 py-1 text-xs font-semibold", cls)}>
+      {children}
+    </span>
+  );
+}
+
 /**
  * AuditLogsPanel
- * - Uses backend GET /audit with filters + cursor pagination.
- * - Uses backend GET /audit/actions to populate action dropdown (optional).
+ * - GET /audit -> { ok: true, rows: [], nextCursor: number|null }
+ * - GET /audit/actions -> { ok: true, actions: [] }
  *
- * Expected backend:
- * GET /audit -> { ok: true, rows: [], nextCursor: number|null }
- * GET /audit/actions -> { ok: true, actions: [] }
+ * NEW:
+ * - GET /users (best effort) to map userId -> name
+ *
+ * Props:
+ * - currentLocationLabel: string (example: "Kigali HQ (KGL)")
+ * - locationLabelById: { [id]: "Name (Code)" } optional
  */
 export default function AuditLogsPanel({
-  title = "Audit logs",
+  title = "Actions history",
   subtitle = "",
   defaultLimit = 50,
-
-  // Optional initial server-side filters for deep links / evidence views.
-  // Example: { entity: "sale", entityId: "uuid", from: "2026-01-01", to: "2026-01-31", q: "john" }
   initialFilters = null,
+
+  // ✅ new
+  currentLocationLabel = "",
+  locationLabelById = null,
 }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
 
-  const init =
-    initialFilters && typeof initialFilters === "object" ? initialFilters : {};
+  const init = initialFilters && typeof initialFilters === "object" ? initialFilters : {};
 
   // server-side filters
   const [q, setQ] = useState(() => toStr(init.q));
@@ -79,15 +104,16 @@ export default function AuditLogsPanel({
   });
 
   // cursor pagination
-  const [cursor, setCursor] = useState(() =>
-    init.cursor === undefined ? null : init.cursor,
-  );
+  const [cursor, setCursor] = useState(() => (init.cursor === undefined ? null : init.cursor));
   const [nextCursor, setNextCursor] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
   // dropdown data
   const [actionsRaw, setActionsRaw] = useState([]);
   const actions = useMemo(() => uniqStrings(actionsRaw), [actionsRaw]);
+
+  // ✅ staff map (userId -> {name,email})
+  const [staffMap, setStaffMap] = useState({});
 
   const buildParams = useCallback(
     (overrideCursor) => {
@@ -117,27 +143,14 @@ export default function AuditLogsPanel({
 
       return params.toString();
     },
-    [
-      action,
-      cursor,
-      defaultLimit,
-      entity,
-      entityId,
-      from,
-      limit,
-      q,
-      to,
-      userId,
-    ],
+    [action, cursor, defaultLimit, entity, entityId, from, limit, q, to, userId],
   );
 
   const load = useCallback(async () => {
     setLoading(true);
     setMsg("");
     try {
-      // New load resets pagination cursor
       setCursor(null);
-
       const qs = buildParams(null);
       const data = await apiFetch(`/audit?${qs}`);
       const list = data?.rows ?? data?.audit ?? data?.logs ?? [];
@@ -146,7 +159,7 @@ export default function AuditLogsPanel({
     } catch (e) {
       setRows([]);
       setNextCursor(null);
-      setMsg(e?.data?.error || e?.message || "Failed to load audit logs");
+      setMsg(e?.data?.error || e?.message || "Failed to load history");
     } finally {
       setLoading(false);
     }
@@ -167,7 +180,6 @@ export default function AuditLogsPanel({
         const prevArr = Array.isArray(prev) ? prev : [];
         const incoming = Array.isArray(newRows) ? newRows : [];
 
-        // de-dup by id (defensive)
         const seen = new Set(prevArr.map((r) => r?.id).filter(Boolean));
         const merged = prevArr.slice();
         for (const r of incoming) {
@@ -205,25 +217,79 @@ export default function AuditLogsPanel({
     };
   }, []);
 
+  // ✅ load staff list (best effort) so we can show names instead of emails/ids
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const data = await apiFetch("/users", { method: "GET" });
+        if (!alive) return;
+        const list = Array.isArray(data?.users) ? data.users : [];
+        const map = {};
+        for (const u of list) {
+          if (u?.id == null) continue;
+          map[String(u.id)] = { name: u?.name || "", email: u?.email || "" };
+        }
+        setStaffMap(map);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // auto-load on mount (and when initialFilters change)
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialFilters]);
 
+  function staffNameForRow(r) {
+    const uid = String(r?.userId ?? r?.user_id ?? "");
+    if (!uid) return "—";
+    const info = staffMap[uid];
+    if (info?.name) return info.name; // ✅ prefer name
+    return "Staff member"; // don’t show raw id if we can’t map
+  }
+
+  function placeForRow(r) {
+    // if backend ever sends it, use it
+    const explicit =
+      r?.locationName ||
+      r?.location_name ||
+      r?.location?.name ||
+      null;
+
+    if (explicit) return String(explicit);
+
+    const locId = r?.locationId ?? r?.location_id ?? null;
+
+    // best: map by id if provided
+    if (locId != null && locationLabelById && typeof locationLabelById === "object") {
+      const hit = locationLabelById[String(locId)];
+      if (hit) return hit;
+    }
+
+    // fallback: current logged-in location label
+    if (currentLocationLabel) return currentLocationLabel;
+
+    // last resort
+    return "Store / branch";
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold">{title}</div>
-          {subtitle ? (
-            <div className="text-xs text-gray-500 mt-1">{subtitle}</div>
-          ) : null}
+          <div className="text-sm font-semibold text-slate-900">{title}</div>
+          {subtitle ? <div className="text-xs text-slate-600 mt-1">{subtitle}</div> : null}
         </div>
 
         <button
           onClick={load}
-          className="px-3 py-1.5 rounded-lg text-sm bg-black text-white"
+          className="rounded-xl bg-slate-900 text-white px-4 py-2 text-sm font-semibold hover:bg-slate-800 disabled:opacity-60"
           disabled={loading}
         >
           {loading ? "Loading…" : "Refresh"}
@@ -231,21 +297,22 @@ export default function AuditLogsPanel({
       </div>
 
       {msg ? (
-        <div className="p-3 rounded-lg bg-red-50 text-red-700 border border-red-200 text-sm">
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
           {msg}
         </div>
       ) : null}
 
+      {/* Filters */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-2">
         <input
-          className="border rounded-lg px-3 py-2 text-sm"
-          placeholder="Search (q)…"
+          className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+          placeholder="Search…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
 
         <select
-          className="border rounded-lg px-3 py-2 text-sm"
+          className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-slate-300"
           value={action}
           onChange={(e) => setAction(e.target.value)}
         >
@@ -258,65 +325,66 @@ export default function AuditLogsPanel({
         </select>
 
         <input
-          className="border rounded-lg px-3 py-2 text-sm"
-          placeholder="Entity (sale/payment/credit…) "
+          className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+          placeholder="Record type (sale, payment…)"
           value={entity}
           onChange={(e) => setEntity(e.target.value)}
         />
 
         <input
-          className="border rounded-lg px-3 py-2 text-sm"
-          placeholder="Entity ID"
+          className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+          placeholder="Record code"
           value={entityId}
           onChange={(e) => setEntityId(e.target.value)}
         />
 
         <input
-          className="border rounded-lg px-3 py-2 text-sm"
-          placeholder="User ID"
+          className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+          placeholder="Staff (optional)"
           value={userId}
           onChange={(e) => setUserId(e.target.value)}
         />
 
         <input
           type="date"
-          className="border rounded-lg px-3 py-2 text-sm"
+          className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-slate-300"
           value={from}
           onChange={(e) => setFrom(e.target.value)}
         />
 
         <input
           type="date"
-          className="border rounded-lg px-3 py-2 text-sm"
+          className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-slate-300"
           value={to}
           onChange={(e) => setTo(e.target.value)}
         />
       </div>
 
       <div className="flex items-center justify-between gap-3">
-        <div className="text-xs text-gray-500">
+        <div className="text-xs text-slate-500">
           {rows.length} row(s)
           {isPresent(nextCursor) ? " • More available" : " • End"}
         </div>
 
         <div className="flex items-center gap-2">
           <input
-            className="border rounded-lg px-3 py-2 text-sm w-24"
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm w-24 outline-none focus:ring-2 focus:ring-slate-300"
             placeholder="Limit"
             value={String(limit)}
             onChange={(e) => setLimit(e.target.value)}
+            inputMode="numeric"
           />
           <button
             onClick={load}
-            className="px-3 py-2 rounded-lg text-sm bg-white border hover:bg-gray-50"
+            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-60"
             disabled={loading}
           >
-            Apply filters
+            Apply
           </button>
 
           <button
             onClick={loadMore}
-            className="px-3 py-2 rounded-lg text-sm bg-white border hover:bg-gray-50"
+            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-60"
             disabled={!isPresent(nextCursor) || loadingMore}
             title={!isPresent(nextCursor) ? "No more pages" : "Load next page"}
           >
@@ -325,42 +393,70 @@ export default function AuditLogsPanel({
         </div>
       </div>
 
-      <div className="overflow-auto border rounded-2xl bg-white">
+      {/* Table */}
+      <div className="overflow-auto rounded-2xl border border-slate-200 bg-white">
         <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600">
-            <tr>
-              <th className="text-left px-3 py-2 border-b">When</th>
-              <th className="text-left px-3 py-2 border-b">Action</th>
-              <th className="text-left px-3 py-2 border-b">Entity</th>
-              <th className="text-left px-3 py-2 border-b">Entity ID</th>
-              <th className="text-left px-3 py-2 border-b">User</th>
-              <th className="text-left px-3 py-2 border-b">Location</th>
+          <thead className="bg-slate-50 text-slate-600">
+            <tr className="border-b border-slate-200">
+              <th className="text-left px-3 py-2 text-xs font-semibold">Time</th>
+              <th className="text-left px-3 py-2 text-xs font-semibold">Action</th>
+              <th className="text-left px-3 py-2 text-xs font-semibold">Record</th>
+              <th className="text-left px-3 py-2 text-xs font-semibold">Staff</th>
+              <th className="text-left px-3 py-2 text-xs font-semibold">Place</th>
             </tr>
           </thead>
+
+          {/* ✅ IMPORTANT: only <tr> inside <tbody> */}
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={r?.id || i} className="border-b last:border-b-0">
-                <td className="px-3 py-2 whitespace-nowrap">
-                  {safeDate(r?.createdAt || r?.created_at)}
-                </td>
-                <td className="px-3 py-2">{r?.action}</td>
-                <td className="px-3 py-2">{r?.entity}</td>
-                <td className="px-3 py-2">
-                  {r?.entityId || r?.entity_id || "-"}
-                </td>
-                <td className="px-3 py-2">{r?.userId || r?.user_id || "-"}</td>
-                <td className="px-3 py-2">
-                  {r?.locationId || r?.location_id || "-"}
-                </td>
-              </tr>
-            ))}
-            {!loading && rows.length === 0 ? (
+            {loading ? (
+              Array.from({ length: 6 }).map((_, i) => (
+                <tr key={`sk-${i}`} className="border-b border-slate-100">
+                  <td className="px-3 py-3">
+                    <div className="h-4 w-32 bg-slate-200/70 rounded animate-pulse" />
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="h-4 w-28 bg-slate-200/70 rounded animate-pulse" />
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="h-4 w-40 bg-slate-200/70 rounded animate-pulse" />
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="h-4 w-32 bg-slate-200/70 rounded animate-pulse" />
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="h-4 w-40 bg-slate-200/70 rounded animate-pulse" />
+                  </td>
+                </tr>
+              ))
+            ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-gray-500">
+                <td colSpan={5} className="px-3 py-10 text-center text-slate-500">
                   No results.
                 </td>
               </tr>
-            ) : null}
+            ) : (
+              rows.map((r, i) => (
+                <tr key={r?.id || i} className="border-b border-slate-100 last:border-b-0">
+                  <td className="px-3 py-2 whitespace-nowrap">{safeDate(r?.createdAt || r?.created_at)}</td>
+
+                  <td className="px-3 py-2">
+                    <Badge kind="gray">{r?.action || "—"}</Badge>
+                  </td>
+
+                  <td className="px-3 py-2">
+                    {/* no raw ids here */}
+                    <div className="font-semibold text-slate-900">{r?.entity || "—"}</div>
+                    {r?.entityId || r?.entity_id ? (
+                      <div className="text-xs text-slate-500">Record code saved</div>
+                    ) : null}
+                  </td>
+
+                  <td className="px-3 py-2">{staffNameForRow(r)}</td>
+
+                  <td className="px-3 py-2">{placeForRow(r)}</td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

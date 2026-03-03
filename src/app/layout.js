@@ -1,5 +1,7 @@
 import "./globals.css";
 
+import ToastStack from "../components/ToastStack";
+
 export const metadata = {
   title: "BCS Staff",
   description: "Business Control System - Staff Dashboard",
@@ -8,7 +10,12 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-gray-50 text-gray-900">{children}</body>
+      <body className="min-h-screen bg-slate-50 text-slate-900 antialiased">
+        {children}
+
+        {/* ✅ Global toasts (urgent alerts use this) */}
+        <ToastStack />
+      </body>
     </html>
   );
 }

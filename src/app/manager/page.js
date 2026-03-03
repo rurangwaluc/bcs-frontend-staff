@@ -1,23 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import AuditLogsPanel from "../../components/AuditLogsPanel";
 import CashReportsPanel from "../../components/CashReportsPanel";
 import CreditsPanel from "../../components/CreditsPanel";
-import CustomersPanel from "../../components/CustomersPanel";
 import InventoryAdjustRequestsPanel from "../../components/InventoryAdjustRequestsPanel";
 import ManagerUsersPanel from "../../components/ManagerUsersPanel";
 import ProductPricingPanel from "../../components/ProductPricingPanel";
+import AsyncButton from "../../components/AsyncButton";
 import RoleBar from "../../components/RoleBar";
 import { apiFetch } from "../../lib/api";
 import { getMe } from "../../lib/auth";
-import { useRouter } from "next/navigation";
 
 const ENDPOINTS = {
   SALES_LIST: "/sales",
   SALE_CANCEL: (id) => `/sales/${id}/cancel`,
-
   MANAGER_DASHBOARD: "/manager/dashboard",
 
   PRODUCTS_LIST: "/products",
@@ -33,17 +32,48 @@ const ENDPOINTS = {
   PRODUCT_RESTORE: (id) => `/products/${id}/restore`,
 };
 
+// ✅ Customers removed
+// ✅ Users renamed to Staff
+// ✅ Evidence moved to Advanced
+const SECTIONS = [
+  { key: "dashboard", label: "Dashboard" },
+  { key: "sales", label: "Sales" },
+  { key: "payments", label: "Payments" },
+  { key: "inventory", label: "Inventory" },
+  { key: "pricing", label: "Pricing" },
+  { key: "inv_requests", label: "Inventory requests" },
+  { key: "arrivals", label: "Stock arrivals" },
+  { key: "cash_reports", label: "Cash reports" },
+  { key: "credits", label: "Credits" },
+  { key: "staff", label: "Staff" },
+];
+
+const ADVANCED_SECTIONS = [
+  { key: "audit", label: "Audit" },
+  { key: "evidence", label: "Proof & History" },
+];
+
+const PAGE_SIZE = 10;
+
+function cx(...classes) {
+  return classes.filter(Boolean).join(" ");
+}
+
 function money(n) {
-  const x = Number(n || 0);
+  const x = Number(n ?? 0);
   if (!Number.isFinite(x)) return "0";
-  return x.toLocaleString();
+  return Math.round(x).toLocaleString();
 }
 
 function fmt(v) {
-  if (!v) return "-";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return String(v);
-  return d.toLocaleString();
+  if (!v) return "—";
+  try {
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return String(v);
+    return d.toLocaleString();
+  } catch {
+    return String(v);
+  }
 }
 
 function normalizeList(data, keys = []) {
@@ -57,9 +87,7 @@ function normalizeList(data, keys = []) {
 }
 
 function normalizeMethodKey(method) {
-  const m = String(method || "")
-    .trim()
-    .toUpperCase();
+  const m = String(method || "").trim().toUpperCase();
   if (!m) return "OTHER";
   if (m === "CASH") return "CASH";
   if (m === "MOMO" || m === "MOBILEMONEY" || m === "MOBILE") return "MOMO";
@@ -88,64 +116,37 @@ function sumBreakdown(rows) {
 
 function isArchivedProduct(p) {
   if (!p) return false;
-
-  // Your backend likely uses isActive
   if (p.isActive === false) return true;
   if (p.is_active === false) return true;
-
-  // Other possible shapes
   if (p.isArchived === true) return true;
   if (p.is_archived === true) return true;
   if (p.archivedAt || p.archived_at) return true;
   if (String(p.status || "").toUpperCase() === "ARCHIVED") return true;
-
   return false;
 }
 
-function ArrivalDocCard({ doc }) {
-  const raw = doc?.fileUrl || doc?.url || "";
-  if (!raw) return null;
+function locationLabel(me) {
+  const loc = me?.location || null;
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000";
-  const url = /^https?:\/\//i.test(raw)
-    ? raw
-    : `${API_BASE}${raw.startsWith("/") ? "" : "/"}${raw}`;
+  const name =
+    (loc?.name != null ? String(loc.name).trim() : "") ||
+    (me?.locationName != null ? String(me.locationName).trim() : "") ||
+    "";
 
-  return (
-    <div className="border rounded-lg p-3 bg-white flex items-center justify-between gap-3">
-      <div className="flex flex-col">
-        <div className="text-sm font-medium truncate max-w-[220px]">
-          {raw.split("/").pop()}
-        </div>
-        {doc?.uploadedAt ? (
-          <div className="text-xs text-gray-500">
-            Uploaded: {new Date(doc.uploadedAt).toLocaleString()}
-          </div>
-        ) : null}
-      </div>
+  const code =
+    (loc?.code != null ? String(loc.code).trim() : "") ||
+    (me?.locationCode != null ? String(me.locationCode).trim() : "") ||
+    "";
 
-      <a
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="px-3 py-1.5 rounded-lg text-xs bg-black text-white hover:bg-gray-800 transition"
-      >
-        Open
-      </a>
-    </div>
-  );
+  const id = loc?.id ?? me?.locationId ?? me?.location_id ?? null;
+
+  if (name && code) return `${name} (${code})`;
+  if (name) return name;
+  if (id != null && id !== "") return "Location";
+return "Location";
 }
 
-function buildEvidenceUrl({
-  entity,
-  entityId,
-  from,
-  to,
-  action,
-  userId,
-  q,
-  limit,
-}) {
+function buildEvidenceUrl({ entity, entityId, from, to, action, userId, q, limit }) {
   const params = new URLSearchParams();
   if (entity) params.set("entity", entity);
   if (entityId) params.set("entityId", entityId);
@@ -158,60 +159,211 @@ function buildEvidenceUrl({
   return `/evidence?${params.toString()}`;
 }
 
+/* ---------- UI atoms ---------- */
+
+function Skeleton({ className = "" }) {
+  return <div className={cx("animate-pulse rounded-xl bg-slate-200/70", className)} />;
+}
+
+function PageSkeleton() {
+  return (
+    <div className="min-h-screen bg-slate-50 overflow-x-hidden">
+      <div className="mx-auto max-w-7xl px-4 sm:px-5 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <Skeleton className="h-6 w-44" />
+            <Skeleton className="mt-3 h-4 w-52" />
+            <div className="mt-6 grid gap-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          </div>
+
+          <div>
+            <Skeleton className="h-12 w-full rounded-2xl" />
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+              <Skeleton className="h-24 w-full rounded-2xl" />
+              <Skeleton className="h-24 w-full rounded-2xl" />
+              <Skeleton className="h-24 w-full rounded-2xl" />
+              <Skeleton className="h-24 w-full rounded-2xl" />
+            </div>
+            <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <Skeleton className="h-80 w-full rounded-2xl" />
+              <Skeleton className="h-80 w-full rounded-2xl" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Banner({ kind = "info", children }) {
+  const styles =
+    kind === "success"
+      ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+      : kind === "warn"
+        ? "bg-amber-50 text-amber-900 border-amber-200"
+        : kind === "danger"
+          ? "bg-rose-50 text-rose-900 border-rose-200"
+          : "bg-slate-50 text-slate-800 border-slate-200";
+
+  return <div className={cx("rounded-2xl border px-4 py-3 text-sm", styles)}>{children}</div>;
+}
+
+function StatCard({ label, value, sub }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="text-xs font-semibold text-slate-600">{label}</div>
+      <div className="mt-1 text-2xl font-bold text-slate-900">{value}</div>
+      {sub ? <div className="mt-1 text-xs text-slate-600">{sub}</div> : null}
+    </div>
+  );
+}
+
+function Input({ className = "", ...props }) {
+  return (
+    <input
+      {...props}
+      className={cx(
+        "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none",
+        "focus:ring-2 focus:ring-slate-300",
+        className,
+      )}
+    />
+  );
+}
+
+function Select({ className = "", ...props }) {
+  return (
+    <select
+      {...props}
+      className={cx(
+        "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none",
+        "focus:ring-2 focus:ring-slate-300",
+        className,
+      )}
+    />
+  );
+}
+
+function SectionCard({ title, hint, right, children }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-4">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-slate-900">{title}</div>
+          {hint ? <div className="mt-1 text-xs text-slate-600">{hint}</div> : null}
+        </div>
+        {right ? <div className="shrink-0">{right}</div> : null}
+      </div>
+      <div className="p-4">{children}</div>
+    </div>
+  );
+}
+
+function NavItem({ active, label, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cx(
+        "w-full text-left rounded-xl px-3 py-2.5 text-sm font-semibold transition",
+        active ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50",
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
+function ArrivalDocCard({ doc }) {
+  const raw = doc?.fileUrl || doc?.url || "";
+  if (!raw) return null;
+
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000";
+  const url = /^https?:\/\//i.test(raw) ? raw : `${API_BASE}${raw.startsWith("/") ? "" : "/"}${raw}`;
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50"
+    >
+      Open file
+    </a>
+  );
+}
+
+/* ---------- Page ---------- */
+
 export default function ManagerPage() {
   const router = useRouter();
 
+  const [bootLoading, setBootLoading] = useState(true);
   const [me, setMe] = useState(null);
+
   const [msg, setMsg] = useState("");
+  const [msgKind, setMsgKind] = useState("info");
 
-  const [tab, setTab] = useState("dashboard");
-  // dashboard | sales | arrivals | inventory | pricing | cash_reports | users | credits | customers | audit | evidence | inv_requests | payments
+  const [section, setSection] = useState("dashboard");
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
+  function toast(kind, text) {
+    setMsgKind(kind);
+    setMsg(text || "");
+  }
+
+  // dashboard
   const [dash, setDash] = useState(null);
   const [dashLoading, setDashLoading] = useState(false);
 
-  // ---------- SALES ----------
+  // sales
   const [sales, setSales] = useState([]);
   const [loadingSales, setLoadingSales] = useState(false);
   const [salesQ, setSalesQ] = useState("");
+  const [salesPage, setSalesPage] = useState(1);
 
   const [cancelOpen, setCancelOpen] = useState(false);
   const [canceling, setCanceling] = useState(false);
   const [cancelSaleId, setCancelSaleId] = useState(null);
   const [cancelReason, setCancelReason] = useState("");
 
-  // ---------- INVENTORY / PRODUCTS ----------
+  // inventory/products
   const [inventory, setInventory] = useState([]);
   const [products, setProducts] = useState([]);
   const [loadingInv, setLoadingInv] = useState(false);
   const [loadingProd, setLoadingProd] = useState(false);
   const [invQ, setInvQ] = useState("");
 
-  // ✅ NEW: show archived products toggle for product list
   const [showArchivedProducts, setShowArchivedProducts] = useState(false);
   const [prodQ, setProdQ] = useState("");
 
-  // ✅ Archive / restore modal state
   const [archOpen, setArchOpen] = useState(false);
   const [archBusy, setArchBusy] = useState(false);
-  const [archMode, setArchMode] = useState("archive"); // "archive" | "restore"
+  const [archMode, setArchMode] = useState("archive"); // archive | restore
   const [archProduct, setArchProduct] = useState(null);
   const [archReason, setArchReason] = useState("");
 
-  // ---------- ARRIVALS ----------
+  // arrivals
   const [arrivals, setArrivals] = useState([]);
   const [loadingArrivals, setLoadingArrivals] = useState(false);
 
-  // ---------- PAYMENTS ----------
+  // payments
   const [payments, setPayments] = useState([]);
   const [paymentsSummary, setPaymentsSummary] = useState(null);
   const [paymentsBreakdown, setPaymentsBreakdown] = useState(null);
   const [payQ, setPayQ] = useState("");
+  const [payView, setPayView] = useState("overview"); // overview | list
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [loadingPaySummary, setLoadingPaySummary] = useState(false);
   const [loadingPayBreakdown, setLoadingPayBreakdown] = useState(false);
 
-  // ---------- EVIDENCE ----------
+  // evidence (advanced)
   const [evEntity, setEvEntity] = useState("sale");
   const [evEntityId, setEvEntityId] = useState("");
   const [evFrom, setEvFrom] = useState("");
@@ -220,12 +372,163 @@ export default function ManagerPage() {
   const [evUserId, setEvUserId] = useState("");
   const [evQ, setEvQ] = useState("");
   const [evLimit, setEvLimit] = useState(200);
+  // Evidence pickers (friendly selectors)
+const [evCandidates, setEvCandidates] = useState([]);
+const [evCandidatesLoading, setEvCandidatesLoading] = useState(false);
 
-  // ---------------- ROLE GUARD ----------------
+const [evStaff, setEvStaff] = useState([]);
+const [evStaffLoading, setEvStaffLoading] = useState(false);
+
+const [refreshNonce, setRefreshNonce] = useState(0);
+const [refreshState, setRefreshState] = useState("idle"); // idle | loading | success
+
+
+function makeCandidateLabel(entity, row) {
+  // Keep it human. No IDs shown.
+  const when = fmt(row?.createdAt || row?.created_at || row?.openedAt || row?.opened_at);
+  if (entity === "sale") {
+    const name = (row?.customerName || row?.customer_name || "Customer").trim();
+    const total = money(row?.totalAmount ?? row?.total ?? 0);
+    return `Sale — ${name} — ${total} — ${when}`;
+  }
+  if (entity === "payment") {
+    const amount = money(row?.amount ?? 0);
+    const method = row?.method || "Payment";
+ 
+    return `Payment — ${amount} — ${method} — ${when}`;
+  }
+  if (entity === "refund") {
+    const amount = money(row?.amount ?? 0);
+    const reason = row?.reason ? ` — ${String(row.reason).slice(0, 40)}` : "";
+    return `Refund — ${amount}${reason} — ${when}`;
+  }
+  if (entity === "cash_session") {
+    const status = row?.status || "Session";
+    return `Cash session — ${status} — ${when}`;
+  }
+  if (entity === "expense") {
+    const amount = money(row?.amount ?? 0);
+    const note = row?.note ? ` — ${String(row.note).slice(0, 40)}` : "";
+    return `Expense — ${amount}${note} — ${when}`;
+  }
+  if (entity === "deposit") {
+    const amount = money(row?.amount ?? 0);
+    return `Deposit — ${amount} — ${when}`;
+  }
+  if (entity === "credit") {
+    const amount = money(row?.amount ?? 0);
+    const name = (row?.customerName || "Customer").trim();
+    const status = row?.status || "Credit";
+    return `Credit — ${name} — ${amount} — ${status} — ${when}`;
+  }
+  if (entity === "product") {
+    const name = (row?.name || row?.productName || row?.title || "Product").trim();
+    const sku = row?.sku ? ` — SKU ${row.sku}` : "";
+    return `Product — ${name}${sku}`;
+  }
+  if (entity === "inventory") {
+    const name = (row?.productName || row?.product_name || row?.name || "Item").trim();
+    const sku = row?.sku ? ` — SKU ${row.sku}` : "";
+    const qty = row?.qtyOnHand ?? row?.qty_on_hand ?? row?.qty ?? row?.quantity;
+    return qty != null ? `Inventory — ${name}${sku} — Qty ${qty}` : `Inventory — ${name}${sku}`;
+  }
+  if (entity === "user") {
+    const name = (row?.name || "Staff").trim();
+    const email = row?.email ? ` — ${row.email}` : "";
+    return `Staff — ${name}${email}`;
+  }
+  return `Record — ${when}`;
+}
+
+async function loadEvidenceCandidates(entity) {
+  setEvCandidatesLoading(true);
+  try {
+    // Use endpoints you already have in manager
+    const map = {
+      sale: ENDPOINTS.SALES_LIST,
+      payment: ENDPOINTS.PAYMENTS_LIST,
+      refund: "/refunds", // if you have it, else remove this option
+      cash_session: "/cash-sessions", // if you have it, else remove this option
+      credit: "/credits",
+      product: ENDPOINTS.PRODUCTS_LIST,
+      inventory: ENDPOINTS.INVENTORY_LIST,
+      user: "/users",
+      expense: "/cash/expenses", // if you have it, else remove this option
+      deposit: "/cash/deposits", // if you have it, else remove this option
+    };
+
+    const path = map[entity];
+    if (!path) {
+      setEvCandidates([]);
+      return;
+    }
+
+    const data = await apiFetch(path, { method: "GET" });
+
+    // Normalize the list safely
+    const list =
+      (Array.isArray(data?.sales) && data.sales) ||
+      (Array.isArray(data?.payments) && data.payments) ||
+      (Array.isArray(data?.refunds) && data.refunds) ||
+      (Array.isArray(data?.sessions) && data.sessions) ||
+      (Array.isArray(data?.credits) && data.credits) ||
+      (Array.isArray(data?.products) && data.products) ||
+      (Array.isArray(data?.inventory) && data.inventory) ||
+      (Array.isArray(data?.users) && data.users) ||
+      (Array.isArray(data?.rows) && data.rows) ||
+      (Array.isArray(data?.items) && data.items) ||
+      [];
+
+    const top = list
+      .slice()
+      .sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0))
+      .slice(0, 30)
+      .map((row) => ({
+        id: row?.id,
+        label: makeCandidateLabel(entity, row),
+      }))
+      .filter((x) => x.id != null);
+
+    setEvCandidates(top);
+
+    // If current selection is not in list, clear it (prevents confusing “empty”)
+    if (evEntityId && !top.some((x) => String(x.id) === String(evEntityId))) {
+      setEvEntityId("");
+    }
+  } catch {
+    setEvCandidates([]);
+  } finally {
+    setEvCandidatesLoading(false);
+  }
+}
+
+async function loadEvidenceStaff() {
+  setEvStaffLoading(true);
+  try {
+    const data = await apiFetch("/users", { method: "GET" });
+    const list = Array.isArray(data?.users) ? data.users : [];
+    setEvStaff(list.map((u) => ({ id: u.id, name: u.name, email: u.email })));
+  } catch {
+    setEvStaff([]);
+  } finally {
+    setEvStaffLoading(false);
+  }
+}
+
+
+useEffect(() => {
+  if (section !== "evidence") return;
+  loadEvidenceStaff();
+  loadEvidenceCandidates(evEntity);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [section, evEntity, refreshNonce]);
+
+  // role guard
   useEffect(() => {
     let alive = true;
 
     async function run() {
+      setBootLoading(true);
       try {
         const data = await getMe();
         if (!alive) return;
@@ -233,9 +536,10 @@ export default function ManagerPage() {
         const user = data?.user || null;
         setMe(user);
 
-        if (!user?.role) return router.replace("/login");
+        const role = String(user?.role || "").toLowerCase();
+        if (!role) return router.replace("/login");
 
-        if (user.role !== "manager") {
+        if (role !== "manager") {
           const map = {
             owner: "/owner",
             admin: "/admin",
@@ -243,11 +547,16 @@ export default function ManagerPage() {
             seller: "/seller",
             cashier: "/cashier",
           };
-          router.replace(map[user.role] || "/");
+          router.replace(map[role] || "/");
+          return;
         }
       } catch {
         if (!alive) return;
         router.replace("/login");
+        return;
+      } finally {
+        if (!alive) return;
+        setBootLoading(false);
       }
     }
 
@@ -257,20 +566,18 @@ export default function ManagerPage() {
     };
   }, [router]);
 
-  const isAuthorized = !!me && me.role === "manager";
+  const isAuthorized = !!me && String(me?.role || "").toLowerCase() === "manager";
 
-  // ---------------- LOADERS ----------------
+  // loaders
   const loadDashboard = useCallback(async () => {
     setDashLoading(true);
-    setMsg("");
+    toast("info", "");
     try {
-      const data = await apiFetch(ENDPOINTS.MANAGER_DASHBOARD, {
-        method: "GET",
-      });
+      const data = await apiFetch(ENDPOINTS.MANAGER_DASHBOARD, { method: "GET" });
       setDash(data?.dashboard || null);
     } catch (e) {
       setDash(null);
-      setMsg(e?.data?.error || e?.message || "Failed to load dashboard");
+      toast("danger", e?.data?.error || e?.message || "Cannot load dashboard");
     } finally {
       setDashLoading(false);
     }
@@ -278,12 +585,12 @@ export default function ManagerPage() {
 
   const loadSales = useCallback(async () => {
     setLoadingSales(true);
-    setMsg("");
+    toast("info", "");
     try {
       const data = await apiFetch(ENDPOINTS.SALES_LIST, { method: "GET" });
       setSales(normalizeList(data, ["sales"]));
     } catch (e) {
-      setMsg(e?.data?.error || e?.message || "Failed to load sales");
+      toast("danger", e?.data?.error || e?.message || "Cannot load sales");
       setSales([]);
     } finally {
       setLoadingSales(false);
@@ -292,12 +599,12 @@ export default function ManagerPage() {
 
   const loadInventory = useCallback(async () => {
     setLoadingInv(true);
-    setMsg("");
+    toast("info", "");
     try {
       const data = await apiFetch(ENDPOINTS.INVENTORY_LIST, { method: "GET" });
       setInventory(normalizeList(data, ["inventory"]));
     } catch (e) {
-      setMsg(e?.data?.error || e?.message || "Failed to load inventory");
+      toast("danger", e?.data?.error || e?.message || "Cannot load inventory");
       setInventory([]);
     } finally {
       setLoadingInv(false);
@@ -307,12 +614,10 @@ export default function ManagerPage() {
   const loadProducts = useCallback(
     async (opts = {}) => {
       const includeInactive =
-        typeof opts.includeInactive === "boolean"
-          ? opts.includeInactive
-          : showArchivedProducts;
+        typeof opts.includeInactive === "boolean" ? opts.includeInactive : showArchivedProducts;
 
       setLoadingProd(true);
-      setMsg("");
+      toast("info", "");
       try {
         const path = includeInactive
           ? `${ENDPOINTS.PRODUCTS_LIST}?includeInactive=true`
@@ -322,7 +627,7 @@ export default function ManagerPage() {
         const items = normalizeList(data, ["products", "pricing"]);
         setProducts(items);
       } catch (e) {
-        setMsg(e?.data?.error || e?.message || "Failed to load products");
+        toast("danger", e?.data?.error || e?.message || "Cannot load products");
         setProducts([]);
       } finally {
         setLoadingProd(false);
@@ -340,7 +645,7 @@ export default function ManagerPage() {
       setPayments([]);
       const text = e?.data?.error || e?.message || "";
       if (String(text).toLowerCase().includes("not found")) return;
-      setMsg(e?.data?.error || e?.message || "Failed to load payments");
+      toast("danger", e?.data?.error || e?.message || "Cannot load payments");
     } finally {
       setLoadingPayments(false);
     }
@@ -349,15 +654,13 @@ export default function ManagerPage() {
   const loadPaymentsSummary = useCallback(async () => {
     setLoadingPaySummary(true);
     try {
-      const data = await apiFetch(ENDPOINTS.PAYMENTS_SUMMARY, {
-        method: "GET",
-      });
+      const data = await apiFetch(ENDPOINTS.PAYMENTS_SUMMARY, { method: "GET" });
       setPaymentsSummary(data?.summary || data || null);
     } catch (e) {
       setPaymentsSummary(null);
       const text = e?.data?.error || e?.message || "";
       if (String(text).toLowerCase().includes("not found")) return;
-      setMsg(e?.data?.error || e?.message || "Failed to load payments summary");
+      toast("danger", e?.data?.error || e?.message || "Cannot load payment summary");
     } finally {
       setLoadingPaySummary(false);
     }
@@ -366,17 +669,13 @@ export default function ManagerPage() {
   const loadPaymentsBreakdown = useCallback(async () => {
     setLoadingPayBreakdown(true);
     try {
-      const data = await apiFetch(ENDPOINTS.PAYMENTS_BREAKDOWN, {
-        method: "GET",
-      });
+      const data = await apiFetch(ENDPOINTS.PAYMENTS_BREAKDOWN, { method: "GET" });
       setPaymentsBreakdown(data?.breakdown || data || null);
     } catch (e) {
       setPaymentsBreakdown(null);
       const text = e?.data?.error || e?.message || "";
       if (String(text).toLowerCase().includes("not found")) return;
-      setMsg(
-        e?.data?.error || e?.message || "Failed to load payments breakdown",
-      );
+      toast("danger", e?.data?.error || e?.message || "Cannot load payment breakdown");
     } finally {
       setLoadingPayBreakdown(false);
     }
@@ -384,48 +683,110 @@ export default function ManagerPage() {
 
   const loadArrivals = useCallback(async () => {
     setLoadingArrivals(true);
-    setMsg("");
+    toast("info", "");
     try {
-      const data = await apiFetch(ENDPOINTS.INVENTORY_ARRIVALS_LIST, {
-        method: "GET",
-      });
+      const data = await apiFetch(ENDPOINTS.INVENTORY_ARRIVALS_LIST, { method: "GET" });
       setArrivals(normalizeList(data, ["arrivals"]));
     } catch (e) {
-      setMsg(e?.data?.error || e?.message || "Failed to load arrivals");
+      toast("danger", e?.data?.error || e?.message || "Cannot load arrivals");
       setArrivals([]);
     } finally {
       setLoadingArrivals(false);
     }
   }, []);
 
+const refreshCurrent = useCallback(async () => {
+  toast("info", "");
+  setRefreshState("loading");
+
+  try {
+    // Tabs that load data INSIDE their own components
+   const componentTabs = new Set([
+  "cash_reports",
+  "credits",
+  "staff",
+  "audit",
+  "evidence",
+  "pricing",
+  "inv_requests",
+]);
+    if (componentTabs.has(section)) {
+      setRefreshNonce((n) => n + 1); // force remount + reload
+      setRefreshState("success");
+      setTimeout(() => setRefreshState("idle"), 900);
+      return;
+    }
+
+    if (section === "dashboard") {
+      await Promise.all([
+        loadDashboard(),
+        loadSales(),
+        loadInventory(),
+        loadProducts({ includeInactive: showArchivedProducts }),
+        loadPaymentsSummary(),
+        loadPayments(),
+        loadPaymentsBreakdown(),
+      ]);
+      setRefreshState("success");
+      setTimeout(() => setRefreshState("idle"), 900);
+      return;
+    }
+
+    if (section === "sales") await loadSales();
+    if (section === "inventory") await Promise.all([loadInventory(), loadProducts({ includeInactive: showArchivedProducts })]);
+    if (section === "payments") await Promise.all([loadPayments(), loadPaymentsSummary(), loadPaymentsBreakdown()]);
+    if (section === "arrivals") await loadArrivals();
+
+    setRefreshState("success");
+    setTimeout(() => setRefreshState("idle"), 900);
+  } catch (e) {
+    setRefreshState("idle");
+    toast("danger", e?.data?.error || e?.message || "Refresh failed");
+  }
+}, [
+  section,
+  showArchivedProducts,
+  loadDashboard,
+  loadSales,
+  loadInventory,
+  loadProducts,
+  loadPaymentsSummary,
+  loadPayments,
+  loadPaymentsBreakdown,
+  loadArrivals,
+]);
+
+  // load per section
   useEffect(() => {
     if (!isAuthorized) return;
 
-    if (tab === "dashboard" || tab === "sales") loadSales();
-
-    if (tab === "dashboard" || tab === "inventory") {
+    if (section === "dashboard") {
+      loadDashboard();
+      loadSales();
       loadInventory();
-      // for inventory, we want products list too (active only by default)
+      loadProducts({ includeInactive: showArchivedProducts });
+      loadPaymentsSummary();
+      loadPayments();
+      loadPaymentsBreakdown();
+    }
+
+    if (section === "sales") loadSales();
+
+    if (section === "inventory") {
+      loadInventory();
       loadProducts({ includeInactive: showArchivedProducts });
     }
 
-    if (tab === "dashboard") {
-      loadDashboard();
-      loadPaymentsSummary();
-      loadPayments();
-      loadPaymentsBreakdown();
-    }
-
-    if (tab === "arrivals") loadArrivals();
-
-    if (tab === "payments") {
+    if (section === "payments") {
       loadPayments();
       loadPaymentsSummary();
       loadPaymentsBreakdown();
     }
+
+    if (section === "arrivals") loadArrivals();
   }, [
     isAuthorized,
-    tab,
+    section,
     loadDashboard,
     loadSales,
     loadInventory,
@@ -437,19 +798,24 @@ export default function ManagerPage() {
     loadArrivals,
   ]);
 
-  // When toggle changes while on inventory tab, reload products accordingly
+  // reload products when toggle changes in inventory
   useEffect(() => {
     if (!isAuthorized) return;
-    if (tab !== "inventory") return;
+    if (section !== "inventory") return;
     loadProducts({ includeInactive: showArchivedProducts });
-  }, [isAuthorized, tab, showArchivedProducts, loadProducts]);
+  }, [isAuthorized, section, showArchivedProducts, loadProducts]);
 
-  // ---------------- CANCEL SALE ----------------
+  // reset sales page when search changes
+  useEffect(() => {
+    setSalesPage(1);
+  }, [salesQ]);
+
+  // cancel sale
   function openCancel(saleId) {
     setCancelSaleId(Number(saleId));
     setCancelReason("");
     setCancelOpen(true);
-    setMsg("");
+    toast("info", "");
   }
 
   function canCancelSale(s) {
@@ -461,36 +827,34 @@ export default function ManagerPage() {
     if (!cancelSaleId) return;
 
     setCanceling(true);
-    setMsg("");
+    toast("info", "");
     try {
       await apiFetch(ENDPOINTS.SALE_CANCEL(cancelSaleId), {
         method: "POST",
-        body: cancelReason?.trim()
-          ? { reason: cancelReason.trim() }
-          : undefined,
+        body: cancelReason?.trim() ? { reason: cancelReason.trim() } : undefined,
       });
 
-      setMsg(`✅ Sale #${cancelSaleId} cancelled`);
+      toast("success", `Sale #${cancelSaleId} cancelled`);
       setCancelOpen(false);
       setCancelSaleId(null);
       setCancelReason("");
 
       await loadSales();
     } catch (e) {
-      setMsg(e?.data?.error || e?.message || "Cancel failed");
+      toast("danger", e?.data?.error || e?.message || "Cancel failed");
     } finally {
       setCanceling(false);
     }
   }
 
-  // ---------------- ARCHIVE / RESTORE ----------------
+  // archive / restore
   function openArchiveProduct(prod) {
     if (!prod?.id) return;
     setArchMode("archive");
     setArchProduct(prod);
     setArchReason("");
     setArchOpen(true);
-    setMsg("");
+    toast("info", "");
   }
 
   function openRestoreProduct(prod) {
@@ -499,7 +863,7 @@ export default function ManagerPage() {
     setArchProduct(prod);
     setArchReason("");
     setArchOpen(true);
-    setMsg("");
+    toast("info", "");
   }
 
   async function confirmArchiveRestore() {
@@ -507,76 +871,65 @@ export default function ManagerPage() {
     if (!pid) return;
 
     setArchBusy(true);
-    setMsg("");
+    toast("info", "");
     try {
       if (archMode === "archive") {
         await apiFetch(ENDPOINTS.PRODUCT_ARCHIVE(pid), {
           method: "PATCH",
-          // backend might accept reason; if it doesn't, it will still work if it ignores body
           body: archReason?.trim() ? { reason: archReason.trim() } : undefined,
         });
-        setMsg(`✅ Archived product #${pid}`);
+        toast("success", `Archived product #${pid}`);
       } else {
         await apiFetch(ENDPOINTS.PRODUCT_RESTORE(pid), { method: "PATCH" });
-        setMsg(`✅ Restored product #${pid}`);
+        toast("success", `Restored product #${pid}`);
       }
 
       setArchOpen(false);
       setArchProduct(null);
       setArchReason("");
 
-      await Promise.all([
-        loadProducts({ includeInactive: showArchivedProducts }),
-        loadInventory(),
-      ]);
+      await Promise.all([loadProducts({ includeInactive: showArchivedProducts }), loadInventory()]);
     } catch (e) {
-      setMsg(e?.data?.error || e?.message || "Action failed");
+      toast("danger", e?.data?.error || e?.message || "Action failed");
     } finally {
       setArchBusy(false);
     }
   }
 
-  // ---------------- DERIVED ----------------
+  // derived
   const salesSorted = useMemo(() => {
     const list = Array.isArray(sales) ? sales : [];
     return list.slice().sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0));
   }, [sales]);
 
   const filteredSales = useMemo(() => {
-    const qq = String(salesQ || "")
-      .trim()
-      .toLowerCase();
+    const qq = String(salesQ || "").trim().toLowerCase();
     if (!qq) return salesSorted;
 
     return salesSorted.filter((s) => {
       const id = String(s?.id ?? "");
       const status = String(s?.status ?? "").toLowerCase();
-      const name = String(
-        s?.customerName ?? s?.customer_name ?? "",
-      ).toLowerCase();
-      const phone = String(
-        s?.customerPhone ?? s?.customer_phone ?? "",
-      ).toLowerCase();
-      return (
-        id.includes(qq) ||
-        status.includes(qq) ||
-        name.includes(qq) ||
-        phone.includes(qq)
-      );
+      const name = String(s?.customerName ?? s?.customer_name ?? "").toLowerCase();
+      const phone = String(s?.customerPhone ?? s?.customer_phone ?? "").toLowerCase();
+      return id.includes(qq) || status.includes(qq) || name.includes(qq) || phone.includes(qq);
     });
   }, [salesSorted, salesQ]);
 
+  const salesShown = useMemo(() => {
+    return filteredSales.slice(0, salesPage * PAGE_SIZE);
+  }, [filteredSales, salesPage]);
+
+  const canLoadMoreSales = useMemo(() => {
+    return salesShown.length < filteredSales.length;
+  }, [salesShown.length, filteredSales.length]);
+
   const filteredInventory = useMemo(() => {
     const list = Array.isArray(inventory) ? inventory : [];
-    const qq = String(invQ || "")
-      .trim()
-      .toLowerCase();
+    const qq = String(invQ || "").trim().toLowerCase();
     if (!qq) return list;
 
     return list.filter((p) => {
-      const name = String(
-        p?.name || p?.productName || p?.product_name || "",
-      ).toLowerCase();
+      const name = String(p?.name || p?.productName || p?.product_name || "").toLowerCase();
       const sku = String(p?.sku || "").toLowerCase();
       return name.includes(qq) || sku.includes(qq);
     });
@@ -584,21 +937,14 @@ export default function ManagerPage() {
 
   const filteredProducts = useMemo(() => {
     const list = Array.isArray(products) ? products : [];
-    const qq = String(prodQ || "")
-      .trim()
-      .toLowerCase();
+    const qq = String(prodQ || "").trim().toLowerCase();
 
-    const byToggle = showArchivedProducts
-      ? list.filter((p) => isArchivedProduct(p))
-      : list.filter((p) => !isArchivedProduct(p));
-
+    const byToggle = showArchivedProducts ? list.filter(isArchivedProduct) : list.filter((p) => !isArchivedProduct(p));
     if (!qq) return byToggle;
 
     return byToggle.filter((p) => {
       const id = String(p?.id ?? "");
-      const name = String(
-        p?.name || p?.productName || p?.title || "",
-      ).toLowerCase();
+      const name = String(p?.name || p?.productName || p?.title || "").toLowerCase();
       const sku = String(p?.sku || "").toLowerCase();
       return id.includes(qq) || name.includes(qq) || sku.includes(qq);
     });
@@ -610,15 +956,9 @@ export default function ManagerPage() {
 
     const prod =
       (pid != null
-        ? (Array.isArray(products) ? products : []).find(
-            (x) => String(x?.id) === String(pid),
-          )
+        ? (Array.isArray(products) ? products : []).find((x) => String(x?.id) === String(pid))
         : null) ||
-      (sku
-        ? (Array.isArray(products) ? products : []).find(
-            (x) => String(x?.sku) === String(sku),
-          )
-        : null);
+      (sku ? (Array.isArray(products) ? products : []).find((x) => String(x?.sku) === String(sku)) : null);
 
     const price =
       prod?.sellingPrice ??
@@ -628,13 +968,11 @@ export default function ManagerPage() {
       prod?.unit_price ??
       null;
 
-    return price == null ? "-" : money(price);
+    return price == null ? "—" : money(price);
   }
 
   const filteredPayments = useMemo(() => {
-    const qq = String(payQ || "")
-      .trim()
-      .toLowerCase();
+    const qq = String(payQ || "").trim().toLowerCase();
     const list = Array.isArray(payments) ? payments : [];
     if (!qq) return list;
 
@@ -643,947 +981,851 @@ export default function ManagerPage() {
       const saleId = String(p?.saleId ?? p?.sale_id ?? "");
       const method = String(p?.method ?? "").toLowerCase();
       const amount = String(p?.amount ?? "");
-      return (
-        id.includes(qq) ||
-        saleId.includes(qq) ||
-        method.includes(qq) ||
-        amount.includes(qq)
-      );
+      return id.includes(qq) || saleId.includes(qq) || method.includes(qq) || amount.includes(qq);
     });
   }, [payments, payQ]);
 
-  const breakdownTodayTotals = useMemo(
-    () => sumBreakdown(paymentsBreakdown?.today || []),
-    [paymentsBreakdown],
-  );
-  const breakdownYesterday = useMemo(
-    () => sumBreakdown(paymentsBreakdown?.yesterday || []),
-    [paymentsBreakdown],
-  );
-  const breakdownAll = useMemo(
-    () => sumBreakdown(paymentsBreakdown?.allTime || []),
-    [paymentsBreakdown],
-  );
+  const breakdownTodayTotals = useMemo(() => sumBreakdown(paymentsBreakdown?.today || []), [paymentsBreakdown]);
+  const breakdownYesterday = useMemo(() => sumBreakdown(paymentsBreakdown?.yesterday || []), [paymentsBreakdown]);
+  const breakdownAll = useMemo(() => sumBreakdown(paymentsBreakdown?.allTime || []), [paymentsBreakdown]);
+
+  const dashTodayTotal = useMemo(() => {
+    const rows = dash?.payments?.breakdownToday || [];
+    const b = sumBreakdown(rows);
+    return Object.values(b).reduce((s, x) => s + Number(x.total || 0), 0);
+  }, [dash]);
+
+  const dashLowStockCount = useMemo(() => {
+    return Array.isArray(dash?.inventory?.lowStock) ? dash.inventory.lowStock.length : 0;
+  }, [dash]);
+
+  const dashStuckSalesCount = useMemo(() => {
+    return Array.isArray(dash?.sales?.stuck) ? dash.sales.stuck.length : 0;
+  }, [dash]);
+
+  const subtitle = `User: ${me?.email || "—"} • ${locationLabel(me)}`;
+
+  if (bootLoading) return <PageSkeleton />;
 
   if (!isAuthorized) {
-    return <div className="p-6 text-sm text-gray-600">Redirecting...</div>;
+    return <div className="p-6 text-sm text-slate-600">Redirecting…</div>;
   }
 
   return (
-    <div>
-      <RoleBar
-        title="Manager"
-        subtitle={`User: ${me.email} • Location: ${me.locationId}`}
-        user={me}
-      />
+    <div className="min-h-screen bg-slate-50 overflow-x-hidden">
+      <RoleBar title="Manager" subtitle={subtitle} user={me} />
 
-      <div className="max-w-6xl mx-auto p-6">
+      <div className="mx-auto max-w-7xl px-4 sm:px-5 py-6">
         {msg ? (
-          <div className="mt-4 text-sm">
-            {String(msg).startsWith("✅") ? (
-              <div className="p-3 rounded-lg bg-green-50 text-green-800">
-                {msg}
-              </div>
-            ) : (
-              <div className="p-3 rounded-lg bg-red-50 text-red-700">{msg}</div>
-            )}
+          <div className="mb-4">
+            <Banner kind={msgKind}>{msg}</Banner>
           </div>
         ) : null}
 
-        <div className="mt-6 flex gap-2 text-sm flex-wrap items-center">
-          <Tab active={tab === "dashboard"} onClick={() => setTab("dashboard")}>
-            Dashboard
-          </Tab>
-          <Tab active={tab === "sales"} onClick={() => setTab("sales")}>
-            Sales
-          </Tab>
-          <Tab active={tab === "arrivals"} onClick={() => setTab("arrivals")}>
-            Stock arrivals
-          </Tab>
-          <Tab active={tab === "inventory"} onClick={() => setTab("inventory")}>
-            Inventory
-          </Tab>
-          <Tab active={tab === "pricing"} onClick={() => setTab("pricing")}>
-            Pricing
-          </Tab>
-          <Tab
-            active={tab === "inv_requests"}
-            onClick={() => setTab("inv_requests")}
-          >
-            Inventory Requests
-          </Tab>
-          <Tab active={tab === "payments"} onClick={() => setTab("payments")}>
-            Payments
-          </Tab>
-          <Tab
-            active={tab === "cash_reports"}
-            onClick={() => setTab("cash_reports")}
-          >
-            Cash Reports
-          </Tab>
-          <Tab active={tab === "users"} onClick={() => setTab("users")}>
-            Users
-          </Tab>
-          <Tab active={tab === "credits"} onClick={() => setTab("credits")}>
-            Credits
-          </Tab>
-          <Tab active={tab === "customers"} onClick={() => setTab("customers")}>
-            Customers
-          </Tab>
-          <Tab active={tab === "audit"} onClick={() => setTab("audit")}>
-            Audit
-          </Tab>
-          <Tab active={tab === "evidence"} onClick={() => setTab("evidence")}>
-            Evidence
-          </Tab>
+        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
+          {/* Sidebar */}
+          <aside className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4 h-fit">
+            <div className="text-sm font-semibold text-slate-900">Manager</div>
+            <div className="mt-1 text-xs text-slate-600">{locationLabel(me)}</div>
 
-          <button
-            onClick={() => {
-              if (tab === "dashboard") {
-                Promise.all([
-                  loadSales(),
-                  loadInventory(),
-                  loadProducts({ includeInactive: showArchivedProducts }),
-                  loadPaymentsSummary(),
-                  loadPayments(),
-                  loadPaymentsBreakdown(),
-                  loadDashboard(),
-                ]);
-              } else if (tab === "sales") loadSales();
-              else if (tab === "inventory")
-                Promise.all([
-                  loadInventory(),
-                  loadProducts({ includeInactive: showArchivedProducts }),
-                ]);
-              else if (tab === "arrivals") loadArrivals();
-              else if (tab === "payments")
-                Promise.all([
-                  loadPayments(),
-                  loadPaymentsSummary(),
-                  loadPaymentsBreakdown(),
-                ]);
-            }}
-            className="ml-auto px-4 py-2 rounded-lg bg-black text-white"
-          >
-            Refresh
-          </button>
-        </div>
-
-        {/* DASHBOARD */}
-        {tab === "dashboard" ? (
-          <div className="mt-6 space-y-4">
-            {dashLoading ? (
-              <div className="p-4 text-sm text-gray-600 bg-white rounded-xl shadow">
-                Loading dashboard…
-              </div>
-            ) : !dash ? (
-              <div className="p-4 text-sm text-gray-600 bg-white rounded-xl shadow">
-                No dashboard data.
-              </div>
-            ) : (
-              <>
-                <TodayMixWidget
-                  breakdown={dash?.payments?.breakdownToday || []}
-                />
-
-                <LowStockWidget
-                  lowStock={dash?.inventory?.lowStock || []}
-                  threshold={dash?.inventory?.lowStockThreshold ?? 5}
-                  products={products}
-                />
-
-                <StuckSalesWidget
-                  stuck={dash?.sales?.stuck || []}
-                  rule={dash?.sales?.stuckRule}
-                />
-              </>
-            )}
-          </div>
-        ) : null}
-
-        {/* SALES */}
-        {tab === "sales" ? (
-          <div className="mt-6 bg-white rounded-xl shadow overflow-hidden">
-            <div className="p-4 border-b">
-              <div className="font-semibold">Sales</div>
-              <div className="text-xs text-gray-500 mt-1">
-                Manager can cancel non-completed sales.
-              </div>
+            {/* Mobile picker */}
+            <div className="mt-4 lg:hidden">
+              <div className="text-xs font-semibold text-slate-600 mb-2">Section</div>
+              <Select value={section} onChange={(e) => setSection(e.target.value)}>
+                {[...SECTIONS, ...(showAdvanced ? ADVANCED_SECTIONS : [])].map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.label}
+                  </option>
+                ))}
+              </Select>
             </div>
 
-            <div className="p-3 border-b">
-              <input
-                className="w-full border rounded-lg px-3 py-2 text-sm"
-                placeholder="Search by sale id / status / customer / phone"
-                value={salesQ}
-                onChange={(e) => setSalesQ(e.target.value)}
-              />
-            </div>
+            {/* Desktop nav */}
+            <div className="mt-4 hidden lg:grid gap-2">
+              {SECTIONS.map((s) => (
+                <NavItem key={s.key} active={section === s.key} label={s.label} onClick={() => setSection(s.key)} />
+              ))}
 
-            {loadingSales ? (
-              <div className="p-4 text-sm text-gray-600">Loading...</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-600">
-                    <tr>
-                      <th className="text-left p-3">ID</th>
-                      <th className="text-left p-3">Status</th>
-                      <th className="text-right p-3">Total</th>
-                      <th className="text-left p-3">Customer</th>
-                      <th className="text-left p-3">Time</th>
-                      <th className="text-right p-3">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredSales.map((s) => (
-                      <tr key={s.id} className="border-t">
-                        <td className="p-3 font-medium">{s.id}</td>
-                        <td className="p-3">{s.status}</td>
-                        <td className="p-3 text-right">
-                          {money(s.totalAmount ?? s.total ?? 0)}
-                        </td>
-                        <td className="p-3">
-                          {(s.customerName || s.customer_name || "").trim() ||
-                            "-"}
-                          <div className="text-xs text-gray-500">
-                            {s.customerPhone || s.customer_phone || ""}
-                          </div>
-                        </td>
-                        <td className="p-3">
-                          {fmt(s.createdAt || s.created_at)}
-                        </td>
-                        <td className="p-3 text-right">
-                          <button
-                            disabled={!canCancelSale(s)}
-                            onClick={() => openCancel(s.id)}
-                            className={
-                              "px-3 py-1.5 rounded-lg text-xs " +
-                              (canCancelSale(s)
-                                ? "border hover:bg-gray-50"
-                                : "bg-gray-100 text-gray-400")
-                            }
-                          >
-                            Cancel
-                          </button>
-                        </td>
-                      </tr>
+              <div className="mt-2 pt-3 border-t border-slate-200">
+                <label className="flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
+                  <span>Advanced</span>
+                  <input type="checkbox" checked={showAdvanced} onChange={(e) => setShowAdvanced(e.target.checked)} />
+                </label>
+
+                {showAdvanced ? (
+                  <div className="mt-2 grid gap-2">
+                    {ADVANCED_SECTIONS.map((s) => (
+                      <NavItem
+                        key={s.key}
+                        active={section === s.key}
+                        label={s.label}
+                        onClick={() => setSection(s.key)}
+                      />
                     ))}
-                    {filteredSales.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="p-4 text-sm text-gray-600">
-                          No sales.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        ) : null}
+                  </div>
+                ) : null}
 
-        {/* INVENTORY (qty) + PRODUCTS (archive/restore) */}
-        {tab === "inventory" ? (
-          <div className="mt-6 space-y-4">
-            {/* Inventory list stays exactly for qty */}
-            <div className="bg-white rounded-xl shadow overflow-hidden">
-              <div className="p-4 border-b">
-                <div className="font-semibold">Inventory (Qty)</div>
-                <div className="text-xs text-gray-500 mt-1">
-                  Qty from GET /inventory; selling price joined from GET
-                  /products.
+                <div className="mt-3 text-xs text-slate-600">
+                  Advanced is for checking “who did what”.
                 </div>
               </div>
-
-              <div className="p-3 border-b">
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Search inventory by name or SKU"
-                  value={invQ}
-                  onChange={(e) => setInvQ(e.target.value)}
-                />
-              </div>
-
-              {loadingInv || loadingProd ? (
-                <div className="p-4 text-sm text-gray-600">Loading...</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left p-3">ID</th>
-                        <th className="text-left p-3">Name</th>
-                        <th className="text-left p-3">SKU</th>
-                        <th className="text-right p-3">On hand</th>
-                        <th className="text-right p-3">Selling</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredInventory.map((p, idx) => {
-                        const pid = p.productId ?? p.product_id ?? p.id ?? "-";
-                        return (
-                          <tr
-                            key={p.id || `${pid}-${idx}`}
-                            className="border-t"
-                          >
-                            <td className="p-3 font-medium">{String(pid)}</td>
-                            <td className="p-3">
-                              {p.productName || p.product_name || p.name || "-"}
-                            </td>
-                            <td className="p-3 text-gray-600">
-                              {p.sku || "-"}
-                            </td>
-                            <td className="p-3 text-right">
-                              {p.qtyOnHand ??
-                                p.qty_on_hand ??
-                                p.qty ??
-                                p.quantity ??
-                                0}
-                            </td>
-                            <td className="p-3 text-right">{priceFor(p)}</td>
-                          </tr>
-                        );
-                      })}
-                      {filteredInventory.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="p-4 text-sm text-gray-600">
-                            No inventory items.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-              )}
             </div>
 
-            {/* Products list is where archived products live */}
-            <div className="bg-white rounded-xl shadow overflow-hidden">
-              <div className="p-4 border-b flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="font-semibold">
-                    Products ({showArchivedProducts ? "Archived" : "Active"})
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    This is where you archive/restore products.
-                  </div>
+            <div className="mt-6 pt-4 border-t border-slate-200">
+             <AsyncButton
+                state={refreshState}
+                text="Refresh"
+                loadingText="Refreshing…"
+                successText="Done"
+                onClick={refreshCurrent}
+                className="w-full"
+              />
+              <div className="mt-3 text-xs text-slate-600">Simple: open Dashboard first.</div>
+            </div>
+          </aside>
+
+          {/* Main */}
+          <main className="grid gap-4">
+            {/* DASHBOARD */}
+            {section === "dashboard" ? (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                  <StatCard label="Money today" value={dashLoading ? "…" : money(dashTodayTotal)} sub="All methods" />
+                  <StatCard label="Low stock" value={dashLoading ? "…" : String(dashLowStockCount)} sub="Need restock" />
+                  <StatCard label="Stuck sales" value={dashLoading ? "…" : String(dashStuckSalesCount)} sub="Need action" />
+                  <StatCard label="Tip" value="Check stock" sub="Then check sales" />
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={showArchivedProducts}
-                      onChange={(e) =>
-                        setShowArchivedProducts(e.target.checked)
-                      }
-                    />
-                    Show archived
-                  </label>
+                {dashLoading ? (
+                  <SectionCard title="Dashboard" hint="Loading…">
+                    <div className="grid gap-3">
+                      <Skeleton className="h-24 w-full" />
+                      <Skeleton className="h-24 w-full" />
+                      <Skeleton className="h-24 w-full" />
+                    </div>
+                  </SectionCard>
+                ) : !dash ? (
+                  <Banner kind="warn">No dashboard data.</Banner>
+                ) : (
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    <TodayMixWidget breakdown={dash?.payments?.breakdownToday || []} />
 
+                    <LowStockWidget
+                      lowStock={dash?.inventory?.lowStock || []}
+                      threshold={dash?.inventory?.lowStockThreshold ?? 5}
+                      products={products}
+                    />
+
+                    <div className="xl:col-span-2">
+                      <StuckSalesWidget stuck={dash?.sales?.stuck || []} rule={dash?.sales?.stuckRule} />
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : null}
+
+            {/* SALES */}
+            {section === "sales" ? (
+              <SectionCard
+                title="Sales"
+                hint="Shows 10 sales. Tap Load more for more."
+                right={
                   <button
-                    onClick={() =>
-                      loadProducts({ includeInactive: showArchivedProducts })
-                    }
-                    className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
+                    onClick={loadSales}
+                    className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold hover:bg-slate-50"
                   >
                     Reload
                   </button>
-                </div>
-              </div>
-
-              <div className="p-3 border-b">
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Search products by id / name / sku"
-                  value={prodQ}
-                  onChange={(e) => setProdQ(e.target.value)}
-                />
-              </div>
-
-              {loadingProd ? (
-                <div className="p-4 text-sm text-gray-600">Loading...</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left p-3">ID</th>
-                        <th className="text-left p-3">Name</th>
-                        <th className="text-left p-3">SKU</th>
-                        <th className="text-right p-3">Selling</th>
-                        <th className="text-right p-3">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredProducts.map((p) => {
-                        const archived = isArchivedProduct(p);
-                        const selling =
-                          p?.sellingPrice ??
-                          p?.selling_price ??
-                          p?.price ??
-                          p?.unitPrice ??
-                          p?.unit_price ??
-                          null;
-
-                        return (
-                          <tr key={p?.id} className="border-t">
-                            <td className="p-3 font-medium">{p?.id ?? "-"}</td>
-                            <td className="p-3">
-                              {p?.name || p?.productName || p?.title || "-"}
-                            </td>
-                            <td className="p-3 text-gray-600">
-                              {p?.sku || "-"}
-                            </td>
-                            <td className="p-3 text-right">
-                              {selling == null ? "-" : money(selling)}
-                            </td>
-                            <td className="p-3 text-right">
-                              {archived ? (
-                                <button
-                                  onClick={() => openRestoreProduct(p)}
-                                  className="px-3 py-1.5 rounded-lg text-xs border hover:bg-gray-50"
-                                >
-                                  Restore
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => openArchiveProduct(p)}
-                                  className="px-3 py-1.5 rounded-lg text-xs border hover:bg-gray-50"
-                                >
-                                  Archive
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-
-                      {filteredProducts.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="p-4 text-sm text-gray-600">
-                            No products in this view.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : null}
-
-        {tab === "pricing" ? <ProductPricingPanel /> : null}
-
-        {tab === "arrivals" ? (
-          <div className="mt-6 bg-white rounded-xl shadow overflow-hidden">
-            <div className="p-4 border-b flex items-center justify-between gap-3">
-              <div>
-                <div className="font-semibold">Stock arrivals</div>
-                <div className="text-xs text-gray-500 mt-1">
-                  View deliveries + attached documents.
-                </div>
-              </div>
-              <button
-                onClick={loadArrivals}
-                className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
+                }
               >
-                {loadingArrivals ? "Loading..." : "Reload"}
-              </button>
-            </div>
+                <div className="grid gap-3">
+                  <Input
+                    placeholder="Search: id, status, name, phone"
+                    value={salesQ}
+                    onChange={(e) => setSalesQ(e.target.value)}
+                  />
 
-            {loadingArrivals ? (
-              <div className="p-4 text-sm text-gray-600">Loading...</div>
-            ) : (
-              <div className="divide-y">
-                {(arrivals || []).map((a) => (
-                  <div key={a.id} className="p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-sm">
-                        <span className="font-semibold">Arrival #{a.id}</span>
-                        <span className="text-gray-500">
-                          {" "}
-                          • product #{a.productId} • qty {a.qtyReceived}
-                        </span>
+                  {loadingSales ? (
+                    <div className="grid gap-3">
+                      <Skeleton className="h-20 w-full" />
+                      <Skeleton className="h-20 w-full" />
+                      <Skeleton className="h-20 w-full" />
+                    </div>
+                  ) : (
+                    <div className="grid gap-3">
+                      {salesShown.map((s) => (
+                        <div key={s?.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-sm font-bold text-slate-900">Sale #{s?.id ?? "—"}</div>
+                              <div className="mt-1 text-xs text-slate-600">
+                                Status: <b>{String(s?.status ?? "—")}</b> • Time: {fmt(s?.createdAt || s?.created_at)}
+                              </div>
+                              <div className="mt-2 text-xs text-slate-600">
+                                Customer: {(s?.customerName || s?.customer_name || "").trim() || "—"}
+                                {(s?.customerPhone || s?.customer_phone) ? ` • ${s?.customerPhone || s?.customer_phone}` : ""}
+                              </div>
+                            </div>
+
+                            <div className="shrink-0 text-right">
+                              <div className="text-sm font-bold text-slate-900">{money(s?.totalAmount ?? s?.total ?? 0)}</div>
+                              <button
+                                disabled={!canCancelSale(s)}
+                                onClick={() => openCancel(s?.id)}
+                                className={cx(
+                                  "mt-2 rounded-xl px-3 py-2 text-xs font-semibold border",
+                                  canCancelSale(s)
+                                    ? "border-slate-200 hover:bg-slate-50"
+                                    : "border-slate-100 bg-slate-100 text-slate-400 cursor-not-allowed",
+                                )}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+
+                      {salesShown.length === 0 ? <div className="text-sm text-slate-600">No sales found.</div> : null}
+
+                      {canLoadMoreSales ? (
+                        <button
+                          type="button"
+                          onClick={() => setSalesPage((p) => p + 1)}
+                          className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"
+                        >
+                          Load more
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              </SectionCard>
+            ) : null}
+
+            {/* PAYMENTS */}
+            {section === "payments" ? (
+              <div className="grid gap-4">
+                <SectionCard
+                  title="Payments"
+                  hint="This is read-only."
+                  right={
+                    <button
+                      onClick={() => {
+                        loadPayments();
+                        loadPaymentsSummary();
+                        loadPaymentsBreakdown();
+                      }}
+                      className="rounded-xl bg-slate-900 text-white px-4 py-2 text-sm font-semibold hover:bg-slate-800"
+                    >
+                      Refresh
+                    </button>
+                  }
+                >
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPayView("overview")}
+                      className={cx(
+                        "rounded-xl border px-4 py-2 text-sm font-semibold",
+                        payView === "overview" ? "bg-slate-900 text-white border-slate-900" : "hover:bg-slate-50",
+                      )}
+                    >
+                      Overview
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPayView("list")}
+                      className={cx(
+                        "rounded-xl border px-4 py-2 text-sm font-semibold",
+                        payView === "list" ? "bg-slate-900 text-white border-slate-900" : "hover:bg-slate-50",
+                      )}
+                    >
+                      List
+                    </button>
+                  </div>
+
+                  {payView === "overview" ? (
+                    <div className="mt-4 grid gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <StatCard
+                          label="Today"
+                          value={loadingPaySummary ? "…" : String(paymentsSummary?.today?.count ?? 0)}
+                          sub={`Total: ${money(paymentsSummary?.today?.total ?? 0)}`}
+                        />
+                        <StatCard
+                          label="Yesterday"
+                          value={loadingPaySummary ? "…" : String(paymentsSummary?.yesterday?.count ?? 0)}
+                          sub={`Total: ${money(paymentsSummary?.yesterday?.total ?? 0)}`}
+                        />
+                        <StatCard
+                          label="All time"
+                          value={loadingPaySummary ? "…" : String(paymentsSummary?.allTime?.count ?? 0)}
+                          sub={`Total: ${money(paymentsSummary?.allTime?.total ?? 0)}`}
+                        />
                       </div>
-                      <div className="text-xs text-gray-500">
-                        {fmt(a.createdAt)}
+
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                        <PayBreakdownCard title="Today" loading={loadingPayBreakdown} buckets={breakdownTodayTotals} />
+                        <PayBreakdownCard title="Yesterday" loading={loadingPayBreakdown} buckets={breakdownYesterday} />
+                        <PayBreakdownCard title="All time" loading={loadingPayBreakdown} buckets={breakdownAll} />
                       </div>
                     </div>
+                  ) : (
+                    <div className="mt-4 grid gap-3">
+                      <Input
+                        placeholder="Search: id, sale, method, amount"
+                        value={payQ}
+                        onChange={(e) => setPayQ(e.target.value)}
+                      />
 
-                    {a.notes ? (
-                      <div className="mt-2 text-sm text-gray-700">
-                        Notes: {a.notes}
-                      </div>
-                    ) : null}
-
-                    <div className="mt-3">
-                      <div className="text-xs text-gray-500 mb-2">
-                        Documents
-                      </div>
-
-                      {Array.isArray(a.documents) && a.documents.length > 0 ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {a.documents.map((d) => (
-                            <ArrivalDocCard key={d.id || d.fileUrl} doc={d} />
-                          ))}
+                      {loadingPayments ? (
+                        <div className="grid gap-3">
+                          <Skeleton className="h-20 w-full" />
+                          <Skeleton className="h-20 w-full" />
+                          <Skeleton className="h-20 w-full" />
                         </div>
                       ) : (
-                        <div className="text-sm text-gray-600">
-                          No documents.
+                        <div className="grid gap-3">
+                          {(filteredPayments || []).slice(0, 80).map((p, idx) => (
+                            <div key={p?.id || idx} className="rounded-2xl border border-slate-200 bg-white p-4">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+                                <div>
+                                  <div className="text-xs font-semibold text-slate-600">Payment</div>
+                                  <div className="text-sm font-bold text-slate-900">{p?.id ?? "—"}</div>
+                                </div>
+
+                                <div>
+                                  <div className="text-xs font-semibold text-slate-600">Sale</div>
+                                  <div className="text-sm font-semibold text-slate-900">
+                                    #{p?.saleId ?? p?.sale_id ?? "—"}
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <div className="text-xs font-semibold text-slate-600">Method</div>
+                                  <div className="text-sm text-slate-900">{p?.method ?? "—"}</div>
+                                </div>
+
+                                <div className="sm:text-right">
+                                  <div className="text-xs font-semibold text-slate-600">Amount</div>
+                                  <div className="text-sm font-bold text-slate-900">{money(p?.amount ?? 0)}</div>
+                                </div>
+
+                                <div className="lg:text-right">
+                                  <div className="text-xs font-semibold text-slate-600">Time</div>
+                                  <div className="text-sm text-slate-700">{fmt(p?.createdAt || p?.created_at)}</div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+
+                          {(filteredPayments || []).length === 0 ? (
+                            <div className="text-sm text-slate-600">No payments.</div>
+                          ) : null}
+
+                          {(filteredPayments || []).length > 80 ? (
+                            <div className="text-xs text-slate-600">Showing first 80 results (to keep it fast).</div>
+                          ) : null}
                         </div>
                       )}
                     </div>
-                  </div>
-                ))}
-
-                {(arrivals || []).length === 0 ? (
-                  <div className="p-4 text-sm text-gray-600">
-                    No arrivals yet.
-                  </div>
-                ) : null}
+                  )}
+                </SectionCard>
               </div>
-            )}
-          </div>
-        ) : null}
+            ) : null}
 
-        {tab === "cash_reports" ? (
-          <div className="mt-6">
-            <CashReportsPanel title="Manager Cash Reports" />
-          </div>
-        ) : null}
-
-        {tab === "payments" ? (
-          <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-white rounded-xl shadow overflow-hidden">
-              <div className="p-4 border-b flex items-center justify-between">
-                <div>
-                  <div className="font-semibold">Payments</div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Read-only. From GET /payments.
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    loadPayments();
-                    loadPaymentsSummary();
-                    loadPaymentsBreakdown();
-                  }}
-                  className="px-4 py-2 rounded-lg bg-black text-white text-sm"
+            {/* INVENTORY */}
+            {section === "inventory" ? (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <SectionCard
+                  title="Inventory"
+                  hint="Name, SKU, qty, selling price."
+                  right={
+                    <button
+                      onClick={() => {
+                        loadInventory();
+                        loadProducts({ includeInactive: showArchivedProducts });
+                      }}
+                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold hover:bg-slate-50"
+                    >
+                      Reload
+                    </button>
+                  }
                 >
-                  Refresh
-                </button>
-              </div>
+                  <Input placeholder="Search by name or SKU" value={invQ} onChange={(e) => setInvQ(e.target.value)} />
 
-              <div className="p-3 border-b">
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Search by id / sale / method / amount"
-                  value={payQ}
-                  onChange={(e) => setPayQ(e.target.value)}
-                />
-              </div>
+                  <div className="mt-3">
+                    {loadingInv || loadingProd ? (
+                      <div className="grid gap-3">
+                        <Skeleton className="h-20 w-full" />
+                        <Skeleton className="h-20 w-full" />
+                        <Skeleton className="h-20 w-full" />
+                      </div>
+                    ) : (
+                      <div className="grid gap-3">
+                        {filteredInventory.map((p, idx) => {
+                          const pid = p?.productId ?? p?.product_id ?? p?.id ?? "—";
+                          const name = p?.productName || p?.product_name || p?.name || "—";
+                          const sku = p?.sku || "—";
+                          const qty = p?.qtyOnHand ?? p?.qty_on_hand ?? p?.qty ?? p?.quantity ?? 0;
+                          const selling = priceFor(p);
 
-              {loadingPayments ? (
-                <div className="p-4 text-sm text-gray-600">Loading...</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left p-3">ID</th>
-                        <th className="text-left p-3">Sale</th>
-                        <th className="text-right p-3">Amount</th>
-                        <th className="text-left p-3">Method</th>
-                        <th className="text-left p-3">Time</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredPayments.map((p, idx) => (
-                        <tr key={p?.id || idx} className="border-t">
-                          <td className="p-3 font-medium">{p?.id ?? "-"}</td>
-                          <td className="p-3">
-                            #{p?.saleId ?? p?.sale_id ?? "-"}
-                          </td>
-                          <td className="p-3 text-right">
-                            {money(p?.amount ?? 0)}
-                          </td>
-                          <td className="p-3">{p?.method ?? "-"}</td>
-                          <td className="p-3">
-                            {fmt(p?.createdAt || p?.created_at)}
-                          </td>
-                        </tr>
-                      ))}
-                      {filteredPayments.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="p-4 text-sm text-gray-600">
-                            No payments.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+                          return (
+                            <div key={p?.id || `${pid}-${idx}`} className="rounded-2xl border border-slate-200 bg-white p-4">
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-bold text-slate-900 truncate">{name}</div>
+                                  <div className="mt-1 text-xs text-slate-600">
+                                    ID: <b>{String(pid)}</b> • SKU: <b>{sku}</b>
+                                  </div>
+                                </div>
 
-            <div className="bg-white rounded-xl shadow p-4 space-y-4">
-              <div>
-                <div className="font-semibold">Summary</div>
-                <div className="text-xs text-gray-500 mt-1">
-                  From GET /payments/summary and /payments/breakdown
-                </div>
-              </div>
+                                <div className="flex gap-4">
+                                  <div className="text-right">
+                                    <div className="text-xs font-semibold text-slate-600">Qty</div>
+                                    <div className="text-sm font-bold text-slate-900">{Number(qty)}</div>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-xs font-semibold text-slate-600">Selling</div>
+                                    <div className="text-sm font-bold text-slate-900">{selling}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <Card
-                  label="Today"
-                  value={
-                    loadingPaySummary
-                      ? "…"
-                      : (paymentsSummary?.today?.count ?? 0)
+                        {filteredInventory.length === 0 ? (
+                          <div className="text-sm text-slate-600">No inventory items.</div>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  title={`Products (${showArchivedProducts ? "Archived" : "Active"})`}
+                  hint="Archive or restore products."
+                  right={
+                    <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={showArchivedProducts}
+                        onChange={(e) => setShowArchivedProducts(e.target.checked)}
+                      />
+                      Show archived
+                    </label>
                   }
-                  sub={`Total: ${money(paymentsSummary?.today?.total ?? 0)}`}
-                />
-                <Card
-                  label="Yesterday"
-                  value={
-                    loadingPaySummary
-                      ? "…"
-                      : (paymentsSummary?.yesterday?.count ?? 0)
-                  }
-                  sub={`Total: ${money(paymentsSummary?.yesterday?.total ?? 0)}`}
-                />
-                <Card
-                  label="All time"
-                  value={
-                    loadingPaySummary
-                      ? "…"
-                      : (paymentsSummary?.allTime?.count ?? 0)
-                  }
-                  sub={`Total: ${money(paymentsSummary?.allTime?.total ?? 0)}`}
-                />
-              </div>
-
-              <div className="border-t pt-4">
-                <div className="font-semibold mb-2">Breakdown (Today)</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <Card
-                    label="Cash"
-                    value={
-                      loadingPayBreakdown
-                        ? "…"
-                        : breakdownTodayTotals.CASH.count
-                    }
-                    sub={`Total: ${money(breakdownTodayTotals.CASH.total)}`}
-                  />
-                  <Card
-                    label="MoMo"
-                    value={
-                      loadingPayBreakdown
-                        ? "…"
-                        : breakdownTodayTotals.MOMO.count
-                    }
-                    sub={`Total: ${money(breakdownTodayTotals.MOMO.total)}`}
-                  />
-                  <Card
-                    label="Bank"
-                    value={
-                      loadingPayBreakdown
-                        ? "…"
-                        : breakdownTodayTotals.BANK.count
-                    }
-                    sub={`Total: ${money(breakdownTodayTotals.BANK.total)}`}
-                  />
-                  <Card
-                    label="Card"
-                    value={
-                      loadingPayBreakdown
-                        ? "…"
-                        : breakdownTodayTotals.CARD.count
-                    }
-                    sub={`Total: ${money(breakdownTodayTotals.CARD.total)}`}
-                  />
-                </div>
-              </div>
-
-              <div className="border-t pt-4">
-                <div className="font-semibold mb-2">Breakdown (Yesterday)</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <Card
-                    label="Cash"
-                    value={
-                      loadingPayBreakdown ? "…" : breakdownYesterday.CASH.count
-                    }
-                    sub={`Total: ${money(breakdownYesterday.CASH.total)}`}
-                  />
-                  <Card
-                    label="MoMo"
-                    value={
-                      loadingPayBreakdown ? "…" : breakdownYesterday.MOMO.count
-                    }
-                    sub={`Total: ${money(breakdownYesterday.MOMO.total)}`}
-                  />
-                </div>
-              </div>
-
-              <div className="border-t pt-4">
-                <div className="font-semibold mb-2">Breakdown (All time)</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <Card
-                    label="Cash"
-                    value={loadingPayBreakdown ? "…" : breakdownAll.CASH.count}
-                    sub={`Total: ${money(breakdownAll.CASH.total)}`}
-                  />
-                  <Card
-                    label="MoMo"
-                    value={loadingPayBreakdown ? "…" : breakdownAll.MOMO.count}
-                    sub={`Total: ${money(breakdownAll.MOMO.total)}`}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {tab === "users" ? (
-          <div className="mt-6">
-            <ManagerUsersPanel title="Staff list (view-only)" />
-          </div>
-        ) : null}
-
-        {tab === "credits" ? (
-          <div className="mt-6">
-            <CreditsPanel
-              title="Credits (Manager)"
-              capabilities={{
-                canView: true,
-                canCreate: false,
-                canDecide: true,
-                canSettle: false,
-              }}
-            />
-          </div>
-        ) : null}
-
-        {tab === "customers" ? (
-          <div className="mt-6">
-            <CustomersPanel title="Customers (Manager)" />
-          </div>
-        ) : null}
-
-        {tab === "audit" ? (
-          <div className="mt-6">
-            <AuditLogsPanel
-              title="Audit logs"
-              subtitle="Manager view (read-only)."
-              defaultLimit={50}
-            />
-          </div>
-        ) : null}
-
-        {tab === "evidence" ? (
-          <div className="mt-6 bg-white rounded-xl shadow p-4 space-y-3">
-            <div>
-              <div className="font-semibold">Evidence (investigation)</div>
-              <div className="text-sm text-gray-600 mt-1">
-                Open the audit trail for one record.
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <div className="text-xs text-gray-500 mb-1">Entity</div>
-                <select
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  value={evEntity}
-                  onChange={(e) => setEvEntity(e.target.value)}
                 >
-                  <option value="sale">sale</option>
-                  <option value="payment">payment</option>
-                  <option value="credit">credit</option>
-                  <option value="refund">refund</option>
-                  <option value="cash_session">cash_session</option>
-                  <option value="expense">expense</option>
-                  <option value="deposit">deposit</option>
-                  <option value="user">user</option>
-                  <option value="inventory">inventory</option>
-                  <option value="product">product</option>
-                </select>
-              </div>
+                  <Input
+                    placeholder="Search products (id, name, sku)"
+                    value={prodQ}
+                    onChange={(e) => setProdQ(e.target.value)}
+                  />
 
-              <div className="md:col-span-2">
-                <div className="text-xs text-gray-500 mb-1">
-                  Entity ID (required)
-                </div>
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Paste the record ID here"
-                  value={evEntityId}
-                  onChange={(e) => setEvEntityId(e.target.value)}
-                />
-              </div>
-            </div>
+                  <div className="mt-3">
+                    {loadingProd ? (
+                      <div className="grid gap-3">
+                        <Skeleton className="h-20 w-full" />
+                        <Skeleton className="h-20 w-full" />
+                        <Skeleton className="h-20 w-full" />
+                      </div>
+                    ) : (
+                      <div className="grid gap-3">
+                        {filteredProducts.map((p) => {
+                          const archived = isArchivedProduct(p);
+                          const selling =
+                            p?.sellingPrice ??
+                            p?.selling_price ??
+                            p?.price ??
+                            p?.unitPrice ??
+                            p?.unit_price ??
+                            null;
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <div>
-                <div className="text-xs text-gray-500 mb-1">
-                  From (optional)
-                </div>
-                <input
-                  type="date"
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  value={evFrom}
-                  onChange={(e) => setEvFrom(e.target.value)}
-                />
-              </div>
-              <div>
-                <div className="text-xs text-gray-500 mb-1">To (optional)</div>
-                <input
-                  type="date"
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  value={evTo}
-                  onChange={(e) => setEvTo(e.target.value)}
-                />
-              </div>
-              <div>
-                <div className="text-xs text-gray-500 mb-1">
-                  Action (optional)
-                </div>
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="e.g. PRODUCT_PRICING_UPDATE"
-                  value={evAction}
-                  onChange={(e) => setEvAction(e.target.value)}
-                />
-              </div>
-              <div>
-                <div className="text-xs text-gray-500 mb-1">
-                  User ID (optional)
-                </div>
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Who acted"
-                  value={evUserId}
-                  onChange={(e) => setEvUserId(e.target.value)}
-                />
-              </div>
-            </div>
+                          return (
+                            <div key={p?.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-bold text-slate-900 truncate">
+                                    {p?.name || p?.productName || p?.title || "—"}
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-600">
+                                    ID: <b>{p?.id ?? "—"}</b> • SKU: <b>{p?.sku || "—"}</b>
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-600">
+                                    Selling: <b>{selling == null ? "—" : money(selling)}</b>
+                                  </div>
+                                </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="md:col-span-2">
-                <div className="text-xs text-gray-500 mb-1">
-                  Search (optional)
-                </div>
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Free text search"
-                  value={evQ}
-                  onChange={(e) => setEvQ(e.target.value)}
-                />
-              </div>
-              <div>
-                <div className="text-xs text-gray-500 mb-1">Limit</div>
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  value={String(evLimit)}
-                  onChange={(e) => setEvLimit(Number(e.target.value || 200))}
-                />
-              </div>
-            </div>
+                                <div className="shrink-0">
+                                  {archived ? (
+                                    <button
+                                      onClick={() => openRestoreProduct(p)}
+                                      className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50"
+                                    >
+                                      Restore
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => openArchiveProduct(p)}
+                                      className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50"
+                                    >
+                                      Archive
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
 
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                className="px-4 py-2 rounded-lg bg-black text-white"
-                onClick={() => {
-                  const id = String(evEntityId || "").trim();
-                  if (!id) {
-                    setMsg("Entity ID is required to open evidence.");
-                    return;
-                  }
-                  const url = buildEvidenceUrl({
-                    entity: evEntity,
-                    entityId: id,
-                    from: evFrom,
-                    to: evTo,
-                    action: evAction,
-                    userId: evUserId,
-                    q: evQ,
-                    limit: evLimit,
-                  });
-                  router.push(url);
-                }}
+                        {filteredProducts.length === 0 ? (
+                          <div className="text-sm text-slate-600">No products here.</div>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                </SectionCard>
+              </div>
+            ) : null}
+
+            {/* PRICING */}
+            {section === "pricing" ? (
+              <SectionCard title="Pricing" hint="Set selling prices.">
+                <ProductPricingPanel key={`pricing-${refreshNonce}`} />
+              </SectionCard>
+            ) : null}
+
+            {/* INVENTORY REQUESTS */}
+            {section === "inv_requests" ? (
+              <SectionCard title="Inventory requests" hint="Approve or decline stock requests.">
+                <InventoryAdjustRequestsPanel key={`invreq-${refreshNonce}`} />
+              </SectionCard>
+            ) : null}
+
+            {/* ARRIVALS */}
+            {section === "arrivals" ? (
+              <SectionCard
+                title="Stock arrivals"
+                hint="New stock that came in (with files)."
+                right={
+                  <button
+                    onClick={loadArrivals}
+                    className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold hover:bg-slate-50"
+                  >
+                    {loadingArrivals ? "Loading…" : "Reload"}
+                  </button>
+                }
               >
-                Open evidence →
-              </button>
+                {loadingArrivals ? (
+                  <div className="grid gap-3">
+                    <Skeleton className="h-20 w-full" />
+                    <Skeleton className="h-20 w-full" />
+                    <Skeleton className="h-20 w-full" />
+                  </div>
+                ) : (
+                  <div className="grid gap-3">
+                    {(arrivals || []).map((a) => {
+                      const id = a?.id ?? "—";
+                      const productId = a?.productId ?? a?.product_id ?? "—";
+                      const qty = a?.qtyReceived ?? a?.qty_received ?? "—";
+                      const when = fmt(a?.createdAt || a?.created_at);
 
-              <button
-                className="px-4 py-2 rounded-lg border hover:bg-gray-50"
-                onClick={() => {
-                  setEvEntity("sale");
-                  setEvEntityId("");
-                  setEvFrom("");
-                  setEvTo("");
-                  setEvAction("");
-                  setEvUserId("");
-                  setEvQ("");
-                  setEvLimit(200);
-                  setMsg("");
-                }}
-              >
-                Clear
-              </button>
+                      return (
+                        <details key={id} className="rounded-2xl border border-slate-200 bg-white p-4">
+                          <summary className="cursor-pointer list-none">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="text-sm font-bold text-slate-900">Arrival #{id}</div>
+                                <div className="mt-1 text-xs text-slate-600">
+                                  Product: <b>#{productId}</b> • Qty: <b>{qty}</b>
+                                </div>
+                              </div>
+                              <div className="text-xs text-slate-500">{when}</div>
+                            </div>
+                          </summary>
+
+                          <div className="mt-4 grid gap-3">
+                            {a?.notes ? (
+                              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                                <b>Notes:</b> {a.notes}
+                              </div>
+                            ) : null}
+
+                            <div>
+                              <div className="text-xs font-semibold text-slate-600">Files</div>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {Array.isArray(a?.documents) && a.documents.length > 0 ? (
+                                  a.documents.map((d) => <ArrivalDocCard key={d?.id || d?.fileUrl || d?.url} doc={d} />)
+                                ) : (
+                                  <div className="text-sm text-slate-600">No files.</div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </details>
+                      );
+                    })}
+
+                    {(arrivals || []).length === 0 ? (
+                      <div className="text-sm text-slate-600">No arrivals yet.</div>
+                    ) : null}
+                  </div>
+                )}
+              </SectionCard>
+            ) : null}
+
+            {/* CASH REPORTS */}
+            {section === "cash_reports" ? (
+              <SectionCard title="Cash reports" hint="Cash summary for this location.">
+                <CashReportsPanel key={`cash-${refreshNonce}`} title="Manager Cash Reports" />
+              </SectionCard>
+            ) : null}
+
+            {/* CREDITS */}
+            {section === "credits" ? (
+              <SectionCard title="Credits" hint="Approve or decline credit requests.">
+               <CreditsPanel
+                  key={`credits-${refreshNonce}`}
+                  title="Credits (Manager)"
+                  capabilities={{ canView: true, canCreate: false, canDecide: true, canSettle: false }}
+                />
+              </SectionCard>
+            ) : null}
+
+            {/* STAFF */}
+            {section === "staff" ? (
+              <SectionCard title="Staff" hint="Online status needs backend data (like lastSeenAt).">
+                <ManagerUsersPanel key={`staff-${refreshNonce}`} title="Staff list (view-only)" />
+                <div className="mt-3 text-xs text-slate-600">
+                  For real “Online / Last seen”, backend must send lastSeenAt.
+                </div>
+              </SectionCard>
+            ) : null}
+
+            {/* ADVANCED: AUDIT */}
+            {section === "audit" ? (
+              <SectionCard title="Actions history" hint="Read-only logs.">
+                <AuditLogsPanel key={`audit-${refreshNonce}`} title="Actions history" subtitle="Manager view (read-only)." defaultLimit={50}
+                currentLocationLabel={locationLabel(me)}
+                />
+              </SectionCard>
+            ) : null}
+
+            {/* ADVANCED: EVIDENCE */}
+           {section === "evidence" ? (
+ <SectionCard 
+ key={`evidence-${refreshNonce}`}
+    title="Proof & History"
+    hint="Use this only when something looks wrong. It shows what happened, when it happened, and who did it."
+  >
+    <div className="grid gap-4">
+      {/* Friendly explanation */}
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-800">
+        <div className="font-semibold text-slate-900">What is this?</div>
+        <div className="mt-1 text-slate-700">
+          This is a <b>proof page</b>. It helps you confirm:
+          <ul className="list-disc ml-5 mt-2 text-slate-700">
+            <li><b>What changed</b> (price, stock, sale, payment, refund…)</li>
+            <li><b>Who did it</b> (which staff member)</li>
+            <li><b>When it happened</b></li>
+          </ul>
+        </div>
+        <div className="mt-2 text-xs text-slate-600">
+          Tip: Start by choosing the record below. You don’t need to type anything.
+        </div>
+      </div>
+
+      {/* Main filters */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <div className="text-xs font-semibold text-slate-600 mb-1">What are you checking?</div>
+          <Select
+            value={evEntity}
+            onChange={(e) => setEvEntity(e.target.value)}
+            aria-label="Select record type"
+          >
+            <option value="sale">Sales</option>
+            <option value="payment">Payments</option>
+            <option value="refund">Refunds</option>
+            <option value="credit">Credits</option>
+            <option value="cash_session">Cash sessions</option>
+            <option value="expense">Expenses</option>
+            <option value="deposit">Deposits</option>
+            <option value="inventory">Inventory</option>
+            <option value="product">Products</option>
+            <option value="user">Staff</option>
+          </Select>
+        </div>
+
+        <div className="md:col-span-2">
+          <div className="text-xs font-semibold text-slate-600 mb-1">Choose the record (no typing)</div>
+
+          {/* If you haven't added the picker states/hook below, keep this Input as a fallback */}
+          {Array.isArray(evCandidates) && evCandidates.length > 0 ? (
+            <Select
+              value={String(evEntityId || "")}
+              onChange={(e) => setEvEntityId(e.target.value)}
+              aria-label="Select a record"
+            >
+              <option value="">Select one…</option>
+              {evCandidates.map((c) => (
+                <option key={String(c.id)} value={String(c.id)}>
+                  {c.label}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-600">
+              {evCandidatesLoading ? "Loading records…" : "No records found for this type (try another type or date range)."}
             </div>
-          </div>
-        ) : null}
+          )}
 
-        {tab === "inv_requests" ? (
-          <div className="mt-6">
-            <InventoryAdjustRequestsPanel />
-          </div>
-        ) : null}
+          {/* Hidden field keeps existing evidence URL logic working */}
+          <input type="hidden" value={String(evEntityId || "")} readOnly />
+        </div>
+      </div>
+
+      {/* Time + staff */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div>
+          <div className="text-xs font-semibold text-slate-600 mb-1">From</div>
+          <Input type="date" value={evFrom} onChange={(e) => setEvFrom(e.target.value)} />
+        </div>
+
+        <div>
+          <div className="text-xs font-semibold text-slate-600 mb-1">To</div>
+          <Input type="date" value={evTo} onChange={(e) => setEvTo(e.target.value)} />
+        </div>
+
+        <div className="md:col-span-2">
+          <div className="text-xs font-semibold text-slate-600 mb-1">Staff member (optional)</div>
+          {Array.isArray(evStaff) && evStaff.length > 0 ? (
+            <Select value={evUserId} onChange={(e) => setEvUserId(e.target.value)}>
+              <option value="">Any staff</option>
+              {evStaff.map((u) => (
+                <option key={String(u.id)} value={String(u.id)}>
+                  {u.name} — {u.email}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-600">
+              {evStaffLoading ? "Loading staff…" : "Staff list not available."}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Optional search */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="md:col-span-2">
+          <div className="text-xs font-semibold text-slate-600 mb-1">Search words (optional)</div>
+          <Input
+            placeholder="Example: cancelled, price change, refund"
+            value={evQ}
+            onChange={(e) => setEvQ(e.target.value)}
+          />
+        </div>
+
+        <div>
+          <div className="text-xs font-semibold text-slate-600 mb-1">Results (advanced)</div>
+          <Select value={String(evLimit)} onChange={(e) => setEvLimit(Number(e.target.value || 200))}>
+            <option value="50">50 rows</option>
+            <option value="100">100 rows</option>
+            <option value="200">200 rows</option>
+            <option value="300">300 rows</option>
+          </Select>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          className="rounded-xl bg-slate-900 text-white px-4 py-2.5 text-sm font-semibold hover:bg-slate-800"
+          onClick={() => {
+            const id = String(evEntityId || "").trim();
+            if (!id) {
+              toast("warn", "Please choose a record first.");
+              return;
+            }
+
+            router.push(
+              buildEvidenceUrl({
+                entity: evEntity,
+                entityId: id,
+                from: evFrom,
+                to: evTo,
+                userId: evUserId,
+                q: evQ,
+                limit: evLimit,
+              })
+            );
+          }}
+        >
+          View proof →
+        </button>
+
+        <button
+          className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"
+          onClick={() => {
+            setEvEntity("sale");
+            setEvEntityId("");
+            setEvFrom("");
+            setEvTo("");
+            setEvUserId("");
+            setEvQ("");
+            setEvLimit(200);
+            toast("info", "");
+          }}
+        >
+          Clear
+        </button>
+      </div>
+    </div>
+  </SectionCard>
+) : null}
+          </main>
+        </div>
       </div>
 
       {/* CANCEL SALE MODAL */}
       {cancelOpen ? (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow max-w-md w-full p-4">
-            <div className="font-semibold">Cancel sale #{cancelSaleId}</div>
-            <div className="text-xs text-gray-500 mt-1">
-              Phase 1 rule: do NOT cancel COMPLETED sales.
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm max-w-md w-full overflow-hidden">
+            <div className="p-4 border-b border-slate-200">
+              <div className="text-sm font-semibold text-slate-900">Cancel sale #{cancelSaleId}</div>
+              <div className="text-xs text-slate-600 mt-1">Rule: do NOT cancel COMPLETED sales.</div>
             </div>
 
-            <div className="mt-3">
-              <input
-                className="w-full border rounded-lg px-3 py-2 text-sm"
+            <div className="p-4">
+              <Input
                 placeholder="Reason (optional)"
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
               />
-            </div>
 
-            <div className="mt-4 flex gap-2 justify-end">
-              <button
-                onClick={() => {
-                  setCancelOpen(false);
-                  setCancelSaleId(null);
-                  setCancelReason("");
-                }}
-                className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
-                disabled={canceling}
-              >
-                Close
-              </button>
+              <div className="mt-4 flex gap-2 justify-end">
+                <button
+                  onClick={() => {
+                    setCancelOpen(false);
+                    setCancelSaleId(null);
+                    setCancelReason("");
+                  }}
+                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"
+                  disabled={canceling}
+                >
+                  Close
+                </button>
 
-              <button
-                onClick={confirmCancel}
-                className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm hover:bg-red-700"
-                disabled={canceling}
-              >
-                {canceling ? "Cancelling..." : "Confirm cancel"}
-              </button>
+                <button
+                  onClick={confirmCancel}
+                  className="rounded-xl bg-rose-600 text-white px-4 py-2.5 text-sm font-semibold hover:bg-rose-700 disabled:opacity-60"
+                  disabled={canceling}
+                >
+                  {canceling ? "Cancelling…" : "Confirm cancel"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1591,53 +1833,52 @@ export default function ManagerPage() {
 
       {/* ARCHIVE / RESTORE MODAL */}
       {archOpen ? (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow max-w-md w-full p-4">
-            <div className="font-semibold">
-              {archMode === "archive" ? "Archive" : "Restore"} product #
-              {archProduct?.id}
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm max-w-md w-full overflow-hidden">
+            <div className="p-4 border-b border-slate-200">
+              <div className="text-sm font-semibold text-slate-900">
+                {archMode === "archive" ? "Archive" : "Restore"} product #{archProduct?.id}
+              </div>
+              <div className="text-xs text-slate-600 mt-1">
+                Product: {archProduct?.name || archProduct?.productName || archProduct?.title || "—"}
+              </div>
             </div>
 
-            {archMode === "archive" ? (
-              <div className="mt-3">
-                <input
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
+            <div className="p-4">
+              {archMode === "archive" ? (
+                <Input
                   placeholder="Reason (optional)"
                   value={archReason}
                   onChange={(e) => setArchReason(e.target.value)}
                 />
+              ) : (
+                <div className="text-sm text-slate-700">This will make the product active again.</div>
+              )}
+
+              <div className="mt-4 flex gap-2 justify-end">
+                <button
+                  onClick={() => {
+                    setArchOpen(false);
+                    setArchProduct(null);
+                    setArchReason("");
+                  }}
+                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"
+                  disabled={archBusy}
+                >
+                  Close
+                </button>
+
+                <button
+                  onClick={confirmArchiveRestore}
+                  className={cx(
+                    "rounded-xl px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60",
+                    archMode === "archive" ? "bg-slate-900 hover:bg-slate-800" : "bg-emerald-600 hover:bg-emerald-700",
+                  )}
+                  disabled={archBusy}
+                >
+                  {archBusy ? "Working…" : archMode === "archive" ? "Confirm archive" : "Confirm restore"}
+                </button>
               </div>
-            ) : null}
-
-            <div className="mt-4 flex gap-2 justify-end">
-              <button
-                onClick={() => {
-                  setArchOpen(false);
-                  setArchProduct(null);
-                  setArchReason("");
-                }}
-                className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
-                disabled={archBusy}
-              >
-                Close
-              </button>
-
-              <button
-                onClick={confirmArchiveRestore}
-                className={
-                  "px-4 py-2 rounded-lg text-white text-sm " +
-                  (archMode === "archive"
-                    ? "bg-black hover:bg-gray-800"
-                    : "bg-green-600 hover:bg-green-700")
-                }
-                disabled={archBusy}
-              >
-                {archBusy
-                  ? "Working..."
-                  : archMode === "archive"
-                    ? "Confirm archive"
-                    : "Confirm restore"}
-              </button>
             </div>
           </div>
         </div>
@@ -1646,53 +1887,32 @@ export default function ManagerPage() {
   );
 }
 
-function Tab({ active, onClick, children }) {
-  return (
-    <button
-      onClick={onClick}
-      className={
-        "px-3 py-2 rounded-lg border text-sm " +
-        (active
-          ? "bg-black text-white border-black"
-          : "bg-white text-gray-700 hover:bg-gray-100")
-      }
-    >
-      {children}
-    </button>
-  );
-}
+/* ---------- Widgets ---------- */
 
-function Card({ label, value, sub }) {
+function PayBreakdownCard({ title, loading, buckets }) {
+  const order = ["CASH", "MOMO", "BANK", "CARD", "OTHER"];
+  const total = order.reduce((s, k) => s + Number(buckets?.[k]?.total || 0), 0);
+
   return (
-    <div className="bg-white rounded-xl shadow p-4">
-      <div className="text-sm text-gray-500">{label}</div>
-      <div className="text-2xl font-semibold mt-1">{value}</div>
-      {sub ? <div className="text-sm text-gray-600 mt-1">{sub}</div> : null}
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="text-sm font-semibold text-slate-900">{title}</div>
+      <div className="mt-1 text-xs text-slate-600">Total: {loading ? "…" : money(total)}</div>
+
+      <div className="mt-3 grid gap-2">
+        {order.map((k) => (
+          <div key={k} className="flex items-center justify-between text-sm">
+            <div className="text-slate-700">{k}</div>
+            <div className="text-slate-900 font-semibold">{loading ? "…" : money(buckets?.[k]?.total || 0)}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 function TodayMixWidget({ breakdown }) {
-  const buckets = useMemo(() => {
-    const out = {
-      CASH: { count: 0, total: 0 },
-      MOMO: { count: 0, total: 0 },
-      BANK: { count: 0, total: 0 },
-      CARD: { count: 0, total: 0 },
-      OTHER: { count: 0, total: 0 },
-    };
-    for (const r of Array.isArray(breakdown) ? breakdown : []) {
-      const k = normalizeMethodKey(r?.method);
-      out[k].count += Number(r?.count || 0);
-      out[k].total += Number(r?.total || 0);
-    }
-    return out;
-  }, [breakdown]);
-
-  const totalToday = Object.values(buckets).reduce(
-    (s, x) => s + Number(x.total || 0),
-    0,
-  );
+  const buckets = useMemo(() => sumBreakdown(breakdown || []), [breakdown]);
+  const totalToday = Object.values(buckets).reduce((s, x) => s + Number(x.total || 0), 0);
 
   function pct(total) {
     const t = Number(total || 0);
@@ -1702,93 +1922,56 @@ function TodayMixWidget({ breakdown }) {
   }
 
   return (
-    <div className="bg-white rounded-xl shadow p-4">
-      <div className="font-semibold">Today payment mix</div>
-      <div className="text-xs text-gray-500 mt-1">
-        Totals + share of today’s collected money.
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-5 gap-3">
+    <SectionCard title="Today payment mix" hint="How money came in today.">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         {["CASH", "MOMO", "BANK", "CARD", "OTHER"].map((k) => (
-          <div key={k} className="border rounded-xl p-3">
-            <div className="text-xs text-gray-500">{k}</div>
-            <div className="text-lg font-semibold mt-1">{buckets[k].count}</div>
-            <div className="text-sm text-gray-700 mt-1">
-              Total: {money(buckets[k].total)}
-            </div>
-            <div className="text-xs text-gray-500 mt-1">
-              {pct(buckets[k].total)}%
-            </div>
+          <div key={k} className="rounded-2xl border border-slate-200 bg-white p-3">
+            <div className="text-xs font-semibold text-slate-600">{k}</div>
+            <div className="mt-1 text-lg font-bold text-slate-900">{buckets[k].count}</div>
+            <div className="text-sm text-slate-700 mt-1">Total: {money(buckets[k].total)}</div>
+            <div className="text-xs text-slate-500 mt-1">{pct(buckets[k].total)}%</div>
           </div>
         ))}
       </div>
 
-      <div className="mt-4 text-sm text-gray-700">
+      <div className="mt-4 text-sm text-slate-700">
         <b>Today total:</b> {money(totalToday)}
       </div>
-    </div>
+    </SectionCard>
   );
 }
 
 function LowStockWidget({ lowStock, threshold, products }) {
   function nameFor(productId) {
     const pid = String(productId || "");
-    const p =
-      (Array.isArray(products) ? products : []).find(
-        (x) => String(x?.id) === pid,
-      ) || null;
+    const p = (Array.isArray(products) ? products : []).find((x) => String(x?.id) === pid) || null;
     return p?.name || p?.productName || p?.title || `Product #${pid}`;
   }
 
   return (
-    <div className="bg-white rounded-xl shadow overflow-hidden">
-      <div className="p-4 border-b">
-        <div className="font-semibold">Low stock alerts</div>
-        <div className="text-xs text-gray-500 mt-1">
-          Items with qty ≤ {threshold}.
-        </div>
-      </div>
+    <SectionCard title="Low stock" hint={`Items with qty ≤ ${threshold}.`}>
+      <div className="grid gap-2">
+        {(Array.isArray(lowStock) ? lowStock : []).map((r, idx) => (
+          <div key={`${r?.productId || idx}`} className="rounded-2xl border border-slate-200 bg-white p-3">
+            <div className="text-sm font-semibold text-slate-900">{nameFor(r?.productId)}</div>
+            <div className="mt-1 text-xs text-slate-600">
+              ID: <b>{r?.productId ?? "—"}</b> • Qty: <b>{Number(r?.qtyOnHand ?? r?.qty_on_hand ?? 0)}</b>
+            </div>
+          </div>
+        ))}
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600">
-            <tr>
-              <th className="text-left p-3">Product</th>
-              <th className="text-right p-3">Qty</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(Array.isArray(lowStock) ? lowStock : []).map((r, idx) => (
-              <tr key={`${r?.productId || idx}`} className="border-t">
-                <td className="p-3">
-                  <div className="font-medium">{nameFor(r?.productId)}</div>
-                  <div className="text-xs text-gray-500">
-                    ID: {r?.productId ?? "-"}
-                  </div>
-                </td>
-                <td className="p-3 text-right font-semibold">
-                  {Number(r?.qtyOnHand ?? r?.qty_on_hand ?? 0)}
-                </td>
-              </tr>
-            ))}
-            {(Array.isArray(lowStock) ? lowStock : []).length === 0 ? (
-              <tr>
-                <td colSpan={2} className="p-4 text-sm text-gray-600">
-                  No low stock alerts.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+        {(Array.isArray(lowStock) ? lowStock : []).length === 0 ? (
+          <div className="text-sm text-slate-600">No low stock alerts.</div>
+        ) : null}
       </div>
-    </div>
+    </SectionCard>
   );
 }
 
 function StuckSalesWidget({ stuck, rule }) {
   function ageLabel(seconds) {
     const s = Number(seconds || 0);
-    if (!Number.isFinite(s) || s <= 0) return "-";
+    if (!Number.isFinite(s) || s <= 0) return "—";
     const mins = Math.floor(s / 60);
     const hrs = Math.floor(mins / 60);
     const days = Math.floor(hrs / 24);
@@ -1798,46 +1981,30 @@ function StuckSalesWidget({ stuck, rule }) {
   }
 
   return (
-    <div className="bg-white rounded-xl shadow overflow-hidden">
-      <div className="p-4 border-b">
-        <div className="font-semibold">Stuck sales</div>
-        <div className="text-xs text-gray-500 mt-1">
-          Rule: {rule || "aging sales"}.
-        </div>
-      </div>
+    <SectionCard title="Stuck sales" hint={`Rule: ${rule || "aging sales"}.`}>
+      <div className="grid gap-3">
+        {(Array.isArray(stuck) ? stuck : []).map((s, idx) => (
+          <div key={s?.id || idx} className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-bold text-slate-900">Sale #{s?.id ?? "—"}</div>
+                <div className="mt-1 text-xs text-slate-600">
+                  Status: <b>{s?.status ?? "—"}</b> • Age: <b>{ageLabel(s?.ageSeconds)}</b>
+                </div>
+                <div className="mt-1 text-xs text-slate-600">Created: {fmt(s?.createdAt)}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs font-semibold text-slate-600">Total</div>
+                <div className="text-sm font-bold text-slate-900">{money(s?.totalAmount ?? 0)}</div>
+              </div>
+            </div>
+          </div>
+        ))}
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600">
-            <tr>
-              <th className="text-left p-3">Sale</th>
-              <th className="text-left p-3">Status</th>
-              <th className="text-right p-3">Total</th>
-              <th className="text-left p-3">Age</th>
-              <th className="text-left p-3">Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(Array.isArray(stuck) ? stuck : []).map((s, idx) => (
-              <tr key={s?.id || idx} className="border-t">
-                <td className="p-3 font-medium">#{s?.id ?? "-"}</td>
-                <td className="p-3">{s?.status ?? "-"}</td>
-                <td className="p-3 text-right">{money(s?.totalAmount ?? 0)}</td>
-                <td className="p-3">{ageLabel(s?.ageSeconds)}</td>
-                <td className="p-3">{fmt(s?.createdAt)}</td>
-              </tr>
-            ))}
-
-            {(Array.isArray(stuck) ? stuck : []).length === 0 ? (
-              <tr>
-                <td colSpan={5} className="p-4 text-sm text-gray-600">
-                  No stuck sales (good).
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+        {(Array.isArray(stuck) ? stuck : []).length === 0 ? (
+          <div className="text-sm text-slate-600">No stuck sales (good).</div>
+        ) : null}
       </div>
-    </div>
+    </SectionCard>
   );
 }

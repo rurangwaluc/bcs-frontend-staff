@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import Link from "next/link";
+import NotificationsBell from "./NotificationsBell";
 import { apiFetch } from "../lib/api";
 import { useRouter } from "next/navigation";
 
@@ -11,13 +12,39 @@ function toStr(v) {
   return String(v).trim();
 }
 
+function cx(...classes) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function locationLabel(user) {
+  if (!user) return "";
+  const loc = user?.location || null;
+
+  const name =
+    (loc?.name != null ? toStr(loc.name) : "") ||
+    (user?.locationName != null ? toStr(user.locationName) : "") ||
+    "";
+
+  const code =
+    (loc?.code != null ? toStr(loc.code) : "") ||
+    (user?.locationCode != null ? toStr(user.locationCode) : "") ||
+    "";
+
+  if (name && code) return `${name} (${code})`;
+  if (name) return name;
+  if (code) return code;
+
+  // Real-world UI: do not show raw ids.
+  return "";
+}
+
 /**
  * RoleBar (presentational + optional auth actions)
  *
  * Props:
  * - title: string
  * - subtitle: string
- * - user: { email?: string, role?: string, locationId?: number|string } | null
+ * - user: { email?: string, role?: string, locationId?: number|string, location?: {name?:string, code?:string, id?:any} } | null
  * - links: Array<{ href: string, label: string }>
  * - showAuthNav: boolean (default: !!user)
  */
@@ -47,11 +74,14 @@ export default function RoleBar({
     if (!user) return "";
     const email = toStr(user.email);
     const role = toStr(user.role);
-    const loc =
-      user.locationId !== undefined ? ` • Loc ${user.locationId}` : "";
+    const loc = locationLabel(user);
+
     const left =
       email || role ? `${email || "User"}${role ? ` • ${role}` : ""}` : "";
-    return left ? `${left}${loc}` : "";
+
+    if (!left && !loc) return "";
+    if (left && loc) return `${left} • ${loc}`;
+    return left || loc;
   }, [user]);
 
   async function logout() {
@@ -69,36 +99,50 @@ export default function RoleBar({
   }
 
   return (
-    <div className="border-b bg-white">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <div className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur overflow-x-hidden">
+      <div className="mx-auto max-w-7xl px-4 sm:px-5 py-3 sm:py-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           {/* Left */}
           <div className="min-w-0">
-            <div className="text-base sm:text-lg font-semibold truncate">
-              {title}
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="h-9 w-9 rounded-2xl bg-slate-900 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                BCS
+              </div>
+
+              <div className="min-w-0">
+                <div className="text-base sm:text-lg font-semibold text-slate-900 truncate">
+                  {title}
+                </div>
+
+                {subtitle ? (
+                  <div className="text-xs text-slate-600 mt-0.5 break-words">
+                    {subtitle}
+                  </div>
+                ) : userLine ? (
+                  <div className="text-xs text-slate-600 mt-0.5 break-words">
+                    {userLine}
+                  </div>
+                ) : null}
+              </div>
             </div>
-
-            {subtitle ? (
-              <div className="text-xs text-gray-600 mt-0.5 break-words">
-                {subtitle}
-              </div>
-            ) : null}
-
-            {!subtitle && userLine ? (
-              <div className="text-xs text-gray-600 mt-0.5 break-words">
-                {userLine}
-              </div>
-            ) : null}
           </div>
 
           {/* Right */}
           {navVisible ? (
-            <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-start sm:justify-end">
+            <div className="flex flex-wrap items-center gap-2 justify-start lg:justify-end">
+              {/* 🔔 Notifications live everywhere */}
+              <NotificationsBell enabled={!!user} />
+
               {navLinks.map((l) => (
                 <Link
                   key={l.href}
                   href={l.href}
-                  className="text-sm px-3 py-2 rounded-lg border hover:bg-gray-50"
+                  className={cx(
+                    "text-sm font-semibold",
+                    "px-3 py-2 rounded-xl border border-slate-200 bg-white",
+                    "hover:bg-slate-50 hover:border-slate-300 transition",
+                    "whitespace-nowrap",
+                  )}
                 >
                   {l.label}
                 </Link>
@@ -108,7 +152,14 @@ export default function RoleBar({
                 type="button"
                 onClick={logout}
                 disabled={loggingOut}
-                className="text-sm px-4 py-2 rounded-lg bg-black text-white disabled:opacity-60"
+                className={cx(
+                  "text-sm font-semibold",
+                  "px-4 py-2 rounded-xl",
+                  "bg-slate-900 text-white",
+                  "hover:bg-slate-800 transition",
+                  "disabled:opacity-60",
+                  "whitespace-nowrap",
+                )}
               >
                 {loggingOut ? "Logging out…" : "Logout"}
               </button>
