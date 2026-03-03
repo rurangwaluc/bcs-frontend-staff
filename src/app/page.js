@@ -2,9 +2,11 @@
 // frontend-staff/src/app/page.js
 
 "use client";
+export const dynamic = "force-dynamic";
 
 import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+
 import AsyncButton from "../components/AsyncButton";
 
 const ROLES = [
@@ -182,8 +184,8 @@ export default function StaffLandingPage() {
             </h1>
 
             <p className="mt-3 text-sm sm:text-base leading-relaxed text-slate-600 max-w-2xl">
-              Built for real retail teams. Every action is tracked. Payments are tied
-              to cash sessions. Reconciliation is enforced. No shortcuts.
+              Built for real retail teams. Every action is tracked. Payments are
+              tied to cash sessions. Reconciliation is enforced. No shortcuts.
             </p>
 
             <div className="mt-6 flex flex-col sm:flex-row gap-3">
@@ -198,7 +200,8 @@ export default function StaffLandingPage() {
                 type="button"
                 onClick={() => {
                   const el = document.getElementById("how-it-works");
-                  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                  if (el)
+                    el.scrollIntoView({ behavior: "smooth", block: "start" });
                 }}
                 className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
@@ -215,19 +218,25 @@ export default function StaffLandingPage() {
           <div className="border-t border-slate-200 bg-slate-50 p-5 sm:p-6">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-xs font-semibold text-slate-600">Security</div>
+                <div className="text-xs font-semibold text-slate-600">
+                  Security
+                </div>
                 <div className="mt-1 text-sm font-semibold text-slate-900">
                   Strict permissions per role
                 </div>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-xs font-semibold text-slate-600">Cash Control</div>
+                <div className="text-xs font-semibold text-slate-600">
+                  Cash Control
+                </div>
                 <div className="mt-1 text-sm font-semibold text-slate-900">
                   Sessions → ledger → reconcile
                 </div>
               </div>
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-xs font-semibold text-slate-600">Traceability</div>
+                <div className="text-xs font-semibold text-slate-600">
+                  Traceability
+                </div>
                 <div className="mt-1 text-sm font-semibold text-slate-900">
                   Audit trail everywhere
                 </div>
@@ -256,10 +265,15 @@ export default function StaffLandingPage() {
       </section>
 
       {/* How it works */}
-      <section id="how-it-works" className="mx-auto max-w-6xl px-4 sm:px-5 py-6">
+      <section
+        id="how-it-works"
+        className="mx-auto max-w-6xl px-4 sm:px-5 py-6"
+      >
         <div className="flex items-end justify-between gap-4">
           <div>
-            <div className="text-sm font-semibold text-slate-900">How it works</div>
+            <div className="text-sm font-semibold text-slate-900">
+              How it works
+            </div>
             <div className="mt-1 text-xs text-slate-600">
               A strict operational flow (the system forces it).
             </div>
@@ -313,7 +327,8 @@ export default function StaffLandingPage() {
                   Demo mode enabled
                 </div>
                 <div className="mt-1 text-xs text-amber-900/80">
-                  Role picker is visible only when <b>?demo=1</b>. Do not use this in production.
+                  Role picker is visible only when <b>?demo=1</b>. Do not use
+                  this in production.
                 </div>
               </div>
               <Pill>Demo</Pill>
@@ -327,7 +342,7 @@ export default function StaffLandingPage() {
                 placeholder="Type: manager, cashier, store keeper..."
                 className={cx(
                   "w-full border border-amber-200 rounded-2xl px-4 py-3 text-sm outline-none bg-white",
-                  "focus:ring-2 focus:ring-amber-200"
+                  "focus:ring-2 focus:ring-amber-200",
                 )}
               />
             </div>
@@ -335,7 +350,11 @@ export default function StaffLandingPage() {
             <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
               {filtered.map((r) => {
                 const state =
-                  busyRole === r.key ? "loading" : doneRole === r.key ? "success" : "idle";
+                  busyRole === r.key
+                    ? "loading"
+                    : doneRole === r.key
+                      ? "success"
+                      : "idle";
 
                 return (
                   <div
@@ -343,13 +362,17 @@ export default function StaffLandingPage() {
                     className={cx(
                       "border border-amber-200 rounded-2xl p-4 bg-white",
                       "hover:bg-amber-50/40 transition",
-                      "flex flex-col"
+                      "flex flex-col",
                     )}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold text-slate-900">{r.title}</div>
-                        <div className="text-xs text-slate-600 mt-1 leading-snug">{r.subtitle}</div>
+                        <div className="text-sm font-semibold text-slate-900">
+                          {r.title}
+                        </div>
+                        <div className="text-xs text-slate-600 mt-1 leading-snug">
+                          {r.subtitle}
+                        </div>
                       </div>
                       <div className="shrink-0">
                         <RoleBadge>{r.badge}</RoleBadge>
@@ -357,7 +380,9 @@ export default function StaffLandingPage() {
                     </div>
 
                     <div className="mt-4 flex items-center justify-between gap-3">
-                      <div className="text-xs text-slate-500">Continue to sign in</div>
+                      <div className="text-xs text-slate-500">
+                        Continue to sign in
+                      </div>
 
                       <AsyncButton
                         state={state}
@@ -382,9 +407,12 @@ export default function StaffLandingPage() {
         <div className="rounded-2xl border border-slate-200 bg-white p-5 text-xs text-slate-600 shadow-sm">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-semibold text-slate-900">Business Control System</div>
+              <div className="text-sm font-semibold text-slate-900">
+                Business Control System
+              </div>
               <div className="mt-1">
-                Built for retail teams, strict control, clean audit trail, real accountability.
+                Built for retail teams, strict control, clean audit trail, real
+                accountability.
               </div>
             </div>
             <div className="text-slate-500">
