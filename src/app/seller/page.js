@@ -3,37 +3,40 @@
 
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import AsyncButton from "../../components/AsyncButton";
 import CreditsPanel from "../../components/CreditsPanel";
 import RoleBar from "../../components/RoleBar";
-import AsyncButton from "../../components/AsyncButton";
+import ToastStack from "../../components/ToastStack";
 import { apiFetch } from "../../lib/api";
 import { getMe } from "../../lib/auth";
+import { useRouter } from "next/navigation";
 
 /**
- * Backend contract:
- * POST /sales/:id/mark
- * body: { status: "PAID" | "PENDING", paymentMethod?: "CASH"|"MOMO"|"BANK" }
+ * SELLER FLOW (matches your backend):
+ * - Create sale => DRAFT
+ * - Store keeper fulfills => FULFILLED
+ * - Seller:
+ *    - Mark CREDIT => POST /sales/:id/mark { status: "PENDING" }
+ *      ✅ Backend auto-creates credit row in markSale() when nextStatus === "PENDING"
+ *    - Mark PAID   => POST /sales/:id/mark { status: "PAID", paymentMethod }
+ *      ✅ Backend converts to AWAITING_PAYMENT_RECORD
+ *      ✅ Cashier later records the actual payment and sale becomes COMPLETED
  *
- * UI rules:
- * - DISPLAY "PENDING" as "CREDIT"
- * - SEND "PENDING" to backend
- *
- * Dashboard rules:
- * - Today's sales/total/credit = based on createdAt
- * - Money received today by method = based on updatedAt (when seller marked paid)
+ * Important constraints (backend):
+ * - Installments are NOT possible yet because payments has uniqSale index (payments_sale_unique).
+ * - This UI displays credit “Paid/Remaining” using listSales.amountPaid (SUM(payments.amount)).
  */
 
 const ENDPOINTS = {
   PRODUCTS_LIST: "/products",
   SALES_LIST: "/sales",
   SALES_CREATE: "/sales",
+  SALE_GET: (id) => `/sales/${id}`,
   SALE_MARK: (id) => `/sales/${id}/mark`,
   CUSTOMERS_SEARCH: (q) => `/customers/search?q=${encodeURIComponent(q)}`,
   CUSTOMERS_CREATE: "/customers",
-  CUSTOMER_HISTORY: (id) => `/customers/${id}/history`,
 };
 
 const PAYMENT_METHODS = [
@@ -53,6 +56,16 @@ function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
+function toStr(v) {
+  if (v === undefined || v === null) return "";
+  return String(v).trim();
+}
+
+function toInt(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : 0;
+}
+
 function money(n) {
   const x = Number(n ?? 0);
   if (!Number.isFinite(x)) return "0";
@@ -70,36 +83,56 @@ function safeDate(v) {
   }
 }
 
-function numOrNull(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+function isSameLocalDay(a, b) {
+  const da = new Date(a);
+  const db = new Date(b);
+  if (Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return false;
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  );
+}
+
+function isToday(dateLike) {
+  if (!dateLike) return false;
+  return isSameLocalDay(dateLike, new Date());
 }
 
 function locationLabel(me) {
   const loc = me?.location || null;
 
   const name =
-    (loc?.name != null ? String(loc.name).trim() : "") ||
-    (me?.locationName != null ? String(me.locationName).trim() : "") ||
+    (loc?.name != null ? toStr(loc.name) : "") ||
+    (me?.locationName != null ? toStr(me.locationName) : "") ||
     "";
 
   const code =
-    (loc?.code != null ? String(loc.code).trim() : "") ||
-    (me?.locationCode != null ? String(me.locationCode).trim() : "") ||
+    (loc?.code != null ? toStr(loc.code) : "") ||
+    (me?.locationCode != null ? toStr(me.locationCode) : "") ||
     "";
 
-  const id = loc?.id ?? me?.locationId ?? me?.location_id ?? null;
-
   if (name && code) return `${name} (${code})`;
-  if (name) return code ? `${name} (${code})` : name;
-  if (id != null && id !== "") return `Location #${id}`;
-  return "Location —";
+  if (name) return name;
+  return "Store —";
+}
+
+function nowLocalDatetimeValue() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
+    now.getDate(),
+  )}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
 /* ---------- UI atoms ---------- */
 
 function Skeleton({ className = "" }) {
-  return <div className={cx("animate-pulse rounded-xl bg-slate-200/70", className)} />;
+  return (
+    <div
+      className={cx("animate-pulse rounded-xl bg-slate-200/70", className)}
+    />
+  );
 }
 
 function PageSkeleton() {
@@ -137,19 +170,6 @@ function PageSkeleton() {
   );
 }
 
-function Banner({ kind = "info", children }) {
-  const styles =
-    kind === "success"
-      ? "bg-emerald-50 text-emerald-900 border-emerald-200"
-      : kind === "warn"
-        ? "bg-amber-50 text-amber-900 border-amber-200"
-        : kind === "danger"
-          ? "bg-rose-50 text-rose-900 border-rose-200"
-          : "bg-slate-50 text-slate-800 border-slate-200";
-
-  return <div className={cx("rounded-2xl border px-4 py-3 text-sm", styles)}>{children}</div>;
-}
-
 function Card({ label, value, sub }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -163,6 +183,19 @@ function Card({ label, value, sub }) {
 function Input({ className = "", ...props }) {
   return (
     <input
+      {...props}
+      className={cx(
+        "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none",
+        "focus:ring-2 focus:ring-slate-300",
+        className,
+      )}
+    />
+  );
+}
+
+function TextArea({ className = "", ...props }) {
+  return (
+    <textarea
       {...props}
       className={cx(
         "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none",
@@ -192,7 +225,9 @@ function SectionCard({ title, hint, right, children }) {
       <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-4">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-slate-900">{title}</div>
-          {hint ? <div className="mt-1 text-xs text-slate-600">{hint}</div> : null}
+          {hint ? (
+            <div className="mt-1 text-xs text-slate-600">{hint}</div>
+          ) : null}
         </div>
         {right ? <div className="shrink-0">{right}</div> : null}
       </div>
@@ -201,42 +236,364 @@ function SectionCard({ title, hint, right, children }) {
   );
 }
 
-function NavItem({ active, label, onClick }) {
+function NavItem({ active, label, onClick, badge }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={cx(
-        "w-full text-left rounded-xl px-3 py-2.5 text-sm font-semibold transition",
+        "w-full text-left rounded-xl px-3 py-2.5 text-sm font-semibold transition flex items-center justify-between gap-2",
         active ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50",
       )}
     >
-      {label}
+      <span className="truncate">{label}</span>
+      {badge ? (
+        <span
+          className={cx(
+            "shrink-0 rounded-full px-2 py-0.5 text-xs font-bold",
+            active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-700",
+          )}
+        >
+          {badge}
+        </span>
+      ) : null}
     </button>
   );
 }
 
-function OverflowCard({ children }) {
+/* ---------- Status UI ---------- */
+
+function statusUi(statusRaw) {
+  const st = String(statusRaw || "").toUpperCase();
+
+  // Seller credit
+  if (st === "PENDING") return { label: "CREDIT", tone: "warn" };
+
+  // Seller paid => backend sets AWAITING_PAYMENT_RECORD
+  if (st === "AWAITING_PAYMENT_RECORD")
+    return { label: "WAITING CASHIER", tone: "warn" };
+
+  if (st === "DRAFT") return { label: "WAITING RELEASE", tone: "info" };
+  if (st === "FULFILLED") return { label: "RELEASED", tone: "success" };
+  if (st === "COMPLETED") return { label: "PAID", tone: "success" };
+  if (st === "CANCELLED") return { label: "CANCELLED", tone: "danger" };
+
+  return { label: st || "—", tone: "neutral" };
+}
+
+function StatusBadge({ status }) {
+  const { label, tone } = statusUi(status);
+
+  const cls =
+    tone === "success"
+      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+      : tone === "warn"
+        ? "bg-amber-50 text-amber-800 border-amber-200"
+        : tone === "danger"
+          ? "bg-rose-50 text-rose-800 border-rose-200"
+          : tone === "info"
+            ? "bg-sky-50 text-sky-800 border-sky-200"
+            : "bg-slate-50 text-slate-700 border-slate-200";
+
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-      <div className="relative">
-        <div className="overflow-x-auto">{children}</div>
-        <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-white to-transparent" />
-        <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-white to-transparent" />
+    <span
+      className={cx(
+        "inline-flex items-center rounded-xl border px-2.5 py-1 text-xs font-extrabold",
+        cls,
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+/* ---------- Sale items modal ---------- */
+
+function ItemsModal({ open, loading, sale, onClose }) {
+  if (!open) return null;
+
+  const items = Array.isArray(sale?.items) ? sale.items : [];
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
+        <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-bold text-slate-900">
+              Sale #{sale?.id ?? "—"} {loading ? "…" : ""}
+            </div>
+            <div className="text-xs text-slate-600 mt-1 truncate">
+              Status: {String(sale?.status || "—").toUpperCase()}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="p-4">
+          {loading ? (
+            <div className="grid gap-3">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+            </div>
+          ) : items.length === 0 ? (
+            <div className="text-sm text-slate-600">No items.</div>
+          ) : (
+            <div className="grid gap-2">
+              {items.map((it, idx) => (
+                <div
+                  key={it?.id || idx}
+                  className="rounded-2xl border border-slate-200 bg-white p-3 flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-bold text-slate-900 truncate">
+                      {it?.productName ||
+                        it?.name ||
+                        `#${it?.productId ?? "—"}`}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      {it?.sku ? `SKU: ${it.sku}` : "SKU: —"}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="text-lg font-extrabold text-slate-900">
+                      {toInt(it?.qty ?? 0)}
+                    </div>
+                    <div className="text-xs text-slate-500">qty</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="mt-4 text-xs text-slate-600">
+            Tip: Released sales can be marked PAID or CREDIT.
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-function MobileList({ items, renderItem, emptyText }) {
-  if (!items?.length) return <div className="text-sm text-slate-600">{emptyText}</div>;
-  return <div className="grid gap-3">{items.map(renderItem)}</div>;
-}
+/* ---------- Credit modal for seller ---------- */
+/**
+ * This modal is UI-only for issue/expectedPayDate/installment.
+ * Backend credit issue date is createdAt; paid date is settledAt.
+ *
+ * ✅ No useEffect state resets (avoids the warning).
+ * ✅ Modal is remounted with a key from parent for clean defaults.
+ */
+function CreditSetupModal({ open, sale, onClose, onConfirm, loading }) {
+  const saleId = sale?.id ?? null;
 
+  const getLocalDateTime = useCallback(() => {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(
+      now.getHours(),
+    )}:${pad(now.getMinutes())}`;
+  }, []);
+
+  const [form, setForm] = useState(() => ({
+    issueDate: "",
+    expectedPayDate: "",
+    installment: "",
+    note: "",
+  }));
+
+  // ✅ Create a stable “defaults key” so ESLint is happy and reset happens only when needed
+  const defaultsKey = useMemo(() => {
+    const d = sale?._defaults || {};
+    // stringify only the fields we care about
+    return JSON.stringify({
+      saleId,
+      issueDate: d.issueDate || "",
+      expectedPayDate: d.expectedPayDate || "",
+      installment: d.installment || "",
+      note: d.note || "",
+    });
+  }, [saleId, sale?._defaults]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const d = sale?._defaults || {};
+    setForm({
+      issueDate: (d.issueDate && String(d.issueDate)) || getLocalDateTime(),
+      expectedPayDate: (d.expectedPayDate && String(d.expectedPayDate)) || "",
+      installment: (d.installment && String(d.installment)) || "",
+      note: (d.note && String(d.note)) || "",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, defaultsKey, getLocalDateTime]);
+
+  if (!open) return null;
+
+  const total = Number(sale?.totalAmount ?? sale?.total ?? 0) || 0;
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative w-full max-w-lg bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
+        <div className="p-4 border-b border-slate-200 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-extrabold text-slate-900">
+              Mark CREDIT • Sale #{sale?.id ?? "—"}
+            </div>
+            <div className="mt-1 text-xs text-slate-600">
+              Total: <b>{money(total)}</b> RWF
+            </div>
+          </div>
+          <button
+            type="button"
+            className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-extrabold text-slate-700 hover:bg-slate-50"
+            onClick={onClose}
+            disabled={loading}
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="p-4 grid gap-3">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            <b>Important:</b> Issue date and paid date are stored by backend on
+            the credit record. Installments are not supported until you remove{" "}
+            <b>payments_sale_unique</b> and implement a partial payment
+            endpoint.
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs font-semibold text-slate-600 mb-1">
+                Issue date (UI only)
+              </div>
+              <Input
+                type="datetime-local"
+                value={form.issueDate}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, issueDate: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-600 mb-1">
+                Expected paying date (UI only)
+              </div>
+              <Input
+                type="date"
+                value={form.expectedPayDate}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, expectedPayDate: e.target.value }))
+                }
+              />
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs font-semibold text-slate-600 mb-1">
+              First installment amount (UI only)
+            </div>
+            <Input
+              type="number"
+              min="0"
+              value={form.installment}
+              onChange={(e) =>
+                setForm((p) => ({ ...p, installment: e.target.value }))
+              }
+            />
+          </div>
+
+          <div>
+            <div className="text-xs font-semibold text-slate-600 mb-1">
+              Note (optional)
+            </div>
+            <TextArea
+              rows={2}
+              value={form.note}
+              onChange={(e) => setForm((p) => ({ ...p, note: e.target.value }))}
+            />
+          </div>
+
+          <div className="flex gap-2 flex-wrap">
+            <AsyncButton
+              variant="primary"
+              state={loading ? "loading" : "idle"}
+              text="Confirm CREDIT"
+              loadingText="Saving…"
+              successText="Saved"
+              onClick={() =>
+                onConfirm?.({
+                  issueDate: form.issueDate,
+                  expectedPayDate: form.expectedPayDate,
+                  installmentAmount: form.installment
+                    ? Number(form.installment)
+                    : 0,
+                  note: form.note,
+                })
+              }
+            />
+            <button
+              type="button"
+              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
+              onClick={onClose}
+              disabled={loading}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 /* ---------- Page ---------- */
 
 export default function SellerPage() {
   const router = useRouter();
+
+  // toast stack
+  const [toasts, setToasts] = useState([]);
+  const toastTimerRef = useRef(new Map());
+
+  function pushToast(kind, message) {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const t = { id, kind: kind || "info", message: message || "" };
+
+    setToasts((prev) => [t, ...(Array.isArray(prev) ? prev : [])].slice(0, 4));
+
+    const tm = setTimeout(() => {
+      setToasts((prev) =>
+        (Array.isArray(prev) ? prev : []).filter((x) => x.id !== id),
+      );
+      toastTimerRef.current.delete(id);
+    }, 6000);
+
+    toastTimerRef.current.set(id, tm);
+  }
+
+  function dismissToast(id) {
+    const tm = toastTimerRef.current.get(id);
+    if (tm) clearTimeout(tm);
+    toastTimerRef.current.delete(id);
+    setToasts((prev) =>
+      (Array.isArray(prev) ? prev : []).filter((x) => x.id !== id),
+    );
+  }
+
+  useEffect(() => {
+    return () => {
+      for (const tm of toastTimerRef.current.values()) clearTimeout(tm);
+      toastTimerRef.current.clear();
+    };
+  }, []);
 
   const [bootLoading, setBootLoading] = useState(true);
   const [me, setMe] = useState(null);
@@ -246,12 +603,12 @@ export default function SellerPage() {
 
   const [section, setSection] = useState("dashboard");
 
-  function toast(kind, text) {
+  function banner(kind, text) {
     setMsgKind(kind);
     setMsg(text || "");
   }
 
-  // ROLE GUARD + skeleton
+  // ROLE GUARD
   useEffect(() => {
     let alive = true;
 
@@ -294,7 +651,8 @@ export default function SellerPage() {
     };
   }, [router]);
 
-  const isAuthorized = !!me && String(me?.role || "").toLowerCase() === "seller";
+  const isAuthorized =
+    !!me && String(me?.role || "").toLowerCase() === "seller";
 
   // DATA
   const [products, setProducts] = useState([]);
@@ -305,44 +663,46 @@ export default function SellerPage() {
   const [salesLoading, setSalesLoading] = useState(false);
   const [salesQ, setSalesQ] = useState("");
 
-  // Create sale
+  // customer search + create
   const [customerQ, setCustomerQ] = useState("");
   const [customerResults, setCustomerResults] = useState([]);
   const [customerLoading, setCustomerLoading] = useState(false);
 
-  const [selectedCustomer, setSelectedCustomer] = useState(null); // {id,name,phone}
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [customerTin, setCustomerTin] = useState("");
+  const [customerAddress, setCustomerAddress] = useState("");
+
   const [note, setNote] = useState("");
 
-  const [saleDiscountPercent, setSaleDiscountPercent] = useState("");
-  const [saleDiscountAmount, setSaleDiscountAmount] = useState("");
-
   const [saleCart, setSaleCart] = useState([]);
-
-  // 3-state buttons
-  const [createCustomerBtn, setCreateCustomerBtn] = useState("idle");
   const [createSaleBtn, setCreateSaleBtn] = useState("idle");
-  const [markBtnState, setMarkBtnState] = useState({}); // { [saleId]: "idle"|"loading"|"success" }
+  const [createCustomerBtn, setCreateCustomerBtn] = useState("idle");
 
-  // history modal
-  const [histOpen, setHistOpen] = useState(false);
-  const [histLoading, setHistLoading] = useState(false);
-  const [histRows, setHistRows] = useState([]);
-  const [histTotals, setHistTotals] = useState(null);
+  const [markBtnState, setMarkBtnState] = useState({});
+  const [salePayMethod, setSalePayMethod] = useState({});
 
-  // per sale chosen method when marking paid
-  const [salePayMethod, setSalePayMethod] = useState({}); // { [saleId]: "CASH" }
+  // Sale items modal
+  const [itemsOpen, setItemsOpen] = useState(false);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [itemsSale, setItemsSale] = useState(null);
 
-  // loaders
+  // Credit modal
+  const [creditOpen, setCreditOpen] = useState(false);
+  const [creditSale, setCreditSale] = useState(null);
+  const [creditSaving, setCreditSaving] = useState(false);
+
   const loadProducts = useCallback(async () => {
     setProductsLoading(true);
     try {
       const data = await apiFetch(ENDPOINTS.PRODUCTS_LIST, { method: "GET" });
-      const list = Array.isArray(data?.products) ? data.products : data?.items || data?.rows || [];
+      const list = Array.isArray(data?.products)
+        ? data.products
+        : data?.items || data?.rows || [];
       setProducts(Array.isArray(list) ? list : []);
     } catch (e) {
-      toast("danger", e?.data?.error || e?.message || "Cannot load products");
+      banner("danger", e?.data?.error || e?.message || "Cannot load products");
       setProducts([]);
     } finally {
       setProductsLoading(false);
@@ -353,17 +713,19 @@ export default function SellerPage() {
     setSalesLoading(true);
     try {
       const data = await apiFetch(ENDPOINTS.SALES_LIST, { method: "GET" });
-      const list = Array.isArray(data?.sales) ? data.sales : data?.items || data?.rows || [];
+      const list = Array.isArray(data?.sales)
+        ? data.sales
+        : data?.items || data?.rows || [];
       setSales(Array.isArray(list) ? list : []);
     } catch (e) {
-      toast("danger", e?.data?.error || e?.message || "Cannot load sales");
+      banner("danger", e?.data?.error || e?.message || "Cannot load sales");
       setSales([]);
     } finally {
       setSalesLoading(false);
     }
   }, []);
 
-  // search customers (debounced)
+  // customer search (debounced)
   const searchCustomers = useCallback(async (q) => {
     const qq = String(q || "").trim();
     if (!qq) {
@@ -372,11 +734,13 @@ export default function SellerPage() {
     }
     setCustomerLoading(true);
     try {
-      const data = await apiFetch(ENDPOINTS.CUSTOMERS_SEARCH(qq), { method: "GET" });
-      setCustomerResults(Array.isArray(data?.customers) ? data.customers : []);
-    } catch (e) {
+      const data = await apiFetch(ENDPOINTS.CUSTOMERS_SEARCH(qq), {
+        method: "GET",
+      });
+      const rows = Array.isArray(data?.customers) ? data.customers : [];
+      setCustomerResults(rows);
+    } catch {
       setCustomerResults([]);
-      toast("danger", e?.data?.error || e?.message || "Customer search failed");
     } finally {
       setCustomerLoading(false);
     }
@@ -390,20 +754,18 @@ export default function SellerPage() {
   // load per section
   useEffect(() => {
     if (!isAuthorized) return;
-
-    loadProducts();
-
-    if (section === "dashboard") loadSales();
-    if (section === "sales") loadSales();
+    if (section === "create") loadProducts();
+    if (section === "dashboard" || section === "sales") loadSales();
   }, [isAuthorized, section, loadProducts, loadSales]);
 
-  /* ---------- Helpers ---------- */
+  /* ---------- derived ---------- */
 
   const filteredProducts = useMemo(() => {
     const list = Array.isArray(products) ? products : [];
-    const q = String(prodQ || "").trim().toLowerCase();
+    const q = String(prodQ || "")
+      .trim()
+      .toLowerCase();
     if (!q) return list;
-
     return list.filter((p) => {
       const name = String(p?.name ?? "").toLowerCase();
       const sku = String(p?.sku ?? "").toLowerCase();
@@ -413,7 +775,9 @@ export default function SellerPage() {
 
   const filteredSales = useMemo(() => {
     const list = Array.isArray(sales) ? sales : [];
-    const q = String(salesQ || "").trim().toLowerCase();
+    const q = String(salesQ || "")
+      .trim()
+      .toLowerCase();
     if (!q) return list;
 
     return list.filter((s) => {
@@ -421,9 +785,15 @@ export default function SellerPage() {
       const st = String(s?.status ?? "");
       const statusReadable = st.toUpperCase() === "PENDING" ? "CREDIT" : st;
 
-      const name = String(s?.customerName ?? s?.customer_name ?? "").toLowerCase();
-      const phone = String(s?.customerPhone ?? s?.customer_phone ?? "").toLowerCase();
-      const pm = String(getPaymentMethodFromSale(s) || "").toLowerCase();
+      const name = String(
+        s?.customerName ?? s?.customer_name ?? "",
+      ).toLowerCase();
+      const phone = String(
+        s?.customerPhone ?? s?.customer_phone ?? "",
+      ).toLowerCase();
+      const pm = String(
+        s?.paymentMethod ?? s?.payment_method ?? "",
+      ).toLowerCase();
 
       return (
         id.includes(q) ||
@@ -435,10 +805,64 @@ export default function SellerPage() {
     });
   }, [sales, salesQ]);
 
+  const salesSorted = useMemo(() => {
+    const list = Array.isArray(filteredSales) ? filteredSales : [];
+    return list.slice().sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0));
+  }, [filteredSales]);
+
+  const showAllSales = String(salesQ || "").trim().length > 0;
+  const salesToShow = useMemo(() => {
+    return showAllSales ? salesSorted.slice(0, 200) : salesSorted.slice(0, 10);
+  }, [salesSorted, showAllSales]);
+
+  const todaySales = useMemo(() => {
+    const list = Array.isArray(sales) ? sales : [];
+    return list.filter((s) => isToday(s?.createdAt || s?.created_at));
+  }, [sales]);
+
+  const todaySalesCount = useMemo(() => {
+    return todaySales.filter(
+      (s) => String(s?.status || "").toUpperCase() !== "CANCELLED",
+    ).length;
+  }, [todaySales]);
+
+  const todaySalesTotal = useMemo(() => {
+    return todaySales.reduce((sum, s) => {
+      const st = String(s?.status || "").toUpperCase();
+      if (st === "CANCELLED") return sum;
+      const v = Number(s?.totalAmount ?? s?.total ?? 0);
+      return sum + (Number.isFinite(v) ? v : 0);
+    }, 0);
+  }, [todaySales]);
+
+  const draftCount = useMemo(() => {
+    const list = Array.isArray(sales) ? sales : [];
+    return list.filter((s) => String(s?.status || "").toUpperCase() === "DRAFT")
+      .length;
+  }, [sales]);
+
+  const releasedCount = useMemo(() => {
+    const list = Array.isArray(sales) ? sales : [];
+    return list.filter(
+      (s) => String(s?.status || "").toUpperCase() === "FULFILLED",
+    ).length;
+  }, [sales]);
+
+  const creditCount = useMemo(() => {
+    const list = Array.isArray(sales) ? sales : [];
+    return list.filter(
+      (s) => String(s?.status || "").toUpperCase() === "PENDING",
+    ).length;
+  }, [sales]);
+
+  /* ---------- cart helpers ---------- */
+
   function productToCartItem(p) {
     const productId = Number(p?.id);
     const sellingPrice = Number(p?.sellingPrice ?? p?.selling_price ?? 0);
-    const maxDiscountPercent = Number(p?.maxDiscountPercent ?? p?.max_discount_percent ?? 0);
+    const maxDiscountPercent = Number(
+      p?.maxDiscountPercent ?? p?.max_discount_percent ?? 0,
+    );
 
     const sp = Number.isFinite(sellingPrice) ? sellingPrice : 0;
     const md = Number.isFinite(maxDiscountPercent) ? maxDiscountPercent : 0;
@@ -458,41 +882,31 @@ export default function SellerPage() {
 
   function addProductToSaleCart(p) {
     const productId = Number(p?.id);
-    if (!productId) return toast("warn", "Missing product id.");
-
+    if (!productId) return pushToast("warn", "Missing product id.");
     if (saleCart.some((x) => Number(x.productId) === productId)) {
-      return toast("warn", "Already added.");
+      return pushToast("warn", "Already added.");
     }
-
     setSaleCart((prev) => [...prev, productToCartItem(p)]);
-    toast("success", "Added to cart.");
+    pushToast("success", "Added to cart.");
   }
 
-  function updateSaleQty(productId, qtyStr) {
-    const qty = Number(qtyStr);
+  function updateCart(productId, patch) {
     setSaleCart((prev) =>
-      prev.map((it) => {
-        if (Number(it.productId) !== Number(productId)) return it;
-        const safe = Number.isFinite(qty) ? qty : it.qty;
-        const clamped = Math.max(1, Math.floor(safe));
-        return { ...it, qty: clamped };
-      }),
+      prev.map((it) =>
+        Number(it.productId) === Number(productId) ? { ...it, ...patch } : it,
+      ),
     );
   }
 
-  function updateSaleItem(productId, patch) {
+  function removeFromCart(productId) {
     setSaleCart((prev) =>
-      prev.map((it) => (Number(it.productId) === Number(productId) ? { ...it, ...patch } : it)),
+      prev.filter((it) => Number(it.productId) !== Number(productId)),
     );
-  }
-
-  function removeFromSaleCart(productId) {
-    setSaleCart((prev) => prev.filter((it) => Number(it.productId) !== Number(productId)));
   }
 
   function previewLineTotal(it) {
-    const qty = Number(it.qty) || 0;
-    const unitPrice = Number(it.unitPrice) || 0;
+    const qty = Math.max(1, toInt(it.qty));
+    const unitPrice = Math.max(0, toInt(it.unitPrice));
     const base = qty * unitPrice;
 
     const pct = Math.max(0, Math.min(100, Number(it.discountPercent) || 0));
@@ -504,203 +918,114 @@ export default function SellerPage() {
     return Math.max(0, base - disc);
   }
 
-  function getPaymentMethodFromSale(s) {
-    const raw = s?.paymentMethod ?? s?.payment_method ?? null;
-    return raw ? String(raw).toUpperCase() : null;
-  }
+  const cartSubtotal = useMemo(() => {
+    return saleCart.reduce((sum, it) => sum + previewLineTotal(it), 0);
+  }, [saleCart]);
 
-  function isSameLocalDay(a, b) {
-    const da = new Date(a);
-    const db = new Date(b);
-    if (Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return false;
-    return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
-  }
-
-  function isToday(dateLike) {
-    if (!dateLike) return false;
-    return isSameLocalDay(dateLike, new Date());
-  }
-
-  const paidStatuses = useMemo(() => new Set(["AWAITING_PAYMENT_RECORD", "COMPLETED"]), []);
-
-  const salesToday = useMemo(() => {
-    const list = Array.isArray(sales) ? sales : [];
-    return list.filter((s) => isToday(s?.createdAt || s?.created_at));
-  }, [sales]);
-
-  const todaySalesCount = useMemo(() => {
-    return salesToday.filter((s) => String(s?.status || "").toUpperCase() !== "CANCELLED").length;
-  }, [salesToday]);
-
-  const todaySalesTotal = useMemo(() => {
-    return salesToday.reduce((sum, s) => {
-      const st = String(s?.status || "").toUpperCase();
-      if (st === "CANCELLED") return sum;
-      const v = Number(s?.totalAmount ?? s?.total ?? 0);
-      return sum + (Number.isFinite(v) ? v : 0);
-    }, 0);
-  }, [salesToday]);
-
-  const todayCreditTotal = useMemo(() => {
-    return salesToday.reduce((sum, s) => {
-      const st = String(s?.status || "").toUpperCase();
-      if (st !== "PENDING") return sum;
-      const v = Number(s?.totalAmount ?? s?.total ?? 0);
-      return sum + (Number.isFinite(v) ? v : 0);
-    }, 0);
-  }, [salesToday]);
-
-  const todayCreditCount = useMemo(() => {
-    return salesToday.filter((s) => String(s?.status || "").toUpperCase() === "PENDING").length;
-  }, [salesToday]);
-
-  const paidLikeToday = useMemo(() => {
-    const list = Array.isArray(sales) ? sales : [];
-    return list.filter((s) => {
-      const st = String(s?.status || "").toUpperCase();
-      if (!paidStatuses.has(st)) return false;
-      const paidMoment = s?.updatedAt || s?.updated_at || null;
-      return isToday(paidMoment);
-    });
-  }, [sales, paidStatuses]);
-
-  const todayMoneyPaidLike = useMemo(() => {
-    return paidLikeToday.reduce((sum, s) => {
-      const v = Number(s?.totalAmount ?? s?.total ?? 0);
-      return sum + (Number.isFinite(v) ? v : 0);
-    }, 0);
-  }, [paidLikeToday]);
-
-  const todayPaidCash = useMemo(() => sumByMethod(paidLikeToday, "CASH"), [paidLikeToday]);
-  const todayPaidMoMo = useMemo(() => sumByMethod(paidLikeToday, "MOMO"), [paidLikeToday]);
-  const todayPaidBank = useMemo(() => sumByMethod(paidLikeToday, "BANK"), [paidLikeToday]);
-  const todayPaidUnknown = useMemo(() => {
-    return paidLikeToday.reduce((sum, s) => {
-      const pm = getPaymentMethodFromSale(s);
-      if (pm === "CASH" || pm === "MOMO" || pm === "BANK") return sum;
-      const v = Number(s?.totalAmount ?? s?.total ?? 0);
-      return sum + (Number.isFinite(v) ? v : 0);
-    }, 0);
-  }, [paidLikeToday]);
-
-  function sumByMethod(list, method) {
-    return (list || []).reduce((sum, s) => {
-      const pm = getPaymentMethodFromSale(s);
-      if (pm !== method) return sum;
-      const v = Number(s?.totalAmount ?? s?.total ?? 0);
-      return sum + (Number.isFinite(v) ? v : 0);
-    }, 0);
-  }
-
-  /* ---------- Actions ---------- */
+  /* ---------- actions ---------- */
 
   async function createCustomerFromInputs() {
     if (createCustomerBtn === "loading") return;
-    setMsg("");
 
-    const name = String(customerName || "").trim();
-    const phone = String(customerPhone || "").trim();
+    const name = toStr(customerName);
+    const phone = toStr(customerPhone);
+    const tin = toStr(customerTin);
+    const address = toStr(customerAddress);
 
-    if (name.length < 2) return toast("warn", "Customer name is required.");
-    if (phone.length < 6) return toast("warn", "Customer phone is required.");
+    if (name.length < 2) return pushToast("warn", "Customer name is required.");
+    if (phone.length < 6)
+      return pushToast("warn", "Customer phone is required.");
 
     setCreateCustomerBtn("loading");
+    setMsg("");
+
     try {
+      const body = { name, phone };
+      if (tin) body.tin = tin;
+      if (address) body.address = address;
+
       const data = await apiFetch(ENDPOINTS.CUSTOMERS_CREATE, {
         method: "POST",
-        body: { name, phone },
+        body,
       });
-
       const c = data?.customer || null;
+
       if (!c?.id) {
         setCreateCustomerBtn("idle");
-        return toast("danger", "Failed to create customer.");
+        return pushToast("danger", "Failed to create customer.");
       }
 
-      setSelectedCustomer({ id: c.id, name: c.name, phone: c.phone });
+      setSelectedCustomer({
+        id: c.id,
+        name: c.name,
+        phone: c.phone,
+        tin: c.tin ?? tin ?? "",
+        address: c.address ?? address ?? "",
+      });
+
       setCustomerQ(`${c.name || ""} ${c.phone || ""}`.trim());
       setCustomerResults([]);
+      pushToast("success", "Customer created and selected.");
 
-      toast("success", "Customer created and selected.");
       setCreateCustomerBtn("success");
       setTimeout(() => setCreateCustomerBtn("idle"), 900);
     } catch (e) {
       setCreateCustomerBtn("idle");
-      toast("danger", e?.data?.error || e?.message || "Customer create failed");
-    }
-  }
-
-  async function openCustomerHistory(customerId) {
-    const id = Number(customerId);
-    if (!id) return toast("warn", "Select a customer first.");
-
-    setHistOpen(true);
-    setHistLoading(true);
-    setHistRows([]);
-    setHistTotals(null);
-
-    try {
-      const data = await apiFetch(ENDPOINTS.CUSTOMER_HISTORY(id), { method: "GET" });
-      setHistRows(Array.isArray(data?.sales) ? data.sales : []);
-      setHistTotals(data?.totals || null);
-    } catch (e) {
-      toast("danger", e?.data?.error || e?.message || "History load failed");
-      setHistOpen(false);
-    } finally {
-      setHistLoading(false);
+      pushToast(
+        "danger",
+        e?.data?.error || e?.message || "Customer create failed",
+      );
     }
   }
 
   async function createSale(e) {
     e.preventDefault();
     if (createSaleBtn === "loading") return;
-    setMsg("");
 
-    const typedName = String(customerName || "").trim();
-    const typedPhone = String(customerPhone || "").trim();
+    const typedName = toStr(customerName);
+    const typedPhone = toStr(customerPhone);
 
     if (!selectedCustomer?.id) {
-      if (!typedName || typedName.length < 2) return toast("warn", "Type customer name or pick from search.");
-      if (!typedPhone || typedPhone.length < 6) return toast("warn", "Type customer phone or pick from search.");
+      if (typedName.length < 2)
+        return pushToast("warn", "Customer name is required.");
+      if (typedPhone.length < 6)
+        return pushToast("warn", "Customer phone is required.");
     }
 
-    if (saleCart.length === 0) return toast("warn", "Cart is empty. Add products.");
+    if (saleCart.length === 0)
+      return pushToast("warn", "Cart is empty. Add products.");
 
-    const strictMax = saleCart.reduce((min, it) => {
-      const v = Number(it.maxDiscountPercent ?? 0);
-      return Math.min(min, Number.isFinite(v) ? v : 0);
-    }, 100);
-
-    const reqSaleDiscPct = Number(saleDiscountPercent ?? 0);
-    const reqSaleDiscAmt = Number(saleDiscountAmount ?? 0);
-
-    if (Number.isFinite(reqSaleDiscPct) && reqSaleDiscPct > strictMax) {
-      return toast("warn", `Sale discount is too high. Max is ${strictMax}%.`);
-    }
-
+    // basic constraints
     for (const it of saleCart) {
-      const itemPct = Number(it.discountPercent ?? 0);
-      const maxPct = Number(it.maxDiscountPercent ?? 0);
-      if (Number.isFinite(itemPct) && itemPct > maxPct) {
-        return toast("warn", `Discount too high for ${it.productName}. Max is ${maxPct}%.`);
-      }
+      const qty = toInt(it.qty);
+      if (qty <= 0) return pushToast("warn", `Bad qty for ${it.productName}.`);
 
-      const unitPrice = Number(it.unitPrice ?? 0);
-      const selling = Number(it.sellingPrice ?? 0);
-      if (Number.isFinite(unitPrice) && Number.isFinite(selling) && unitPrice > selling) {
-        return toast("warn", `Unit price cannot be above selling price for ${it.productName}.`);
-      }
+      const selling = toInt(it.sellingPrice);
+      const unit = toInt(it.unitPrice);
+      if (unit > selling)
+        return pushToast(
+          "warn",
+          `Unit price above selling price for ${it.productName}.`,
+        );
+
+      const maxPct = Number(it.maxDiscountPercent ?? 0) || 0;
+      const pct = Number(it.discountPercent ?? 0) || 0;
+      if (pct > maxPct)
+        return pushToast(
+          "warn",
+          `Discount too high for ${it.productName}. Max ${maxPct}%.`,
+        );
     }
 
     const payload = {
-      customerId: selectedCustomer?.id ? Number(selectedCustomer.id) : undefined,
+      customerId: selectedCustomer?.id
+        ? Number(selectedCustomer.id)
+        : undefined,
       customerName: typedName ? typedName : null,
       customerPhone: typedPhone ? typedPhone : null,
-      note: note ? String(note).slice(0, 200) : null,
-      discountPercent: reqSaleDiscPct || undefined,
-      discountAmount: reqSaleDiscAmt > 0 ? reqSaleDiscAmt : undefined,
+      note: toStr(note) ? toStr(note).slice(0, 200) : null,
       items: saleCart.map((it) => {
-        const out = { productId: Number(it.productId), qty: Number(it.qty) };
+        const out = { productId: Number(it.productId), qty: toInt(it.qty) };
         const up = Number(it.unitPrice);
         if (Number.isFinite(up)) out.unitPrice = up;
 
@@ -715,11 +1040,21 @@ export default function SellerPage() {
     };
 
     setCreateSaleBtn("loading");
+    setMsg("");
+
     try {
-      const data = await apiFetch(ENDPOINTS.SALES_CREATE, { method: "POST", body: payload });
+      const data = await apiFetch(ENDPOINTS.SALES_CREATE, {
+        method: "POST",
+        body: payload,
+      });
       const newSaleId = data?.sale?.id || data?.id || null;
 
-      toast("success", newSaleId ? `Sale created (Draft) #${newSaleId}` : "Sale created (Draft)");
+      pushToast(
+        "success",
+        newSaleId
+          ? `Sale created (Draft) #${newSaleId}`
+          : "Sale created (Draft)",
+      );
 
       // reset
       setSelectedCustomer(null);
@@ -727,77 +1062,182 @@ export default function SellerPage() {
       setCustomerResults([]);
       setCustomerName("");
       setCustomerPhone("");
+      setCustomerTin("");
+      setCustomerAddress("");
       setNote("");
-      setSaleDiscountPercent("");
-      setSaleDiscountAmount("");
       setSaleCart([]);
 
       setCreateSaleBtn("success");
       setTimeout(() => setCreateSaleBtn("idle"), 900);
 
-      // go to sales
       setSection("sales");
       await loadSales();
     } catch (e2) {
       setCreateSaleBtn("idle");
-      toast("danger", e2?.data?.error || e2?.message || "Sale create failed");
+      pushToast(
+        "danger",
+        e2?.data?.error || e2?.message || "Sale create failed",
+      );
     }
   }
 
-  async function markSale(saleId, newStatus, paymentMethod) {
+  async function openSaleItems(saleId) {
+    const sid = Number(saleId);
+    if (!sid) return;
+
+    setItemsOpen(true);
+    setItemsLoading(true);
+    setItemsSale({ id: sid });
+
+    try {
+      const data = await apiFetch(ENDPOINTS.SALE_GET(sid), { method: "GET" });
+      setItemsSale(data?.sale || data || { id: sid });
+    } catch (e) {
+      pushToast(
+        "danger",
+        e?.data?.error || e?.message || "Cannot load sale items",
+      );
+      setItemsSale({ id: sid });
+    } finally {
+      setItemsLoading(false);
+    }
+  }
+
+  async function markSalePaid(saleId, paymentMethod) {
     const sid = Number(saleId);
     if (!sid) return;
 
     setMarkBtnState((p) => ({ ...p, [sid]: "loading" }));
+    setMsg("");
+
     try {
-      const upper = String(newStatus || "").toUpperCase();
-      const body = upper === "PAID" ? { status: "PAID", paymentMethod } : { status: "PENDING" };
+      const method = String(paymentMethod || "CASH").toUpperCase();
 
-      await apiFetch(ENDPOINTS.SALE_MARK(sid), { method: "POST", body });
+      await apiFetch(ENDPOINTS.SALE_MARK(sid), {
+        method: "POST",
+        body: { status: "PAID", paymentMethod: method },
+      });
 
-      const uiLabel = upper === "PENDING" ? "CREDIT" : "PAID";
-      const pm = upper === "PAID" ? ` (${paymentMethod || "-"})` : "";
-      toast("success", `Sale #${sid} marked ${uiLabel}${pm}`);
-
+      pushToast("success", `Sale #${sid} marked PAID (${method})`);
       await loadSales();
 
       setMarkBtnState((p) => ({ ...p, [sid]: "success" }));
       setTimeout(() => setMarkBtnState((p) => ({ ...p, [sid]: "idle" })), 900);
     } catch (e) {
       setMarkBtnState((p) => ({ ...p, [sid]: "idle" }));
-      const debug = e?.data?.debug ? ` (${JSON.stringify(e.data.debug)})` : "";
-      toast("danger", (e?.data?.error || e?.message || "Mark failed") + debug);
+      pushToast("danger", e?.data?.error || e?.message || "Mark PAID failed");
     }
   }
 
-  /* ---------- Render ---------- */
+  function openCreditModal(sale) {
+    setCreditSale({
+      ...(sale || null),
+      _defaults: {
+        issueDate: nowLocalDatetimeValue(),
+        expectedPayDate: "",
+        installment: "",
+        note: "",
+      },
+    });
+    setCreditOpen(true);
+  }
+
+  async function confirmCredit({ note }) {
+    const sid = Number(creditSale?.id);
+    if (!sid) return;
+
+    setCreditSaving(true);
+    setMsg("");
+
+    try {
+      // ✅ Only this call. Backend auto-creates credit row.
+      await apiFetch(ENDPOINTS.SALE_MARK(sid), {
+        method: "POST",
+        body: { status: "PENDING" },
+      });
+
+      pushToast("success", `Sale #${sid} marked CREDIT`);
+      setCreditOpen(false);
+      setCreditSale(null);
+      await loadSales();
+    } catch (e) {
+      pushToast("danger", e?.data?.error || e?.message || "Mark CREDIT failed");
+    } finally {
+      setCreditSaving(false);
+    }
+  }
+
+  /* ---------- render ---------- */
 
   if (bootLoading) return <PageSkeleton />;
-  if (!isAuthorized) return <div className="p-6 text-sm text-slate-600">Redirecting…</div>;
+  if (!isAuthorized)
+    return <div className="p-6 text-sm text-slate-600">Redirecting…</div>;
 
   const subtitle = `User: ${me?.email || "—"} • ${locationLabel(me)}`;
 
   return (
     <div className="min-h-screen bg-slate-50 overflow-x-hidden">
+      {/* ✅ Toast overlay always above UI */}
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
+
       <RoleBar title="Seller" subtitle={subtitle} user={me} />
+
+      <ItemsModal
+        open={itemsOpen}
+        loading={itemsLoading}
+        sale={itemsSale}
+        onClose={() => setItemsOpen(false)}
+      />
+
+      <CreditSetupModal
+        key={creditSale?.id || "credit"} // ✅ remount for clean defaults
+        open={creditOpen}
+        sale={creditSale}
+        loading={creditSaving}
+        onClose={() => {
+          if (creditSaving) return;
+          setCreditOpen(false);
+          setCreditSale(null);
+        }}
+        onConfirm={confirmCredit}
+      />
 
       <div className="mx-auto max-w-7xl px-4 sm:px-5 py-6">
         {msg ? (
           <div className="mb-4">
-            <Banner kind={msgKind}>{msg}</Banner>
+            <div
+              className={cx(
+                "rounded-2xl border px-4 py-3 text-sm",
+                msgKind === "success"
+                  ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+                  : msgKind === "warn"
+                    ? "bg-amber-50 text-amber-900 border-amber-200"
+                    : msgKind === "danger"
+                      ? "bg-rose-50 text-rose-900 border-rose-200"
+                      : "bg-slate-50 text-slate-800 border-slate-200",
+              )}
+            >
+              {msg}
+            </div>
           </div>
         ) : null}
 
         <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
           {/* Sidebar */}
           <aside className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4 h-fit">
-            <div className="text-sm font-semibold text-slate-900">Seller</div>
-            <div className="mt-1 text-xs text-slate-600">{locationLabel(me)}</div>
+            <div className="text-sm font-bold text-slate-900">Seller</div>
+            <div className="mt-1 text-xs text-slate-600">
+              {locationLabel(me)}
+            </div>
 
-            {/* Mobile section picker */}
             <div className="mt-4 lg:hidden">
-              <div className="text-xs font-semibold text-slate-600 mb-2">Section</div>
-              <Select value={section} onChange={(e) => setSection(e.target.value)}>
+              <div className="text-xs font-semibold text-slate-600 mb-2">
+                Section
+              </div>
+              <Select
+                value={section}
+                onChange={(e) => setSection(e.target.value)}
+              >
                 {SECTIONS.map((s) => (
                   <option key={s.key} value={s.key}>
                     {s.label}
@@ -806,37 +1246,68 @@ export default function SellerPage() {
               </Select>
             </div>
 
-            {/* Desktop nav */}
             <div className="mt-4 hidden lg:grid gap-2">
-              {SECTIONS.map((s) => (
-                <NavItem key={s.key} active={section === s.key} label={s.label} onClick={() => setSection(s.key)} />
-              ))}
+              <NavItem
+                active={section === "dashboard"}
+                label="Dashboard"
+                onClick={() => setSection("dashboard")}
+                // badge={releasedCount > 0 ? String(releasedCount) : null}
+              />
+              <NavItem
+                active={section === "create"}
+                label="Create sale"
+                onClick={() => setSection("create")}
+              />
+              <NavItem
+                active={section === "sales"}
+                label="My sales"
+                onClick={() => setSection("sales")}
+                badge={draftCount > 0 ? String(draftCount) : null}
+              />
+              <NavItem
+                active={section === "credits"}
+                label="Credits"
+                onClick={() => setSection("credits")}
+                badge={creditCount > 0 ? String(creditCount) : null}
+              />
             </div>
 
             <div className="mt-6 pt-4 border-t border-slate-200 text-xs text-slate-600">
-              Flow: Draft → Store Keeper fulfill → you mark Paid or Credit.
+              Flow: Draft → Store keeper releases → you mark Paid or Credit.
             </div>
           </aside>
 
           {/* Main */}
           <main className="grid gap-4">
-            {/* ✅ DASHBOARD (KPI cards are ONLY here now, like cashier) */}
+            {/* DASHBOARD */}
             {section === "dashboard" ? (
-              <div className="grid gap-4">
+              <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                  <Card label="Today sales" value={salesLoading ? "…" : String(todaySalesCount)} sub="Created today" />
-                  <Card label="Today total" value={salesLoading ? "…" : money(todaySalesTotal)} sub="RWF" />
                   <Card
-                    label="Today credit"
-                    value={salesLoading ? "…" : money(todayCreditTotal)}
-                    sub={`RWF • Count: ${salesLoading ? "…" : todayCreditCount}`}
+                    label="Today sales"
+                    value={salesLoading ? "…" : String(todaySalesCount)}
+                    sub="Created today"
                   />
-                  <Card label="Money received today" value={salesLoading ? "…" : money(todayMoneyPaidLike)} sub="Marked paid today" />
+                  <Card
+                    label="Today total"
+                    value={salesLoading ? "…" : money(todaySalesTotal)}
+                    sub="RWF"
+                  />
+                  <Card
+                    label="Waiting release"
+                    value={salesLoading ? "…" : String(draftCount)}
+                    sub="Draft sales"
+                  />
+                  <Card
+                    label="Released"
+                    value={salesLoading ? "…" : String(releasedCount)}
+                    sub="Ready to finalize"
+                  />
                 </div>
 
                 <SectionCard
-                  title="Paid today by method"
-                  hint="This uses updated time (when you mark paid)."
+                  title="Today focus"
+                  hint="Finalize released sales to get paid faster."
                   right={
                     <AsyncButton
                       variant="secondary"
@@ -849,21 +1320,18 @@ export default function SellerPage() {
                     />
                   }
                 >
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                    <Card label="Cash" value={salesLoading ? "…" : money(todayPaidCash)} sub="RWF" />
-                    <Card label="MoMo" value={salesLoading ? "…" : money(todayPaidMoMo)} sub="RWF" />
-                    <Card label="Bank" value={salesLoading ? "…" : money(todayPaidBank)} sub="RWF" />
-                    <Card label="No method" value={salesLoading ? "…" : money(todayPaidUnknown)} sub="RWF" />
-                  </div>
-
-                  <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <button
                       type="button"
                       onClick={() => setSection("create")}
                       className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
                     >
-                      <div className="text-sm font-semibold text-slate-900">Create sale</div>
-                      <div className="mt-1 text-xs text-slate-600">Make a draft sale.</div>
+                      <div className="text-sm font-bold text-slate-900">
+                        Create sale
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600">
+                        Make a draft sale for store keeper to release.
+                      </div>
                     </button>
 
                     <button
@@ -871,17 +1339,22 @@ export default function SellerPage() {
                       onClick={() => setSection("sales")}
                       className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
                     >
-                      <div className="text-sm font-semibold text-slate-900">My sales</div>
-                      <div className="mt-1 text-xs text-slate-600">Mark paid or credit.</div>
+                      <div className="text-sm font-bold text-slate-900">
+                        Finalize sales
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600">
+                        Mark paid or credit once released.
+                      </div>
                     </button>
                   </div>
                 </SectionCard>
-              </div>
+              </>
             ) : null}
 
             {/* CREATE */}
             {section === "create" ? (
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                {/* PRODUCTS */}
                 <SectionCard
                   title="Products"
                   hint="Search and add to cart."
@@ -898,330 +1371,510 @@ export default function SellerPage() {
                   }
                 >
                   <div className="grid gap-3">
-                    <Input placeholder="Search by name or SKU" value={prodQ} onChange={(e) => setProdQ(e.target.value)} />
+                    <Input
+                      placeholder="Search by name or SKU"
+                      value={prodQ}
+                      onChange={(e) => setProdQ(e.target.value)}
+                    />
 
-                    <div className="block xl:hidden">
-                      {productsLoading ? (
-                        <div className="grid gap-3">
-                          <Skeleton className="h-24 w-full" />
-                          <Skeleton className="h-24 w-full" />
-                          <Skeleton className="h-24 w-full" />
-                        </div>
-                      ) : (
-                        <MobileList
-                          items={filteredProducts.slice(0, 80)}
-                          emptyText="No products."
-                          renderItem={(p) => {
-                            const selling = Number(p?.sellingPrice ?? p?.selling_price ?? 0) || 0;
-                            const maxp = Number(p?.maxDiscountPercent ?? p?.max_discount_percent ?? 0) || 0;
-                            return (
-                              <div key={p?.id} className="rounded-2xl border border-slate-200 bg-white p-4">
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <div className="text-sm font-bold text-slate-900">{p?.name || "—"}</div>
-                                    <div className="mt-1 text-xs text-slate-600">SKU: {p?.sku || "—"}</div>
-                                    <div className="mt-2 text-xs text-slate-600">
-                                      Selling: <b>{money(selling)}</b> • Max discount: <b>{maxp}%</b>
-                                    </div>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    className="shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50"
-                                    onClick={() => addProductToSaleCart(p)}
-                                  >
-                                    Add
-                                  </button>
+                    {productsLoading ? (
+                      <div className="grid gap-3">
+                        <Skeleton className="h-20 w-full" />
+                        <Skeleton className="h-20 w-full" />
+                        <Skeleton className="h-20 w-full" />
+                      </div>
+                    ) : filteredProducts.length === 0 ? (
+                      <div className="text-sm text-slate-600">
+                        No products found.
+                      </div>
+                    ) : (
+                      <div className="grid gap-2">
+                        {filteredProducts.slice(0, 40).map((p) => {
+                          const selling =
+                            Number(p?.sellingPrice ?? p?.selling_price ?? 0) ||
+                            0;
+                          const maxp =
+                            Number(
+                              p?.maxDiscountPercent ??
+                                p?.max_discount_percent ??
+                                0,
+                            ) || 0;
+
+                          return (
+                            <div
+                              key={String(p?.id)}
+                              className="rounded-2xl border border-slate-200 bg-white p-3 flex items-start justify-between gap-3"
+                            >
+                              <div className="min-w-0">
+                                <div className="text-sm font-bold text-slate-900 truncate">
+                                  {p?.name || "—"}
+                                </div>
+                                <div className="mt-1 text-xs text-slate-600">
+                                  SKU: {p?.sku || "—"}
+                                </div>
+                                <div className="mt-2 text-xs text-slate-600">
+                                  Selling: <b>{money(selling)}</b> • Max
+                                  discount: <b>{maxp}%</b>
                                 </div>
                               </div>
-                            );
-                          }}
-                        />
-                      )}
-                    </div>
 
-                    <div className="hidden xl:block">
-                      {productsLoading ? (
-                        <div className="grid gap-3">
-                          <Skeleton className="h-10 w-full" />
-                          <Skeleton className="h-12 w-full" />
-                          <Skeleton className="h-12 w-full" />
-                        </div>
-                      ) : (
-                        <OverflowCard>
-                          <table className="min-w-[860px] w-full text-sm">
-                            <thead className="bg-slate-50 text-slate-600">
-                              <tr className="border-b border-slate-200">
-                                <th className="p-3 text-left text-xs font-semibold">Product</th>
-                                <th className="p-3 text-left text-xs font-semibold">SKU</th>
-                                <th className="p-3 text-right text-xs font-semibold">Selling</th>
-                                <th className="p-3 text-right text-xs font-semibold">Max %</th>
-                                <th className="p-3 text-right text-xs font-semibold">Action</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {filteredProducts.map((p, idx) => {
-                                const selling = Number(p?.sellingPrice ?? p?.selling_price ?? 0) || 0;
-                                const maxp = Number(p?.maxDiscountPercent ?? p?.max_discount_percent ?? 0) || 0;
+                              <button
+                                type="button"
+                                className="shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-xs font-extrabold hover:bg-slate-50"
+                                onClick={() => addProductToSaleCart(p)}
+                              >
+                                Add
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
 
-                                return (
-                                  <tr key={p?.id || idx} className="border-b border-slate-100 hover:bg-slate-50">
-                                    <td className="p-3 font-semibold text-slate-900">{p?.name || "—"}</td>
-                                    <td className="p-3 text-slate-600">{p?.sku || "—"}</td>
-                                    <td className="p-3 text-right font-semibold">{money(selling)}</td>
-                                    <td className="p-3 text-right">{maxp}%</td>
-                                    <td className="p-3 text-right">
-                                      <button
-                                        type="button"
-                                        className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50"
-                                        onClick={() => addProductToSaleCart(p)}
-                                      >
-                                        Add
-                                      </button>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                              {filteredProducts.length === 0 ? (
-                                <tr>
-                                  <td colSpan={5} className="p-4 text-sm text-slate-600">
-                                    No products.
-                                  </td>
-                                </tr>
-                              ) : null}
-                            </tbody>
-                          </table>
-                        </OverflowCard>
-                      )}
-                    </div>
+                    {filteredProducts.length > 40 ? (
+                      <div className="text-xs text-slate-500">
+                        Showing first 40 results. Refine your search to find
+                        more.
+                      </div>
+                    ) : null}
                   </div>
                 </SectionCard>
 
-                <SectionCard title="Create sale (Draft)" hint="Pick customer and items, then create draft.">
-                  <div className="grid gap-3">
-                    <div className="text-sm font-semibold text-slate-900">Customer</div>
+                {/* CREATE SALE */}
+                <SectionCard
+                  title="Create sale (Draft)"
+                  hint="Customer + cart → create draft sale → store keeper releases stock."
+                >
+                  <form onSubmit={createSale} className="grid gap-4">
+                    {/* CUSTOMER */}
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-extrabold text-slate-900">
+                            Customer
+                          </div>
+                          <div className="mt-1 text-xs text-slate-600">
+                            Search existing customer or create a new one.
+                          </div>
+                        </div>
 
-                    <Input
-                      placeholder="Search customer (name or phone)"
-                      value={customerQ}
-                      onChange={(e) => setCustomerQ(e.target.value)}
-                    />
+                        {selectedCustomer?.id ? (
+                          <span className="shrink-0 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1 text-xs font-extrabold">
+                            Selected
+                          </span>
+                        ) : null}
+                      </div>
 
-                    {customerQ.trim() && !selectedCustomer ? (
-                      <div className="rounded-2xl border border-slate-200 overflow-hidden">
-                        <div className="max-h-56 overflow-auto">
-                          {customerLoading ? (
-                            <div className="p-3 text-sm text-slate-600">Searching…</div>
-                          ) : customerResults.length ? (
-                            customerResults.map((c) => (
-                              <button
-                                key={c.id}
-                                type="button"
-                                className="w-full text-left p-3 hover:bg-slate-50 border-b last:border-b-0"
-                                onClick={() => {
-                                  setSelectedCustomer(c);
-                                  setCustomerName(c.name || "");
-                                  setCustomerPhone(c.phone || "");
-                                  setCustomerQ(`${c.name || ""} ${c.phone || ""}`.trim());
-                                  setCustomerResults([]);
-                                }}
-                              >
-                                <div className="text-sm font-semibold text-slate-900">{c.name || "—"}</div>
-                                <div className="text-xs text-slate-600">{c.phone || "—"}</div>
-                              </button>
-                            ))
-                          ) : (
-                            <div className="p-3 text-sm text-slate-600">
-                              No customer found. Type name + phone below and create.
+                      <div className="mt-3 grid gap-2">
+                        <Input
+                          placeholder="Search customer (name, phone, TIN)"
+                          value={customerQ}
+                          onChange={(e) => setCustomerQ(e.target.value)}
+                        />
+
+                        {/* dropdown */}
+                        {toStr(customerQ) && !selectedCustomer ? (
+                          <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+                            <div className="max-h-64 overflow-auto">
+                              {customerLoading ? (
+                                <div className="p-3 text-sm text-slate-600">
+                                  Searching…
+                                </div>
+                              ) : customerResults.length ? (
+                                <div className="divide-y divide-slate-100">
+                                  {customerResults.map((c) => (
+                                    <div
+                                      key={c.id}
+                                      className="p-3 hover:bg-slate-50"
+                                    >
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                          <div className="text-sm font-extrabold text-slate-900 truncate">
+                                            {c.name || "—"}
+                                          </div>
+
+                                          <div className="mt-1 text-xs text-slate-600 flex flex-wrap gap-x-2 gap-y-1">
+                                            <span className="font-semibold">
+                                              {c.phone || "—"}
+                                            </span>
+                                            {c.tin ? (
+                                              <span className="rounded-full bg-slate-50 border border-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-700">
+                                                TIN: {c.tin}
+                                              </span>
+                                            ) : null}
+                                          </div>
+
+                                          {c.address ? (
+                                            <div className="mt-1 text-xs text-slate-600 line-clamp-2">
+                                              {c.address}
+                                            </div>
+                                          ) : null}
+                                        </div>
+
+                                        <button
+                                          type="button"
+                                          className="shrink-0 rounded-xl bg-slate-900 text-white px-3 py-2 text-xs font-extrabold hover:bg-slate-800"
+                                          onClick={() => {
+                                            const name =
+                                              c?.name ?? c?.customerName ?? "";
+                                            const phone =
+                                              c?.phone ??
+                                              c?.customerPhone ??
+                                              "";
+                                            const tin =
+                                              c?.tin ??
+                                              c?.tinNumber ??
+                                              c?.taxId ??
+                                              "";
+                                            const address =
+                                              c?.address ??
+                                              c?.location ??
+                                              c?.customerAddress ??
+                                              "";
+
+                                            setSelectedCustomer(c);
+
+                                            setCustomerName(name);
+                                            setCustomerPhone(phone);
+                                            setCustomerTin(tin);
+                                            setCustomerAddress(address);
+
+                                            setCustomerQ(
+                                              `${name} ${phone}`.trim(),
+                                            );
+                                            setCustomerResults([]);
+                                          }}
+                                        >
+                                          Select
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="p-3">
+                                  <div className="text-sm font-semibold text-slate-900">
+                                    No customer found
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-600">
+                                    Fill details below and create, or use this
+                                    search value to prefill.
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
+                                    onClick={() => {
+                                      const q = toStr(customerQ);
+                                      const digits = q.replace(/\D/g, "");
+                                      const looksLikePhone = digits.length >= 8;
+
+                                      setSelectedCustomer(null);
+                                      setCustomerResults([]);
+
+                                      if (looksLikePhone) {
+                                        setCustomerPhone(digits);
+                                        if (!toStr(customerName))
+                                          setCustomerName("");
+                                      } else {
+                                        setCustomerName(q);
+                                        if (!toStr(customerPhone))
+                                          setCustomerPhone("");
+                                      }
+
+                                      setCustomerTin("");
+                                      setCustomerAddress("");
+                                    }}
+                                  >
+                                    Use search value to create customer
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                          )}
+                          </div>
+                        ) : null}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <div className="text-xs font-semibold text-slate-600 mb-1">
+                              Name
+                            </div>
+                            <Input
+                              placeholder="Customer name"
+                              value={customerName}
+                              onChange={(e) => {
+                                setCustomerName(e.target.value);
+                                setSelectedCustomer(null);
+                              }}
+                            />
+                          </div>
+
+                          <div>
+                            <div className="text-xs font-semibold text-slate-600 mb-1">
+                              Phone
+                            </div>
+                            <Input
+                              placeholder="Customer phone"
+                              value={customerPhone}
+                              onChange={(e) => {
+                                setCustomerPhone(e.target.value);
+                                setSelectedCustomer(null);
+                              }}
+                            />
+                          </div>
+
+                          <div>
+                            <div className="text-xs font-semibold text-slate-600 mb-1">
+                              TIN
+                            </div>
+                            <Input
+                              placeholder="TIN (optional)"
+                              value={customerTin}
+                              onChange={(e) => {
+                                setCustomerTin(e.target.value);
+                                setSelectedCustomer(null);
+                              }}
+                            />
+                          </div>
+
+                          <div>
+                            <div className="text-xs font-semibold text-slate-600 mb-1">
+                              Address
+                            </div>
+                            <Input
+                              placeholder="Address / location (optional)"
+                              value={customerAddress}
+                              onChange={(e) => {
+                                setCustomerAddress(e.target.value);
+                                setSelectedCustomer(null);
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <AsyncButton
+                            type="button"
+                            variant="primary"
+                            state={createCustomerBtn}
+                            text="Create customer"
+                            loadingText="Creating…"
+                            successText="Created"
+                            onClick={createCustomerFromInputs}
+                            disabled={
+                              !toStr(customerName) || !toStr(customerPhone)
+                            }
+                          />
+
+                          <button
+                            type="button"
+                            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
+                            onClick={() => {
+                              setSelectedCustomer(null);
+                              setCustomerQ("");
+                              setCustomerResults([]);
+                              setCustomerName("");
+                              setCustomerPhone("");
+                              setCustomerTin("");
+                              setCustomerAddress("");
+                            }}
+                          >
+                            Clear
+                          </button>
+
+                          {selectedCustomer?.id ? (
+                            <div className="text-xs text-emerald-700 font-extrabold self-center">
+                              {selectedCustomer.name} • {selectedCustomer.phone}
+                              {selectedCustomer.tin
+                                ? ` • TIN: ${selectedCustomer.tin}`
+                                : ""}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
-                    ) : null}
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <Input
-                        placeholder="Customer name"
-                        value={customerName}
-                        onChange={(e) => {
-                          setCustomerName(e.target.value);
-                          setSelectedCustomer(null);
-                        }}
-                      />
-                      <Input
-                        placeholder="Customer phone"
-                        value={customerPhone}
-                        onChange={(e) => {
-                          setCustomerPhone(e.target.value);
-                          setSelectedCustomer(null);
-                        }}
-                      />
                     </div>
 
-                    <div className="flex gap-2 flex-wrap">
-                      <AsyncButton
-                        variant="primary"
-                        state={createCustomerBtn}
-                        text="Create"
-                        loadingText="Creating…"
-                        successText="Created"
-                        onClick={createCustomerFromInputs}
-                        disabled={!customerName.trim() || !customerPhone.trim()}
-                      />
-
-                      <button
-                        type="button"
-                        className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                        disabled={!selectedCustomer?.id}
-                        onClick={() => openCustomerHistory(selectedCustomer?.id)}
-                      >
-                        View history
-                      </button>
-
-                      <button
-                        type="button"
-                        className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                        onClick={() => {
-                          setSelectedCustomer(null);
-                          setCustomerQ("");
-                          setCustomerResults([]);
-                          setCustomerName("");
-                          setCustomerPhone("");
-                          toast("info", "");
-                        }}
-                      >
-                        Clear
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <Input
-                        placeholder="Sale discount % (optional)"
-                        value={saleDiscountPercent}
-                        onChange={(e) => setSaleDiscountPercent(e.target.value)}
-                      />
-                      <Input
-                        placeholder="Sale discount amount (optional)"
-                        value={saleDiscountAmount}
-                        onChange={(e) => setSaleDiscountAmount(e.target.value)}
-                      />
-                    </div>
-
-                    <Input placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
-
-                    <div className="mt-2">
-                      <div className="text-sm font-semibold text-slate-900">Cart</div>
+                    {/* NOTE */}
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="text-sm font-extrabold text-slate-900">
+                        Note
+                      </div>
                       <div className="mt-2">
-                        <OverflowCard>
-                          <table className="min-w-[980px] w-full text-sm">
-                            <thead className="bg-slate-50 text-slate-600">
-                              <tr className="border-b border-slate-200">
-                                <th className="p-3 text-left text-xs font-semibold">Product</th>
-                                <th className="p-3 text-left text-xs font-semibold">SKU</th>
-                                <th className="p-3 text-right text-xs font-semibold">Qty</th>
-                                <th className="p-3 text-right text-xs font-semibold">Selling</th>
-                                <th className="p-3 text-right text-xs font-semibold">Unit</th>
-                                <th className="p-3 text-right text-xs font-semibold">Disc %</th>
-                                <th className="p-3 text-right text-xs font-semibold">Disc amt</th>
-                                <th className="p-3 text-right text-xs font-semibold">Line</th>
-                                <th className="p-3 text-right text-xs font-semibold">Remove</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {saleCart.map((it) => (
-                                <tr key={it.productId} className="border-b border-slate-100">
-                                  <td className="p-3 font-semibold text-slate-900">{it.productName}</td>
-                                  <td className="p-3 text-slate-600">{it.sku}</td>
+                        <TextArea
+                          rows={2}
+                          placeholder="Optional note (e.g., delivery, special request)"
+                          value={note}
+                          onChange={(e) => setNote(e.target.value)}
+                        />
+                      </div>
+                    </div>
 
-                                  <td className="p-3 text-right">
-                                    <input
+                    {/* CART (no horizontal scroll) */}
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-extrabold text-slate-900">
+                            Cart
+                          </div>
+                          <div className="mt-1 text-xs text-slate-600">
+                            Adjust qty/price/discount per item.
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 text-right">
+                          <div className="text-xs text-slate-600">Subtotal</div>
+                          <div className="text-lg font-extrabold text-slate-900">
+                            {money(cartSubtotal)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {saleCart.length === 0 ? (
+                        <div className="mt-3 text-sm text-slate-600">
+                          Cart is empty. Add products from the left.
+                        </div>
+                      ) : (
+                        <div className="mt-3 grid gap-3">
+                          {saleCart.map((it) => {
+                            const line = previewLineTotal(it);
+                            const maxPct =
+                              Number(it.maxDiscountPercent ?? 0) || 0;
+
+                            return (
+                              <div
+                                key={String(it.productId)}
+                                className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-extrabold text-slate-900 truncate">
+                                      {it.productName}
+                                    </div>
+                                    <div className="mt-1 text-xs text-slate-600">
+                                      SKU: {it.sku} • Selling:{" "}
+                                      <b>{money(it.sellingPrice)}</b>
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => removeFromCart(it.productId)}
+                                    className="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-700 hover:bg-slate-50"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+
+                                <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                  <div>
+                                    <div className="text-xs font-semibold text-slate-600 mb-1">
+                                      Qty
+                                    </div>
+                                    <Input
                                       type="number"
                                       min="1"
-                                      value={it.qty}
-                                      onChange={(e) => updateSaleQty(it.productId, e.target.value)}
-                                      className="w-20 rounded-xl border border-slate-300 px-2 py-1 text-right text-sm"
+                                      value={String(it.qty)}
+                                      onChange={(e) =>
+                                        updateCart(it.productId, {
+                                          qty: Number(e.target.value || 1),
+                                        })
+                                      }
                                     />
-                                  </td>
+                                  </div>
 
-                                  <td className="p-3 text-right">{money(it.sellingPrice)}</td>
-
-                                  <td className="p-3 text-right">
-                                    <input
+                                  <div>
+                                    <div className="text-xs font-semibold text-slate-600 mb-1">
+                                      Unit price
+                                    </div>
+                                    <Input
                                       type="number"
                                       min="0"
                                       max={it.sellingPrice || undefined}
-                                      value={it.unitPrice}
+                                      value={String(it.unitPrice)}
                                       onChange={(e) =>
-                                        updateSaleItem(it.productId, { unitPrice: Number(e.target.value || 0) })
+                                        updateCart(it.productId, {
+                                          unitPrice: Number(
+                                            e.target.value || 0,
+                                          ),
+                                        })
                                       }
-                                      className="w-24 rounded-xl border border-slate-300 px-2 py-1 text-right text-sm"
                                     />
-                                  </td>
+                                    <div className="mt-1 text-[11px] text-slate-500">
+                                      ≤ selling price
+                                    </div>
+                                  </div>
 
-                                  <td className="p-3 text-right">
-                                    <input
+                                  <div>
+                                    <div className="text-xs font-semibold text-slate-600 mb-1">
+                                      Discount %
+                                    </div>
+                                    <Input
                                       type="number"
                                       min="0"
-                                      max={it.maxDiscountPercent ?? 0}
-                                      value={it.discountPercent}
+                                      max={maxPct}
+                                      value={String(it.discountPercent || 0)}
                                       onChange={(e) =>
-                                        updateSaleItem(it.productId, { discountPercent: Number(e.target.value || 0) })
+                                        updateCart(it.productId, {
+                                          discountPercent: Number(
+                                            e.target.value || 0,
+                                          ),
+                                        })
                                       }
-                                      className="w-20 rounded-xl border border-slate-300 px-2 py-1 text-right text-sm"
                                     />
-                                    <div className="mt-1 text-[10px] text-slate-500">max {it.maxDiscountPercent}%</div>
-                                  </td>
+                                    <div className="mt-1 text-[11px] text-slate-500">
+                                      max {maxPct}%
+                                    </div>
+                                  </div>
 
-                                  <td className="p-3 text-right">
-                                    <input
+                                  <div>
+                                    <div className="text-xs font-semibold text-slate-600 mb-1">
+                                      Discount amount
+                                    </div>
+                                    <Input
                                       type="number"
                                       min="0"
-                                      value={it.discountAmount}
+                                      value={String(it.discountAmount || 0)}
                                       onChange={(e) =>
-                                        updateSaleItem(it.productId, { discountAmount: Number(e.target.value || 0) })
+                                        updateCart(it.productId, {
+                                          discountAmount: Number(
+                                            e.target.value || 0,
+                                          ),
+                                        })
                                       }
-                                      className="w-24 rounded-xl border border-slate-300 px-2 py-1 text-right text-sm"
                                     />
-                                  </td>
+                                  </div>
+                                </div>
 
-                                  <td className="p-3 text-right font-bold">{money(previewLineTotal(it))}</td>
-
-                                  <td className="p-3 text-right">
-                                    <button
-                                      type="button"
-                                      onClick={() => removeFromSaleCart(it.productId)}
-                                      className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50"
-                                    >
-                                      Remove
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
-
-                              {saleCart.length === 0 ? (
-                                <tr>
-                                  <td colSpan={9} className="p-4 text-sm text-slate-600">
-                                    Cart is empty. Add products from left.
-                                  </td>
-                                </tr>
-                              ) : null}
-                            </tbody>
-                          </table>
-                        </OverflowCard>
-                      </div>
+                                <div className="mt-3 flex items-center justify-between">
+                                  <div className="text-xs text-slate-600">
+                                    Line total
+                                  </div>
+                                  <div className="text-lg font-extrabold text-slate-900">
+                                    {money(line)}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
 
-                    <form onSubmit={createSale} className="mt-2">
-                      <AsyncButton
-                        type="submit"
-                        variant="primary"
-                        state={createSaleBtn}
-                        text="Create"
-                        loadingText="Creating…"
-                        successText="Created"
-                        disabled={saleCart.length === 0}
-                      />
-                    </form>
-                  </div>
+                    <AsyncButton
+                      type="submit"
+                      variant="primary"
+                      state={createSaleBtn}
+                      text="Create draft sale"
+                      loadingText="Creating…"
+                      successText="Created"
+                      disabled={saleCart.length === 0}
+                    />
+
+                    <div className="text-xs text-slate-600">
+                      After you create the sale, store keeper must release stock
+                      before you can mark paid/credit.
+                    </div>
+                  </form>
                 </SectionCard>
               </div>
             ) : null}
@@ -1230,7 +1883,11 @@ export default function SellerPage() {
             {section === "sales" ? (
               <SectionCard
                 title="My sales"
-                hint="When fulfilled: mark Paid or Credit."
+                hint={
+                  showAllSales
+                    ? "Showing matches (up to 200). Clear search to see last 10."
+                    : "Showing last 10 sales (most recent first)."
+                }
                 right={
                   <AsyncButton
                     variant="secondary"
@@ -1245,224 +1902,254 @@ export default function SellerPage() {
               >
                 <div className="grid gap-3">
                   <Input
-                    placeholder="Search: id, credit, momo, name, phone"
+                    placeholder="Search: id, credit, paid, customer name, phone"
                     value={salesQ}
                     onChange={(e) => setSalesQ(e.target.value)}
                   />
 
-                  <div className="hidden xl:block">
-                    {salesLoading ? (
-                      <div className="grid gap-3">
-                        <Skeleton className="h-10 w-full" />
-                        <Skeleton className="h-12 w-full" />
-                        <Skeleton className="h-12 w-full" />
-                      </div>
-                    ) : (
-                      <OverflowCard>
-                        <table className="min-w-[1100px] w-full text-sm">
-                          <thead className="bg-slate-50 text-slate-600">
-                            <tr className="border-b border-slate-200">
-                              <th className="p-3 text-left text-xs font-semibold">ID</th>
-                              <th className="p-3 text-left text-xs font-semibold">Status</th>
-                              <th className="p-3 text-left text-xs font-semibold">Total</th>
-                              <th className="p-3 text-left text-xs font-semibold">Customer</th>
-                              <th className="p-3 text-left text-xs font-semibold">Created</th>
-                              <th className="p-3 text-right text-xs font-semibold">Finalize</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredSales.map((s) => {
-                              const st = String(s?.status || "").toUpperCase();
-                              const statusUi = st === "PENDING" ? "CREDIT" : st;
+                  {salesLoading ? (
+                    <div className="grid gap-3">
+                      <Skeleton className="h-24 w-full" />
+                      <Skeleton className="h-24 w-full" />
+                      <Skeleton className="h-24 w-full" />
+                    </div>
+                  ) : salesToShow.length === 0 ? (
+                    <div className="text-sm text-slate-600">
+                      No sales found.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                      {salesToShow.map((s) => {
+                        const id = s?.id;
+                        const st = String(s?.status || "").toUpperCase();
 
-                              const cname = s?.customerName ?? s?.customer_name ?? "—";
-                              const cphone = s?.customerPhone ?? s?.customer_phone ?? "";
+                        const cname =
+                          s?.customerName ?? s?.customer_name ?? "Walk-in";
+                        const cphone =
+                          s?.customerPhone ?? s?.customer_phone ?? "";
+                        const customerLabel = [toStr(cname), toStr(cphone)]
+                          .filter(Boolean)
+                          .join(" • ");
 
-                              const total = Number(s?.totalAmount ?? s?.total ?? 0) || 0;
-                              const canFinalize = st === "FULFILLED" || st === "PENDING";
-                              const selectedMethod = salePayMethod[s.id] || "CASH";
-                              const btnState = markBtnState[s.id] || "idle";
+                        const total =
+                          Number(s?.totalAmount ?? s?.total ?? 0) || 0;
 
-                              return (
-                                <tr key={s?.id} className="border-b border-slate-100 hover:bg-slate-50">
-                                  <td className="p-3 font-semibold text-slate-900">#{s?.id}</td>
-                                  <td className="p-3">{statusUi}</td>
-                                  <td className="p-3 font-semibold">{money(total)}</td>
-                                  <td className="p-3">
-                                    <div className="font-semibold text-slate-900">{cname}</div>
-                                    <div className="text-xs text-slate-600">{cphone}</div>
-                                  </td>
-                                  <td className="p-3">{safeDate(s?.createdAt || s?.created_at)}</td>
-                                  <td className="p-3 text-right">
-                                    {!canFinalize ? (
-                                      <span className="text-xs text-slate-600">{statusHint(st)}</span>
-                                    ) : (
-                                      <div className="flex items-center justify-end gap-2">
-                                        <Select
-                                          className="w-28"
-                                          value={selectedMethod}
-                                          onChange={(e) =>
-                                            setSalePayMethod((prev) => ({ ...prev, [s.id]: e.target.value }))
-                                          }
-                                        >
-                                          {PAYMENT_METHODS.map((m) => (
-                                            <option key={m.value} value={m.value}>
-                                              {m.label}
-                                            </option>
-                                          ))}
-                                        </Select>
+                        // listSales returns COALESCE(SUM(p.amount),0) as amountPaid
+                        const amountPaid = Number(s?.amountPaid ?? 0) || 0;
 
-                                        <Select
-                                          className="w-44"
-                                          defaultValue=""
-                                          onChange={(e) => {
-                                            const newStatus = e.target.value;
-                                            if (!newStatus) return;
+                        const canFinalize =
+                          st === "FULFILLED" || st === "PENDING";
 
-                                            const upper = String(newStatus).toUpperCase();
-                                            const pmToSend = upper === "PAID" ? selectedMethod : undefined;
+                        const pm = salePayMethod[id] || "CASH";
+                        const btnState = markBtnState[id] || "idle";
 
-                                            markSale(s.id, newStatus, pmToSend);
-                                            e.target.value = "";
-                                          }}
-                                        >
-                                          <option value="">{st === "FULFILLED" ? "Finalize…" : "Mark paid…"}</option>
-                                          {st === "FULFILLED" ? (
-                                            <>
-                                              <option value="PAID">PAID</option>
-                                              <option value="PENDING">CREDIT</option>
-                                            </>
-                                          ) : (
-                                            <option value="PAID">PAID</option>
-                                          )}
-                                        </Select>
+                        const createdAt = s?.createdAt || s?.created_at;
 
-                                        <AsyncButton
-                                          variant="secondary"
-                                          size="sm"
-                                          state={btnState}
-                                          text="Save"
-                                          loadingText="Saving…"
-                                          successText="Saved"
-                                          onClick={() => toast("info", "Use the dropdown to finalize.")}
-                                        />
-                                      </div>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
+                        // Optional: if backend attaches credit, show its dates
+                        const credit = s?.credit || null;
+                        const issueDate = credit?.createdAt || null;
+                        const payingDate = credit?.settledAt || null;
+                        const creditAmount =
+                          Number(credit?.amount ?? total) || total;
 
-                            {filteredSales.length === 0 ? (
-                              <tr>
-                                <td colSpan={6} className="p-4 text-sm text-slate-600">
-                                  No sales found.
-                                </td>
-                              </tr>
-                            ) : null}
-                          </tbody>
-                        </table>
-                      </OverflowCard>
-                    )}
-                  </div>
+                        const remaining =
+                          st === "PENDING"
+                            ? Math.max(0, creditAmount - amountPaid)
+                            : null;
 
-                  {/* Mobile list */}
-                  <div className="block xl:hidden">
-                    {salesLoading ? (
-                      <div className="grid gap-3">
-                        <Skeleton className="h-24 w-full" />
-                        <Skeleton className="h-24 w-full" />
-                        <Skeleton className="h-24 w-full" />
-                      </div>
-                    ) : (
-                      <MobileList
-                        items={filteredSales}
-                        emptyText="No sales found."
-                        renderItem={(s) => {
-                          const st = String(s?.status || "").toUpperCase();
-                          const statusUi = st === "PENDING" ? "CREDIT" : st;
+                        const itemsPreview = Array.isArray(s?.itemsPreview)
+                          ? s.itemsPreview
+                          : null;
 
-                          const cname = s?.customerName ?? s?.customer_name ?? "—";
-                          const cphone = s?.customerPhone ?? s?.customer_phone ?? "";
-                          const total = Number(s?.totalAmount ?? s?.total ?? 0) || 0;
+                        return (
+                          <div
+                            key={String(id)}
+                            className="rounded-2xl border border-slate-200 bg-white p-4"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <div className="text-sm font-extrabold text-slate-900">
+                                    Sale #{id ?? "—"}
+                                  </div>
+                                  <StatusBadge status={st} />
+                                </div>
 
-                          const canFinalize = st === "FULFILLED" || st === "PENDING";
-                          const selectedMethod = salePayMethod[s.id] || "CASH";
-                          const btnState = markBtnState[s.id] || "idle";
+                                <div className="mt-2 text-sm text-slate-700">
+                                  Customer:{" "}
+                                  <b className="break-words">
+                                    {customerLabel || "—"}
+                                  </b>
+                                </div>
 
-                          return (
-                            <div key={s?.id} className="rounded-2xl border border-slate-200 bg-white p-4">
-                              <div className="text-sm font-bold text-slate-900">Sale #{s?.id}</div>
-                              <div className="mt-1 text-xs text-slate-600">
-                                {cname}{cphone ? ` • ${cphone}` : ""}
-                              </div>
-                              <div className="mt-2 text-xs text-slate-600">
-                                Status: <b>{statusUi}</b> • Total: <b>{money(total)}</b>
-                              </div>
-                              <div className="mt-2 text-xs text-slate-500">Created: {safeDate(s?.createdAt || s?.created_at)}</div>
+                                <div className="mt-1 text-sm text-slate-700">
+                                  Total: <b>{money(total)}</b> RWF
+                                </div>
 
-                              {!canFinalize ? (
-                                <div className="mt-3 text-xs text-slate-600">{statusHint(st)}</div>
-                              ) : (
-                                <div className="mt-3 grid gap-2">
-                                  <Select
-                                    value={selectedMethod}
-                                    onChange={(e) => setSalePayMethod((prev) => ({ ...prev, [s.id]: e.target.value }))}
-                                  >
-                                    {PAYMENT_METHODS.map((m) => (
-                                      <option key={m.value} value={m.value}>
-                                        {m.label}
-                                      </option>
+                                {itemsPreview?.length ? (
+                                  <div className="mt-2 text-xs text-slate-600">
+                                    <b>Items:</b>{" "}
+                                    {itemsPreview.slice(0, 3).map((it, idx) => (
+                                      <span key={idx}>
+                                        {idx ? " • " : ""}
+                                        {toStr(it?.productName) ||
+                                          "Item"} × {Number(it?.qty ?? 0)}
+                                      </span>
                                     ))}
-                                  </Select>
+                                    {itemsPreview.length > 3 ? " • …" : ""}
+                                  </div>
+                                ) : null}
 
-                                  <Select
-                                    defaultValue=""
-                                    onChange={(e) => {
-                                      const newStatus = e.target.value;
-                                      if (!newStatus) return;
+                                <div className="mt-2 text-xs text-slate-500">
+                                  Created: {safeDate(createdAt)}
+                                </div>
+                              </div>
 
-                                      const upper = String(newStatus).toUpperCase();
-                                      const pmToSend = upper === "PAID" ? selectedMethod : undefined;
+                              <button
+                                type="button"
+                                className="shrink-0 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
+                                onClick={() => openSaleItems(id)}
+                              >
+                                View items
+                              </button>
+                            </div>
 
-                                      markSale(s.id, newStatus, pmToSend);
-                                      e.target.value = "";
-                                    }}
-                                  >
-                                    <option value="">{st === "FULFILLED" ? "Finalize…" : "Mark paid…"}</option>
-                                    {st === "FULFILLED" ? (
-                                      <>
-                                        <option value="PAID">PAID</option>
-                                        <option value="PENDING">CREDIT</option>
-                                      </>
-                                    ) : (
-                                      <option value="PAID">PAID</option>
-                                    )}
-                                  </Select>
+                            {/* CREDIT summary */}
+                            {st === "PENDING" ? (
+                              <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                                <div className="text-xs font-extrabold text-amber-900">
+                                  Credit summary
+                                </div>
 
-                                  <AsyncButton
-                                    variant="secondary"
-                                    state={btnState}
-                                    text="Save"
-                                    loadingText="Saving…"
-                                    successText="Saved"
-                                    onClick={() => toast("info", "Use the dropdown to finalize.")}
-                                  />
+                                <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                  <div className="rounded-xl border border-amber-200 bg-white p-2">
+                                    <div className="text-[11px] font-semibold text-amber-900/80">
+                                      Issue date
+                                    </div>
+                                    <div className="text-xs font-extrabold text-amber-900">
+                                      {issueDate ? safeDate(issueDate) : "—"}
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-xl border border-amber-200 bg-white p-2">
+                                    <div className="text-[11px] font-semibold text-amber-900/80">
+                                      Paid / Total
+                                    </div>
+                                    <div className="text-xs font-extrabold text-amber-900">
+                                      {money(amountPaid)} /{" "}
+                                      {money(creditAmount)} RWF
+                                    </div>
+                                    <div className="mt-1 text-[11px] text-amber-900/80">
+                                      Remaining: <b>{money(remaining)}</b> RWF
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-xl border border-amber-200 bg-white p-2">
+                                    <div className="text-[11px] font-semibold text-amber-900/80">
+                                      Paid date
+                                    </div>
+                                    <div className="text-xs font-extrabold text-amber-900">
+                                      {payingDate ? safeDate(payingDate) : "—"}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="mt-2 text-[11px] text-amber-900/80">
+                                  Installments are not enabled yet because
+                                  payments has a unique index per sale.
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {/* ACTIONS */}
+                            <div className="mt-3 pt-3 border-t border-slate-200">
+                              {!canFinalize ? (
+                                <div className="text-sm text-slate-600">
+                                  {st === "DRAFT"
+                                    ? "Waiting for store keeper to release stock."
+                                    : "No action required."}
+                                </div>
+                              ) : (
+                                <div className="grid gap-2">
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    <div>
+                                      <div className="text-xs font-semibold text-slate-600 mb-1">
+                                        Payment method (for PAID)
+                                      </div>
+                                      <Select
+                                        value={pm}
+                                        onChange={(e) =>
+                                          setSalePayMethod((prev) => ({
+                                            ...prev,
+                                            [id]: e.target.value,
+                                          }))
+                                        }
+                                      >
+                                        {PAYMENT_METHODS.map((m) => (
+                                          <option key={m.value} value={m.value}>
+                                            {m.label}
+                                          </option>
+                                        ))}
+                                      </Select>
+                                    </div>
+
+                                    <div className="flex items-end gap-2">
+                                      <AsyncButton
+                                        variant="primary"
+                                        size="md"
+                                        state={btnState}
+                                        text={
+                                          st === "PENDING"
+                                            ? "Record payment (mark PAID)"
+                                            : "Mark PAID"
+                                        }
+                                        loadingText="Saving…"
+                                        successText="Saved"
+                                        onClick={() => markSalePaid(id, pm)}
+                                      />
+                                    </div>
+                                  </div>
+
+                                  {st === "FULFILLED" ? (
+                                    <button
+                                      type="button"
+                                      className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-extrabold text-amber-900 hover:bg-amber-100"
+                                      onClick={() => openCreditModal(s)}
+                                    >
+                                      Mark CREDIT (customer will pay later)
+                                    </button>
+                                  ) : null}
+
+                                  {st === "AWAITING_PAYMENT_RECORD" ? (
+                                    <div className="text-xs text-slate-600">
+                                      Waiting cashier to record payment. Sale
+                                      will become PAID after cashier records it.
+                                    </div>
+                                  ) : null}
                                 </div>
                               )}
                             </div>
-                          );
-                        }}
-                      />
-                    )}
-                  </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {!showAllSales ? (
+                    <div className="text-xs text-slate-500">
+                      Tip: type in the search box to find older sales.
+                    </div>
+                  ) : null}
                 </div>
               </SectionCard>
             ) : null}
 
             {/* CREDITS */}
             {section === "credits" ? (
-              <SectionCard title="Credits (Seller)" hint="View your credit sales and status.">
+              <SectionCard
+                title="Credits"
+                hint="Credit history, issue date, payment date, and details."
+              >
                 <CreditsPanel
                   title="Credits (Seller)"
                   capabilities={{
@@ -1477,89 +2164,6 @@ export default function SellerPage() {
           </main>
         </div>
       </div>
-
-      {/* Customer history modal */}
-      {histOpen ? (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
-          <div className="bg-white w-full max-w-3xl rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900">Customer history</div>
-                <div className="text-xs text-slate-600 truncate">
-                  {selectedCustomer?.name || "—"} • {selectedCustomer?.phone || "—"}
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setHistOpen(false)}
-                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="p-4">
-              {histLoading ? (
-                <div className="grid gap-3">
-                  <Skeleton className="h-20 w-full" />
-                  <Skeleton className="h-20 w-full" />
-                  <Skeleton className="h-20 w-full" />
-                </div>
-              ) : (
-                <>
-                  {histTotals ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-                      <Card label="Total purchases" value={money(histTotals.totalAmount || 0)} sub="RWF" />
-                      <Card label="Total paid" value={money(histTotals.totalPaid || 0)} sub="RWF" />
-                      <Card label="Open credit" value={money(histTotals.openCredit || 0)} sub="RWF" />
-                    </div>
-                  ) : null}
-
-                  <OverflowCard>
-                    <table className="min-w-[780px] w-full text-sm">
-                      <thead className="bg-slate-50 text-slate-600">
-                        <tr className="border-b border-slate-200">
-                          <th className="p-3 text-left text-xs font-semibold">Sale</th>
-                          <th className="p-3 text-left text-xs font-semibold">Status</th>
-                          <th className="p-3 text-right text-xs font-semibold">Total</th>
-                          <th className="p-3 text-left text-xs font-semibold">Created</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {histRows.map((r) => (
-                          <tr key={r?.id} className="border-b border-slate-100 hover:bg-slate-50">
-                            <td className="p-3 font-semibold text-slate-900">#{r?.id}</td>
-                            <td className="p-3">{String(r?.status || "—")}</td>
-                            <td className="p-3 text-right font-bold">{money(r?.totalAmount || 0)}</td>
-                            <td className="p-3">{safeDate(r?.createdAt || r?.created_at)}</td>
-                          </tr>
-                        ))}
-
-                        {histRows.length === 0 ? (
-                          <tr>
-                            <td colSpan={4} className="p-4 text-sm text-slate-600">
-                              No history found.
-                            </td>
-                          </tr>
-                        ) : null}
-                      </tbody>
-                    </table>
-                  </OverflowCard>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
-}
-
-function statusHint(status) {
-  if (status === "DRAFT") return "Waiting store keeper";
-  if (status === "AWAITING_PAYMENT_RECORD") return "Waiting cashier record";
-  if (status === "COMPLETED") return "Completed";
-  if (status === "CANCELLED") return "Cancelled";
-  return "No action";
 }

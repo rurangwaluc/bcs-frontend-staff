@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { apiFetch } from "../lib/api";
+import { connectSSE } from "../lib/sse";
+import { createPortal } from "react-dom";
 
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
@@ -31,8 +33,12 @@ function isDocumentFocused() {
   );
 }
 
-// Small beep. No assets needed.
-function playBeep({ volume = 0.05, durationMs = 180, freq = 880 } = {}) {
+/**
+ * ⚠️ Audio policy note:
+ * Browsers may block sound until the user interacts with the page (click/tap).
+ * We handle that by only beeping after at least one user interaction.
+ */
+function playBeep({ volume = 0.06, durationMs = 180, freq = 880 } = {}) {
   try {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return;
@@ -120,7 +126,7 @@ function ToastItem({ t, onClose }) {
   return (
     <div
       className={cx(
-        "rounded-2xl border shadow-xl overflow-hidden pointer-events-auto",
+        "rounded-2xl border shadow-2xl overflow-hidden pointer-events-auto",
         isUrgent ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white",
       )}
     >
@@ -128,12 +134,13 @@ function ToastItem({ t, onClose }) {
         <div className="min-w-0">
           <div
             className={cx(
-              "text-sm font-bold truncate",
+              "text-sm font-extrabold truncate",
               isUrgent ? "text-rose-900" : "text-slate-900",
             )}
           >
             {toStr(t?.title) || "Alert"}
           </div>
+
           {toStr(t?.body) ? (
             <div
               className={cx(
@@ -144,6 +151,7 @@ function ToastItem({ t, onClose }) {
               {toStr(t?.body)}
             </div>
           ) : null}
+
           <div
             className={cx(
               "mt-2 text-[11px]",
@@ -176,10 +184,16 @@ function ToastItem({ t, onClose }) {
 
 /**
  * NotificationsBell
- * - Shows unread count
- * - Dropdown with latest notifications
- * - Uses SSE: GET /notifications/stream
- * - ✅ Urgent toast overlay (top-right, always over other UI)
+ * - Unread badge updates live via SSE
+ * - Dropdown list is portaled (never behind)
+ * - Urgent toast is portaled (never behind)
+ *
+ * Backend:
+ * - GET /notifications/unread-count
+ * - GET /notifications?limit=30
+ * - PATCH /notifications/:id/read
+ * - PATCH /notifications/read-all
+ * - SSE /notifications/stream (hello + notification events)
  */
 export default function NotificationsBell({ enabled = true }) {
   const [open, setOpen] = useState(false);
@@ -188,9 +202,11 @@ export default function NotificationsBell({ enabled = true }) {
   const [rows, setRows] = useState([]);
   const [err, setErr] = useState("");
 
-  const [toasts, setToasts] = useState([]); // urgent/high notifications
-  const esRef = useRef(null);
-  const aliveRef = useRef(true);
+  const [toasts, setToasts] = useState([]);
+
+  const connRef = useRef(null);
+  const mountedRef = useRef(false);
+  const userInteractedRef = useRef(false);
 
   const topRows = useMemo(() => {
     const list = Array.isArray(rows) ? rows : [];
@@ -202,7 +218,7 @@ export default function NotificationsBell({ enabled = true }) {
       const data = await apiFetch("/notifications/unread-count", {
         method: "GET",
       });
-      const n = Number(data?.count ?? data?.unread ?? 0);
+      const n = Number(data?.unread ?? data?.count ?? 0);
       setUnread(Number.isFinite(n) ? n : 0);
     } catch {
       // ignore
@@ -233,6 +249,7 @@ export default function NotificationsBell({ enabled = true }) {
       const nid = Number(id);
       if (!Number.isFinite(nid) || nid <= 0) return;
 
+      // optimistic UI
       setRows((prev) =>
         (Array.isArray(prev) ? prev : []).map((r) =>
           Number(r?.id) === nid ? { ...r, isRead: true, is_read: true } : r,
@@ -243,6 +260,7 @@ export default function NotificationsBell({ enabled = true }) {
       try {
         await apiFetch(`/notifications/${nid}/read`, { method: "PATCH" });
       } catch {
+        // rollback by reloading
         loadUnread();
         loadList();
       }
@@ -277,11 +295,9 @@ export default function NotificationsBell({ enabled = true }) {
 
     setToasts((prev) => {
       const arr = Array.isArray(prev) ? prev : [];
-      // keep max 3 visible
       return [toast, ...arr].slice(0, 3);
     });
 
-    // auto-hide after 10s (urgent still long enough)
     setTimeout(() => {
       setToasts((prev) =>
         (Array.isArray(prev) ? prev : []).filter((x) => x?.toastId !== toastId),
@@ -295,9 +311,24 @@ export default function NotificationsBell({ enabled = true }) {
     );
   }
 
-  // initial
+  // Track user interaction once (needed for beep in many browsers)
   useEffect(() => {
-    aliveRef.current = true;
+    function markInteracted() {
+      userInteractedRef.current = true;
+      window.removeEventListener("pointerdown", markInteracted);
+      window.removeEventListener("keydown", markInteracted);
+    }
+    window.addEventListener("pointerdown", markInteracted);
+    window.addEventListener("keydown", markInteracted);
+    return () => {
+      window.removeEventListener("pointerdown", markInteracted);
+      window.removeEventListener("keydown", markInteracted);
+    };
+  }, []);
+
+  // initial load
+  useEffect(() => {
+    mountedRef.current = true;
     if (!enabled) return;
 
     loadUnread();
@@ -308,113 +339,85 @@ export default function NotificationsBell({ enabled = true }) {
     }, 30_000);
 
     return () => {
-      aliveRef.current = false;
+      mountedRef.current = false;
       clearInterval(t);
     };
   }, [enabled, loadList, loadUnread]);
 
-  // SSE stream
+  // SSE connect (fetch-based) — no refresh required
   useEffect(() => {
     if (!enabled) return;
 
+    // close old
     try {
-      esRef.current?.close?.();
+      connRef.current?.close?.();
     } catch {
       // ignore
     }
+    connRef.current = null;
 
-    let closed = false;
-    let retryMs = 1000;
+    const conn = connectSSE("/notifications/stream", {
+      onHello: (data) => {
+        const n = Number(data?.unread ?? 0);
+        if (Number.isFinite(n)) setUnread(n);
+      },
+      onNotification: (n) => {
+        if (!n) return;
 
-    function connect() {
-      if (closed) return;
-      setErr("");
+        setRows((prev) => {
+          const arr = Array.isArray(prev) ? prev : [];
+          const id = n?.id == null ? null : String(n.id);
+          if (!id) return arr;
+          if (arr.some((x) => String(x?.id) === id)) return arr;
+          return [n, ...arr].slice(0, 60);
+        });
 
-      try {
-        const url = `${process.env.NEXT_PUBLIC_API_BASE || ""}/notifications/stream`;
-        const es = new EventSource(url, { withCredentials: true });
-        esRef.current = es;
+        const isRead = n?.isRead ?? n?.is_read;
+        if (!isRead) setUnread((u) => (Number(u) || 0) + 1);
 
-        es.onmessage = (ev) => {
-          if (!aliveRef.current) return;
+        pushUrgentToast(n);
 
-          let payload = null;
-          try {
-            payload = JSON.parse(ev.data);
-          } catch {
-            payload = null;
-          }
-          const n = payload?.notification ?? payload;
-          if (!n) return;
+        const pr = String(n?.priority || "normal").toLowerCase();
+        const shouldSound = pr === "urgent" || pr === "high";
 
-          setRows((prev) => {
-            const arr = Array.isArray(prev) ? prev : [];
-            const id = n?.id;
-            if (id == null) return arr;
-            if (arr.some((x) => String(x?.id) === String(id))) return arr;
-            return [n, ...arr].slice(0, 60);
+        if (shouldSound && userInteractedRef.current) {
+          playBeep({
+            volume: 0.06,
+            freq: pr === "urgent" ? 1040 : 880,
+            durationMs: pr === "urgent" ? 240 : 160,
           });
+        }
 
-          const isRead = n?.isRead ?? n?.is_read;
-          if (!isRead) setUnread((u) => (Number(u) || 0) + 1);
-
-          // ✅ toast overlay for urgent/high
-          pushUrgentToast(n);
-
-          const pr = String(n?.priority || "normal").toLowerCase();
-          const shouldSound = pr === "urgent" || pr === "high";
-
-          if (shouldSound) {
-            playBeep({
-              volume: 0.06,
-              freq: pr === "urgent" ? 1040 : 880,
-              durationMs: pr === "urgent" ? 240 : 160,
-            });
-          }
-
-          // Browser notification fallback (only if not focused)
-          if (!isDocumentFocused()) {
-            try {
-              if (
-                "Notification" in window &&
-                Notification.permission === "granted"
-              ) {
-                new Notification(toStr(n?.title) || "New notification", {
-                  body: toStr(n?.body) || "",
-                });
-              }
-            } catch {
-              // ignore
-            }
-          }
-        };
-
-        es.onerror = () => {
+        // Browser notification fallback when not focused
+        if (!isDocumentFocused()) {
           try {
-            es.close();
+            if (
+              "Notification" in window &&
+              Notification.permission === "granted"
+            ) {
+              new Notification(toStr(n?.title) || "New alert", {
+                body: toStr(n?.body) || "",
+              });
+            }
           } catch {
             // ignore
           }
-          if (closed) return;
-          setTimeout(() => {
-            retryMs = Math.min(15_000, retryMs * 2);
-            connect();
-          }, retryMs);
-        };
-      } catch {
-        // ignore
-      }
-    }
+        }
+      },
+      onError: () => {
+        // silent; connectSSE retries
+      },
+    });
 
-    connect();
+    connRef.current = conn;
 
     return () => {
-      closed = true;
       try {
-        esRef.current?.close?.();
+        conn.close();
       } catch {
         // ignore
       }
+      connRef.current = null;
     };
   }, [enabled]);
 
@@ -428,18 +431,31 @@ export default function NotificationsBell({ enabled = true }) {
     }
   }
 
+  // Esc closes dropdown
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
   if (!enabled) return null;
 
   return (
     <>
-      {/* ✅ Urgent toast overlay (always over other UI) */}
-      <div className="fixed top-4 right-4 z-[9999] w-[360px] max-w-[90vw] pointer-events-none">
-        <div className="grid gap-2">
-          {toasts.map((t) => (
-            <ToastItem key={t.toastId} t={t} onClose={closeToast} />
-          ))}
-        </div>
-      </div>
+      {/* ✅ Toast overlay (portaled so it can NEVER be behind any page) */}
+      {createPortal(
+        <div className="fixed top-4 right-4 z-[2147483647] w-[360px] max-w-[90vw] pointer-events-none">
+          <div className="grid gap-2">
+            {toasts.map((t) => (
+              <ToastItem key={t.toastId} t={t} onClose={closeToast} />
+            ))}
+          </div>
+        </div>,
+        document.body,
+      )}
 
       <div className="relative">
         <button
@@ -482,107 +498,121 @@ export default function NotificationsBell({ enabled = true }) {
           ) : null}
         </button>
 
-        {open ? (
-          <div className="absolute right-0 mt-2 w-[360px] max-w-[90vw] rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden z-50">
-            <div className="p-3 border-b border-slate-200 flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900">
-                  Notifications
-                </div>
-                <div className="text-xs text-slate-600 mt-0.5">
-                  {unread} unread
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={markAllRead}
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50 cursor-pointer"
-                >
-                  Read all
-                </button>
-
-                <button
-                  type="button"
+        {/* ✅ Dropdown (portaled so it can NEVER be behind any page) */}
+        {open
+          ? createPortal(
+              <div className="fixed inset-0 z-[2147483647]">
+                {/* click outside to close */}
+                <div
+                  className="absolute inset-0 bg-black/20"
                   onClick={() => setOpen(false)}
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50 cursor-pointer"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
+                />
 
-            {err ? (
-              <div className="p-3 text-sm text-rose-900 bg-rose-50 border-b border-rose-200">
-                {err}
-              </div>
-            ) : null}
+                <div className="absolute top-16 right-4 w-[360px] max-w-[90vw] rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+                  <div className="p-3 border-b border-slate-200 flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-slate-900">
+                        Notifications
+                      </div>
+                      <div className="text-xs text-slate-600 mt-0.5">
+                        {unread} unread
+                      </div>
+                    </div>
 
-            <div className="max-h-[420px] overflow-auto">
-              {loading ? (
-                <div className="p-4 text-sm text-slate-600">Loading…</div>
-              ) : topRows.length === 0 ? (
-                <div className="p-6 text-sm text-slate-600">
-                  No notifications yet.
-                </div>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {topRows.map((n) => {
-                    const isRead = !!(n?.isRead ?? n?.is_read);
-                    const title = toStr(n?.title) || "Notification";
-                    const body = toStr(n?.body);
-                    const createdAt = n?.createdAt ?? n?.created_at;
-                    const priority = n?.priority || "normal";
-
-                    return (
+                    <div className="flex items-center gap-2">
                       <button
-                        key={String(n?.id)}
                         type="button"
-                        onClick={() => {
-                          if (!isRead) markRead(n?.id);
-                        }}
-                        className={cx(
-                          "w-full text-left p-3 hover:bg-slate-50 transition cursor-pointer",
-                        )}
+                        onClick={markAllRead}
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50"
                       >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div
-                              className={cx(
-                                "text-sm font-semibold truncate",
-                                isRead ? "text-slate-700" : "text-slate-900",
-                              )}
-                            >
-                              {title}
-                            </div>
-                            {body ? (
-                              <div className="mt-0.5 text-xs text-slate-600 line-clamp-2">
-                                {body}
-                              </div>
-                            ) : null}
-                            <div className="mt-1 text-[11px] text-slate-500">
-                              {safeDate(createdAt)}
-                            </div>
-                          </div>
-
-                          <div className="shrink-0 flex flex-col items-end gap-2">
-                            <PriorityBadge priority={priority} />
-                            {!isRead ? (
-                              <span className="inline-flex items-center rounded-full bg-rose-600 text-white text-[10px] font-bold px-2 py-0.5">
-                                NEW
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
+                        Read all
                       </button>
-                    );
-                  })}
+
+                      <button
+                        type="button"
+                        onClick={() => setOpen(false)}
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+
+                  {err ? (
+                    <div className="p-3 text-sm text-rose-900 bg-rose-50 border-b border-rose-200">
+                      {err}
+                    </div>
+                  ) : null}
+
+                  <div className="max-h-[420px] overflow-auto">
+                    {loading ? (
+                      <div className="p-4 text-sm text-slate-600">Loading…</div>
+                    ) : topRows.length === 0 ? (
+                      <div className="p-6 text-sm text-slate-600">
+                        No notifications yet.
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-slate-100">
+                        {topRows.map((n) => {
+                          const isRead = !!(n?.isRead ?? n?.is_read);
+                          const title = toStr(n?.title) || "Notification";
+                          const body = toStr(n?.body);
+                          const createdAt = n?.createdAt ?? n?.created_at;
+                          const priority = n?.priority || "normal";
+
+                          return (
+                            <button
+                              key={String(n?.id)}
+                              type="button"
+                              onClick={() => {
+                                if (!isRead) markRead(n?.id);
+                              }}
+                              className="w-full text-left p-3 hover:bg-slate-50 transition"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div
+                                    className={cx(
+                                      "text-sm font-semibold truncate",
+                                      isRead
+                                        ? "text-slate-700"
+                                        : "text-slate-900",
+                                    )}
+                                  >
+                                    {title}
+                                  </div>
+
+                                  {body ? (
+                                    <div className="mt-0.5 text-xs text-slate-600 line-clamp-2">
+                                      {body}
+                                    </div>
+                                  ) : null}
+
+                                  <div className="mt-1 text-[11px] text-slate-500">
+                                    {safeDate(createdAt)}
+                                  </div>
+                                </div>
+
+                                <div className="shrink-0 flex flex-col items-end gap-2">
+                                  <PriorityBadge priority={priority} />
+                                  {!isRead ? (
+                                    <span className="inline-flex items-center rounded-full bg-rose-600 text-white text-[10px] font-bold px-2 py-0.5">
+                                      NEW
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
       </div>
     </>
   );

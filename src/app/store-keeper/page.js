@@ -8,6 +8,8 @@ import AsyncButton from "../../components/AsyncButton";
 import RoleBar from "../../components/RoleBar";
 import { apiFetch } from "../../lib/api";
 import { apiUpload } from "../../lib/apiUpload";
+import { connectSSE } from "../../lib/sse";
+import { createPortal } from "react-dom";
 import { getMe } from "../../lib/auth";
 import { useRouter } from "next/navigation";
 
@@ -17,6 +19,85 @@ import { useRouter } from "next/navigation";
  * - Store keeper fulfills sale (POST /sales/:id/fulfill)
  * - Seller finalizes later (mark PAID / CREDIT)
  */
+
+function getApiBase() {
+  // Must match your apiFetch base logic (localhost:4000 in dev)
+  return (
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_BASE ||
+    "http://localhost:4000"
+  ).replace(/\/$/, "");
+}
+
+// Minimal SSE parser for fetch streaming
+// async function connectSSE({ url, onEvent, signal }) {
+//   const res = await fetch(url, {
+//     method: "GET",
+//     credentials: "include",
+//     headers: { Accept: "text/event-stream" },
+//     signal,
+//   });
+
+//   if (!res.ok || !res.body) {
+//     throw new Error(`SSE failed: ${res.status}`);
+//   }
+
+//   const reader = res.body.getReader();
+//   const decoder = new TextDecoder("utf-8");
+
+//   let buf = "";
+//   let eventName = "message";
+//   let dataLines = [];
+
+//   const flush = () => {
+//     if (!dataLines.length) return;
+
+//     const dataRaw = dataLines.join("\n");
+//     dataLines = [];
+
+//     let payload = null;
+//     try {
+//       payload = JSON.parse(dataRaw);
+//     } catch {
+//       payload = dataRaw;
+//     }
+
+//     onEvent?.(eventName, payload);
+//   };
+
+//   while (true) {
+//     const { value, done } = await reader.read();
+//     if (done) break;
+
+//     buf += decoder.decode(value, { stream: true });
+
+//     // process complete lines
+//     while (true) {
+//       const idx = buf.indexOf("\n");
+//       if (idx === -1) break;
+
+//       const line = buf.slice(0, idx).replace(/\r$/, "");
+//       buf = buf.slice(idx + 1);
+
+//       if (line.startsWith("event:")) {
+//         eventName = line.slice("event:".length).trim() || "message";
+//         continue;
+//       }
+
+//       if (line.startsWith("data:")) {
+//         dataLines.push(line.slice("data:".length).trimStart());
+//         continue;
+//       }
+
+//       // blank line = end of event
+//       if (line === "") {
+//         flush();
+//         eventName = "message";
+//         continue;
+//       }
+//     }
+//   }
+// }
 const ENDPOINTS = {
   PRODUCTS_LIST: "/products",
   PRODUCT_CREATE: "/products",
@@ -209,7 +290,9 @@ function SectionCard({ title, hint, right, children }) {
   );
 }
 
-function NavItem({ active, label, onClick, badge }) {
+function NavItem({ active, label, onClick, badge, badgeTone = "default" }) {
+  const isDanger = badgeTone === "danger";
+
   return (
     <button
       type="button"
@@ -220,11 +303,16 @@ function NavItem({ active, label, onClick, badge }) {
       )}
     >
       <span className="truncate">{label}</span>
+
       {badge ? (
         <span
           className={cx(
-            "shrink-0 rounded-full px-2 py-0.5 text-xs font-bold",
-            active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-700",
+            "shrink-0 rounded-full px-2 py-0.5 text-xs font-extrabold",
+            isDanger
+              ? "bg-rose-600 text-white"
+              : active
+                ? "bg-white/20 text-white"
+                : "bg-slate-100 text-slate-700",
           )}
         >
           {badge}
@@ -265,6 +353,7 @@ function PillTabsWithBadges({ value, onChange, tabs = [] }) {
       {tabs.map((t) => {
         const active = value === t.value;
         const badge = Number(t.badge || 0);
+        const danger = t.badgeTone === "danger";
 
         return (
           <button
@@ -272,7 +361,7 @@ function PillTabsWithBadges({ value, onChange, tabs = [] }) {
             type="button"
             onClick={() => onChange(t.value)}
             className={cx(
-              "rounded-full px-3 py-1.5 text-sm font-bold border transition inline-flex items-center gap-2",
+              "rounded-full px-3 py-1.5 text-sm font-extrabold border transition inline-flex items-center gap-2",
               active
                 ? "bg-slate-900 text-white border-slate-900"
                 : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50",
@@ -280,13 +369,14 @@ function PillTabsWithBadges({ value, onChange, tabs = [] }) {
           >
             <span>{t.label}</span>
 
-            {/* badge ALWAYS visible */}
             <span
               className={cx(
                 "rounded-full px-2 py-0.5 text-xs font-extrabold",
-                active
-                  ? "bg-white/20 text-white"
-                  : "bg-slate-100 text-slate-700",
+                danger
+                  ? "bg-rose-600 text-white"
+                  : active
+                    ? "bg-white/20 text-white"
+                    : "bg-slate-100 text-slate-700",
               )}
             >
               {badge}
@@ -299,28 +389,33 @@ function PillTabsWithBadges({ value, onChange, tabs = [] }) {
 }
 
 function StatusBadge({ status }) {
-  const s = String(status || "").toUpperCase();
+  const raw = String(status || "").toUpperCase();
+
+  // storekeeper language
+  const label =
+    raw === "DRAFT" ? "TO RELEASE" : raw === "FULFILLED" ? "RELEASED" : raw;
+
   const cls =
-    s === "DRAFT"
-      ? "bg-slate-50 text-slate-700 border-slate-200"
-      : s === "FULFILLED"
+    raw === "DRAFT"
+      ? "bg-sky-50 text-sky-800 border-sky-200"
+      : raw === "FULFILLED"
         ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-        : s === "PENDING"
+        : raw === "PENDING"
           ? "bg-amber-50 text-amber-800 border-amber-200"
-          : s === "COMPLETED"
-            ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-            : s === "CANCELLED"
+          : raw === "COMPLETED"
+            ? "bg-slate-50 text-slate-700 border-slate-200"
+            : raw === "CANCELLED"
               ? "bg-rose-50 text-rose-800 border-rose-200"
               : "bg-slate-50 text-slate-700 border-slate-200";
 
   return (
     <span
       className={cx(
-        "inline-flex items-center rounded-xl border px-2.5 py-1 text-xs font-bold",
+        "inline-flex items-center rounded-xl border px-2.5 py-1 text-xs font-extrabold",
         cls,
       )}
     >
-      {s || "—"}
+      {label || "—"}
     </span>
   );
 }
@@ -387,28 +482,33 @@ function useBeep() {
 
 function UrgentToast({ open, title, body, onClose }) {
   if (!open) return null;
-  return (
-    <div className="fixed top-4 right-4 z-[9999] w-[92vw] max-w-sm">
-      <div className="rounded-2xl border border-rose-200 bg-rose-50 shadow-lg p-4">
+
+  // Portal so it can NEVER be behind the page
+  return createPortal(
+    <div className="fixed top-4 right-4 z-[2147483647] w-[92vw] max-w-sm pointer-events-none">
+      <div className="pointer-events-auto rounded-2xl border border-rose-200 bg-rose-50 shadow-2xl p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-bold text-rose-900 truncate">
+            <div className="text-sm font-extrabold text-rose-900 truncate">
               {title || "Urgent alert"}
             </div>
             {body ? (
-              <div className="mt-1 text-sm text-rose-900/90">{body}</div>
+              <div className="mt-1 text-sm text-rose-900/90 break-words">
+                {body}
+              </div>
             ) : null}
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 rounded-xl border border-rose-200 bg-white px-3 py-1.5 text-xs font-bold text-rose-800 hover:bg-rose-100"
+            className="shrink-0 rounded-xl border border-rose-200 bg-white px-3 py-1.5 text-xs font-extrabold text-rose-800 hover:bg-rose-100"
           >
             Close
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -423,16 +523,17 @@ function AlertsModal({
 }) {
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-start justify-center p-4 sm:p-6">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+  // Portal so it can NEVER be behind the page
+  return createPortal(
+    <div className="fixed inset-0 z-[2147483647] flex items-start justify-center p-4 sm:p-6">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
 
-      <div className="relative w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden mt-10">
+      <div className="relative w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden mt-10">
         <div className="p-4 border-b border-slate-200 flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-bold text-slate-900">Alerts</div>
+            <div className="text-sm font-extrabold text-slate-900">Alerts</div>
             <div className="mt-1 text-xs text-slate-600">
-              {unreadCount ? <b>{unreadCount}</b> : 0} unread
+              <b>{Number(unreadCount || 0)}</b> unread
             </div>
           </div>
 
@@ -440,7 +541,7 @@ function AlertsModal({
             <button
               type="button"
               onClick={onReadAll}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50"
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold hover:bg-slate-50 disabled:opacity-60"
               disabled={loading}
             >
               Read all
@@ -448,7 +549,7 @@ function AlertsModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-xl bg-slate-900 text-white px-3 py-2 text-sm font-semibold hover:bg-slate-800"
+              className="rounded-xl bg-slate-900 text-white px-3 py-2 text-sm font-bold hover:bg-slate-800"
             >
               Close
             </button>
@@ -462,11 +563,11 @@ function AlertsModal({
               <Skeleton className="h-16 w-full" />
               <Skeleton className="h-16 w-full" />
             </div>
-          ) : rows.length === 0 ? (
+          ) : (rows || []).length === 0 ? (
             <div className="text-sm text-slate-600">No alerts yet.</div>
           ) : (
             <div className="grid gap-2">
-              {rows.map((n) => {
+              {(rows || []).map((n) => {
                 const isUnread = n?.isRead === false || n?.is_read === false;
                 const priority = String(n?.priority || "normal").toLowerCase();
                 const title = toStr(n?.title) || "Alert";
@@ -485,26 +586,27 @@ function AlertsModal({
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <div className="text-sm font-bold text-slate-900 truncate">
+                          <div className="text-sm font-extrabold text-slate-900 truncate">
                             {title}
                           </div>
                           {priority === "high" ? (
-                            <span className="rounded-full bg-rose-600 text-white px-2 py-0.5 text-xs font-bold">
+                            <span className="rounded-full bg-rose-600 text-white px-2 py-0.5 text-xs font-extrabold">
                               URGENT
                             </span>
                           ) : null}
                           {isUnread ? (
-                            <span className="rounded-full bg-slate-900 text-white px-2 py-0.5 text-xs font-bold">
+                            <span className="rounded-full bg-slate-900 text-white px-2 py-0.5 text-xs font-extrabold">
                               NEW
                             </span>
                           ) : null}
                         </div>
 
                         {body ? (
-                          <div className="mt-1 text-sm text-slate-700">
+                          <div className="mt-1 text-sm text-slate-700 break-words">
                             {body}
                           </div>
                         ) : null}
+
                         <div className="mt-2 text-xs text-slate-500">
                           {safeDate(n?.createdAt || n?.created_at)}
                         </div>
@@ -515,7 +617,7 @@ function AlertsModal({
                           <button
                             type="button"
                             onClick={() => onReadOne(n?.id)}
-                            className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold hover:bg-slate-50"
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-extrabold hover:bg-slate-50"
                           >
                             Mark read
                           </button>
@@ -532,10 +634,11 @@ function AlertsModal({
         </div>
 
         <div className="p-4 border-t border-slate-200 text-xs text-slate-600">
-          Tip: urgent alerts also show a red popup and sound.
+          Urgent alerts also show a red popup and play a sound.
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -631,25 +734,19 @@ export default function StoreKeeperPage() {
 
   const loadUnread = useCallback(async () => {
     try {
-      const data = await apiFetch(ENDPOINTS.NOTIFS_UNREAD, { method: "GET" });
-      const n = Number(data?.count ?? data?.unread ?? 0);
+      const data = await apiFetch(`/notifications/unread-count`, {
+        method: "GET",
+      });
+      const n = Number(data?.unread ?? 0);
       setUnread(Number.isFinite(n) ? n : 0);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, []);
 
   const loadNotifs = useCallback(async () => {
     setNotifsLoading(true);
     try {
-      const data = await apiFetch(`${ENDPOINTS.NOTIFS_LIST}?limit=50`, {
-        method: "GET",
-      });
-      const list = Array.isArray(data?.notifications)
-        ? data.notifications
-        : Array.isArray(data?.rows)
-          ? data.rows
-          : [];
+      const data = await apiFetch(`/notifications?limit=50`, { method: "GET" });
+      const list = Array.isArray(data?.rows) ? data.rows : [];
       setNotifs(list);
     } catch {
       setNotifs([]);
@@ -700,31 +797,16 @@ export default function StoreKeeperPage() {
     // initial fetch
     loadUnread();
 
-    // connect stream
-    try {
-      if (sseRef.current) {
-        sseRef.current.close();
-        sseRef.current = null;
-      }
-
-      const es = new EventSource(ENDPOINTS.NOTIFS_STREAM);
-      sseRef.current = es;
-
-      es.onmessage = (evt) => {
-        if (!evt?.data) return;
-
-        let payload = null;
-        try {
-          payload = JSON.parse(evt.data);
-        } catch {
-          return;
-        }
-
-        // expected: { type: "notification", notification: {...} } or direct notification
-        const n = payload?.notification || payload;
+    // connect stream (uses API_BASE + cookies)
+    const conn = connectSSE(ENDPOINTS.NOTIFS_STREAM, {
+      onHello: (data) => {
+        const n = Number(data?.unread ?? 0);
+        if (Number.isFinite(n)) setUnread(n);
+      },
+      onNotification: (n) => {
         if (!n) return;
 
-        // prepend list
+        // prepend list (dedupe)
         setNotifs((prev) => {
           const arr = Array.isArray(prev) ? prev : [];
           const id = n?.id == null ? null : String(n.id);
@@ -732,7 +814,7 @@ export default function StoreKeeperPage() {
           return [n, ...arr].slice(0, 80);
         });
 
-        // unread refresh
+        // increment unread locally (fast UX) + also refresh occasionally
         loadUnread();
 
         // urgent behavior
@@ -743,22 +825,14 @@ export default function StoreKeeperPage() {
           setUrgentOpen(true);
           beep();
         }
-      };
-
-      es.onerror = () => {
-        // browser auto-retries; keep silent
-      };
-    } catch {
-      // ignore
-    }
+      },
+      onError: () => {
+        // keep silent; connectSSE will retry
+      },
+    });
 
     return () => {
-      try {
-        if (sseRef.current) sseRef.current.close();
-      } catch {
-        // ignore
-      }
-      sseRef.current = null;
+      conn.close();
     };
   }, [isAuthorized, loadUnread, beep]);
 
@@ -907,18 +981,20 @@ export default function StoreKeeperPage() {
   useEffect(() => {
     if (!isAuthorized) return;
 
+    // Always load these so sidebar badges are correct immediately
     loadProducts();
     loadInventory();
+    loadSales(); // ✅ IMPORTANT: enables default badge for "Release stock"
 
+    // Section-specific
     if (section === "adjustments") loadMyAdjustRequests();
-    if (section === "sales") loadSales();
   }, [
     isAuthorized,
     section,
     loadProducts,
     loadInventory,
-    loadMyAdjustRequests,
     loadSales,
+    loadMyAdjustRequests,
   ]);
 
   // KPIs
@@ -1233,23 +1309,6 @@ export default function StoreKeeperPage() {
       <RoleBar title="Store keeper" subtitle={subtitle} user={me} />
 
       <div className="mx-auto max-w-7xl px-4 sm:px-5 py-6">
-        {/* Top actions bar (Alerts always on top, never behind) */}
-        <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={openAlerts}
-            className="relative rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold hover:bg-slate-50"
-            title="Alerts"
-          >
-            🔔 Alerts
-            {unread > 0 ? (
-              <span className="absolute -top-2 -right-2 rounded-full bg-rose-600 text-white text-xs font-bold px-2 py-0.5">
-                {unread}
-              </span>
-            ) : null}
-          </button>
-        </div>
-
         {msg ? (
           <div className="mb-4">
             <Banner kind={msgKind}>{msg}</Banner>
@@ -1281,19 +1340,26 @@ export default function StoreKeeperPage() {
             </div>
 
             <div className="mt-4 hidden lg:grid gap-2">
-              {SECTIONS.map((s) => (
-                <NavItem
-                  key={s.key}
-                  active={section === s.key}
-                  label={s.label}
-                  onClick={() => setSection(s.key)}
-                  badge={
-                    s.key === "sales" && draftSalesCount > 0
-                      ? String(draftSalesCount)
-                      : null
-                  }
-                />
-              ))}
+              {SECTIONS.map((s) => {
+                const isSales = s.key === "sales";
+                const badge =
+                  isSales && draftSalesCount > 0
+                    ? String(draftSalesCount)
+                    : null;
+
+                return (
+                  <NavItem
+                    key={s.key}
+                    active={section === s.key}
+                    label={s.label}
+                    onClick={() => setSection(s.key)}
+                    badge={badge}
+                    badgeTone={
+                      isSales && draftSalesCount > 0 ? "danger" : "default"
+                    }
+                  />
+                );
+              })}
             </div>
 
             <div className="mt-6 pt-4 border-t border-slate-200 text-xs text-slate-600">
@@ -1931,6 +1997,7 @@ export default function StoreKeeperPage() {
                           value: "TO_RELEASE",
                           label: "To release",
                           badge: draftSalesCount,
+                          badgeTone: draftSalesCount > 0 ? "danger" : "default",
                         },
                         {
                           value: "RELEASED",
@@ -1982,44 +2049,32 @@ export default function StoreKeeperPage() {
                           .join(" • ");
 
                         const created = safeDate(s?.createdAt || s?.created_at);
-                        const total = money(s?.totalAmount ?? s?.total ?? 0);
 
                         return (
                           <div
                             key={String(s?.id)}
                             className="rounded-2xl border border-slate-200 bg-white p-4"
                           >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <div className="text-sm font-extrabold text-slate-900">
-                                    Sale ID: {s?.id ?? "—"}
-                                  </div>
-                                  <StatusBadge status={status} />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <div className="text-sm font-extrabold text-slate-900">
+                                  Sale #{s?.id ?? "—"}
                                 </div>
-
-                                <div className="mt-2 text-sm text-slate-700">
-                                  Customer:{" "}
-                                  <b className="break-words">{customerLabel}</b>
-                                </div>
-
-                                <div className="mt-1 text-sm text-slate-700">
-                                  Seller:{" "}
-                                  <b className="break-words">{sellerLabel}</b>
-                                </div>
-
-                                <div className="mt-2 text-xs text-slate-500">
-                                  Created: {created}
-                                </div>
+                                <StatusBadge status={status} />
                               </div>
 
-                              <div className="shrink-0 text-right">
-                                <div className="text-lg font-extrabold text-slate-900">
-                                  {total}
-                                </div>
-                                <div className="text-xs text-slate-500">
-                                  total
-                                </div>
+                              <div className="mt-2 text-sm text-slate-700">
+                                Customer:{" "}
+                                <b className="break-words">{customerLabel}</b>
+                              </div>
+
+                              <div className="mt-1 text-sm text-slate-700">
+                                Seller:{" "}
+                                <b className="break-words">{sellerLabel}</b>
+                              </div>
+
+                              <div className="mt-2 text-xs text-slate-500">
+                                Created: {created}
                               </div>
                             </div>
 
@@ -2032,7 +2087,7 @@ export default function StoreKeeperPage() {
 
                               <button
                                 type="button"
-                                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
                                 onClick={() => openSaleDetails(s?.id)}
                               >
                                 View items
@@ -2040,7 +2095,7 @@ export default function StoreKeeperPage() {
 
                               {!canRelease ? (
                                 <span className="text-xs text-slate-500">
-                                  Release allowed only for <b>DRAFT</b>.
+                                  Release allowed only for <b>TO RELEASE</b>.
                                 </span>
                               ) : null}
                             </div>
@@ -2080,8 +2135,7 @@ function SaleModal({ open, sale, loading, onClose }) {
               Sale #{sale?.id ?? "—"} {loading ? "…" : ""}
             </div>
             <div className="text-xs text-slate-600 mt-1 truncate">
-              Status: {String(sale?.status || "—").toUpperCase()} • Total:{" "}
-              {money(sale?.totalAmount ?? 0)}
+              Status: {String(sale?.status || "—").toUpperCase()}
             </div>
           </div>
 
