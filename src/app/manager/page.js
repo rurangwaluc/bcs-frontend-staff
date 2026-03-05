@@ -1,40 +1,57 @@
+// ✅ PASTE THIS WHOLE FILE INTO:
+// frontend-staff/src/app/manager/page.js
+
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import AsyncButton from "../../components/AsyncButton";
 import AuditLogsPanel from "../../components/AuditLogsPanel";
 import CashReportsPanel from "../../components/CashReportsPanel";
 import CreditsPanel from "../../components/CreditsPanel";
 import InventoryAdjustRequestsPanel from "../../components/InventoryAdjustRequestsPanel";
 import ManagerUsersPanel from "../../components/ManagerUsersPanel";
+import NotificationsBell from "../../components/NotificationsBell";
 import ProductPricingPanel from "../../components/ProductPricingPanel";
-import AsyncButton from "../../components/AsyncButton";
 import RoleBar from "../../components/RoleBar";
+import SuppliersPanel from "../../components/SuppliersPanel";
 import { apiFetch } from "../../lib/api";
 import { getMe } from "../../lib/auth";
+import { useRouter } from "next/navigation";
 
 const ENDPOINTS = {
-  SALES_LIST: "/sales",
-  SALE_CANCEL: (id) => `/sales/${id}/cancel`,
+  // Manager dashboard
   MANAGER_DASHBOARD: "/manager/dashboard",
 
-  PRODUCTS_LIST: "/products",
+  // Sales
+  SALES_LIST: "/sales",
+  SALE_GET: (id) => `/sales/${id}`,
+  SALE_CANCEL: (id) => `/sales/${id}/cancel`,
+
+  // Inventory / products
   INVENTORY_LIST: "/inventory",
-
-  PAYMENTS_LIST: "/payments",
-  PAYMENTS_SUMMARY: "/payments/summary",
-  PAYMENTS_BREAKDOWN: "/payments/breakdown",
-
+  PRODUCTS_LIST: "/products",
   INVENTORY_ARRIVALS_LIST: "/inventory/arrivals",
 
   PRODUCT_ARCHIVE: (id) => `/products/${id}/archive`,
   PRODUCT_RESTORE: (id) => `/products/${id}/restore`,
+
+  // Payments
+  PAYMENTS_LIST: "/payments",
+  PAYMENTS_SUMMARY: "/payments/summary",
+  PAYMENTS_BREAKDOWN: "/payments/breakdown",
+
+  // Inventory adjust requests (for badge)
+  INV_ADJ_REQ_LIST: "/inventory/adjust-requests",
+
+  // Suppliers
+  SUPPLIERS_LIST: "/suppliers",
+  SUPPLIER_BILLS_LIST: "/supplier-bills",
+  SUPPLIER_SUMMARY: "/supplier/summary",
+  SUPPLIER_CREATE: "/suppliers",
+  SUPPLIER_BILL_CREATE: "/supplier-bills",
 };
 
-// ✅ Customers removed
-// ✅ Users renamed to Staff
-// ✅ Evidence moved to Advanced
 const SECTIONS = [
   { key: "dashboard", label: "Dashboard" },
   { key: "sales", label: "Sales" },
@@ -43,6 +60,7 @@ const SECTIONS = [
   { key: "pricing", label: "Pricing" },
   { key: "inv_requests", label: "Inventory requests" },
   { key: "arrivals", label: "Stock arrivals" },
+  { key: "suppliers", label: "Suppliers" },
   { key: "cash_reports", label: "Cash reports" },
   { key: "credits", label: "Credits" },
   { key: "staff", label: "Staff" },
@@ -57,6 +75,11 @@ const PAGE_SIZE = 10;
 
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
+}
+
+function toStr(v) {
+  if (v === undefined || v === null) return "";
+  return String(v).trim();
 }
 
 function money(n) {
@@ -87,7 +110,9 @@ function normalizeList(data, keys = []) {
 }
 
 function normalizeMethodKey(method) {
-  const m = String(method || "").trim().toUpperCase();
+  const m = String(method || "")
+    .trim()
+    .toUpperCase();
   if (!m) return "OTHER";
   if (m === "CASH") return "CASH";
   if (m === "MOMO" || m === "MOBILEMONEY" || m === "MOBILE") return "MOMO";
@@ -138,15 +163,21 @@ function locationLabel(me) {
     (me?.locationCode != null ? String(me.locationCode).trim() : "") ||
     "";
 
-  const id = loc?.id ?? me?.locationId ?? me?.location_id ?? null;
-
   if (name && code) return `${name} (${code})`;
   if (name) return name;
-  if (id != null && id !== "") return "Location";
-return "Location";
+  return "Location";
 }
 
-function buildEvidenceUrl({ entity, entityId, from, to, action, userId, q, limit }) {
+function buildEvidenceUrl({
+  entity,
+  entityId,
+  from,
+  to,
+  action,
+  userId,
+  q,
+  limit,
+}) {
   const params = new URLSearchParams();
   if (entity) params.set("entity", entity);
   if (entityId) params.set("entityId", entityId);
@@ -162,7 +193,11 @@ function buildEvidenceUrl({ entity, entityId, from, to, action, userId, q, limit
 /* ---------- UI atoms ---------- */
 
 function Skeleton({ className = "" }) {
-  return <div className={cx("animate-pulse rounded-xl bg-slate-200/70", className)} />;
+  return (
+    <div
+      className={cx("animate-pulse rounded-xl bg-slate-200/70", className)}
+    />
+  );
 }
 
 function PageSkeleton() {
@@ -211,7 +246,11 @@ function Banner({ kind = "info", children }) {
           ? "bg-rose-50 text-rose-900 border-rose-200"
           : "bg-slate-50 text-slate-800 border-slate-200";
 
-  return <div className={cx("rounded-2xl border px-4 py-3 text-sm", styles)}>{children}</div>;
+  return (
+    <div className={cx("rounded-2xl border px-4 py-3 text-sm", styles)}>
+      {children}
+    </div>
+  );
 }
 
 function StatCard({ label, value, sub }) {
@@ -256,7 +295,9 @@ function SectionCard({ title, hint, right, children }) {
       <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-4">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-slate-900">{title}</div>
-          {hint ? <div className="mt-1 text-xs text-slate-600">{hint}</div> : null}
+          {hint ? (
+            <div className="mt-1 text-xs text-slate-600">{hint}</div>
+          ) : null}
         </div>
         {right ? <div className="shrink-0">{right}</div> : null}
       </div>
@@ -265,37 +306,332 @@ function SectionCard({ title, hint, right, children }) {
   );
 }
 
-function NavItem({ active, label, onClick }) {
+function NavItem({ active, label, onClick, badge }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={cx(
         "w-full text-left rounded-xl px-3 py-2.5 text-sm font-semibold transition",
+        "flex items-center justify-between gap-2",
         active ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50",
       )}
     >
-      {label}
+      <span className="truncate">{label}</span>
+      {badge != null ? (
+        <span
+          className={cx(
+            "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-extrabold border",
+            active
+              ? "bg-white/10 text-white border-white/20"
+              : "bg-slate-50 text-slate-900 border-slate-200",
+          )}
+        >
+          {badge}
+        </span>
+      ) : null}
     </button>
   );
 }
 
-function ArrivalDocCard({ doc }) {
-  const raw = doc?.fileUrl || doc?.url || "";
-  if (!raw) return null;
-
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000";
-  const url = /^https?:\/\//i.test(raw) ? raw : `${API_BASE}${raw.startsWith("/") ? "" : "/"}${raw}`;
+function Pill({ tone = "neutral", children }) {
+  const cls =
+    tone === "success"
+      ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+      : tone === "warn"
+        ? "bg-amber-50 text-amber-900 border-amber-200"
+        : tone === "danger"
+          ? "bg-rose-50 text-rose-900 border-rose-200"
+          : tone === "info"
+            ? "bg-sky-50 text-sky-900 border-sky-200"
+            : "bg-slate-50 text-slate-800 border-slate-200";
 
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50"
+    <span
+      className={cx(
+        "inline-flex items-center rounded-xl border px-2.5 py-1 text-[11px] font-bold",
+        cls,
+      )}
     >
-      Open file
-    </a>
+      {children}
+    </span>
+  );
+}
+
+function statusTone(status) {
+  const s = String(status || "").toUpperCase();
+  if (s === "COMPLETED" || s === "PAID" || s === "APPROVED") return "success";
+  if (s.includes("AWAIT") || s === "PENDING" || s === "OPEN") return "warn";
+  if (s === "CANCELLED" || s === "DECLINED" || s === "VOID") return "danger";
+  return "neutral";
+}
+
+function normalizeItemsForSummary(items) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((it) => {
+      const name =
+        String(
+          it?.productName ??
+            it?.name ??
+            it?.product?.name ??
+            it?.title ??
+            "Item",
+        ).trim() || "Item";
+      const qty = Number(it?.qty ?? it?.quantity ?? it?.count ?? 0) || 0;
+      const unitPrice =
+        Number(
+          it?.unitPrice ??
+            it?.unit_price ??
+            it?.price ??
+            it?.sellingPrice ??
+            it?.selling_price ??
+            0,
+        ) || 0;
+      return { name, qty, unitPrice };
+    })
+    .filter((x) => x.qty > 0);
+}
+
+function firstItemLabel(items) {
+  const list = normalizeItemsForSummary(items);
+  if (!list.length) return { name: "—", qty: 0 };
+  return { name: list[0].name, qty: list[0].qty };
+}
+
+function productNameById(products, productId) {
+  const pid = String(productId ?? "");
+  const p = (Array.isArray(products) ? products : []).find(
+    (x) => String(x?.id) === pid,
+  );
+  return p?.name || p?.productName || p?.title || null;
+}
+
+/* ---------- lightweight beep + browser notifications ---------- */
+
+function safePlayBeep({ volume = 0.06, durationMs = 160, freq = 920 } = {}) {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    gain.gain.value = volume;
+    osc.frequency.value = freq;
+    osc.type = "sine";
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    setTimeout(
+      () => {
+        try {
+          osc.stop();
+          ctx.close?.();
+        } catch {
+          // ignore
+        }
+      },
+      Math.max(80, Number(durationMs) || 160),
+    );
+  } catch {
+    // ignore
+  }
+}
+
+function isDocumentFocused() {
+  if (typeof document === "undefined") return true;
+  return (
+    document.visibilityState === "visible" && (document.hasFocus?.() ?? true)
+  );
+}
+
+/* ---------- Widgets ---------- */
+
+function PayBreakdownCard({ title, loading, buckets }) {
+  const order = ["CASH", "MOMO", "BANK", "CARD", "OTHER"];
+  const total = order.reduce((s, k) => s + Number(buckets?.[k]?.total || 0), 0);
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="text-sm font-semibold text-slate-900">{title}</div>
+      <div className="mt-1 text-xs text-slate-600">
+        Total: {loading ? "…" : money(total)}
+      </div>
+
+      <div className="mt-3 grid gap-2">
+        {order.map((k) => (
+          <div key={k} className="flex items-center justify-between text-sm">
+            <div className="text-slate-700">{k}</div>
+            <div className="text-slate-900 font-semibold">
+              {loading ? "…" : money(buckets?.[k]?.total || 0)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TodayMixWidget({ breakdown }) {
+  const buckets = useMemo(() => sumBreakdown(breakdown || []), [breakdown]);
+  const totalToday = Object.values(buckets).reduce(
+    (s, x) => s + Number(x.total || 0),
+    0,
+  );
+
+  function pct(total) {
+    const t = Number(total || 0);
+    if (!Number.isFinite(t) || t <= 0) return 0;
+    if (totalToday <= 0) return 0;
+    return Math.round((t / totalToday) * 100);
+  }
+
+  return (
+    <SectionCard title="Today payment mix" hint="How money came in today.">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        {["CASH", "MOMO", "BANK", "CARD", "OTHER"].map((k) => (
+          <div
+            key={k}
+            className="rounded-2xl border border-slate-200 bg-white p-3"
+          >
+            <div className="text-xs font-semibold text-slate-600">{k}</div>
+            <div className="mt-1 text-lg font-bold text-slate-900">
+              {buckets[k].count}
+            </div>
+            <div className="text-sm text-slate-700 mt-1">
+              Total: {money(buckets[k].total)}
+            </div>
+            <div className="text-xs text-slate-500 mt-1">
+              {pct(buckets[k].total)}%
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 text-sm text-slate-700">
+        <b>Today total:</b> {money(totalToday)}
+      </div>
+    </SectionCard>
+  );
+}
+
+function LowStockWidget({ lowStock, threshold, products }) {
+  function nameFor(productId) {
+    const pid = String(productId || "");
+    const p =
+      (Array.isArray(products) ? products : []).find(
+        (x) => String(x?.id) === pid,
+      ) || null;
+    return p?.name || p?.productName || p?.title || `Product #${pid}`;
+  }
+
+  return (
+    <SectionCard title="Low stock" hint={`Items with qty ≤ ${threshold}.`}>
+      <div className="grid gap-2">
+        {(Array.isArray(lowStock) ? lowStock : []).map((r, idx) => (
+          <div
+            key={`${r?.productId || idx}`}
+            className="rounded-2xl border border-slate-200 bg-white p-3"
+          >
+            <div className="text-sm font-semibold text-slate-900">
+              {nameFor(r?.productId)}
+            </div>
+            <div className="mt-1 text-xs text-slate-600">
+              Qty: <b>{Number(r?.qtyOnHand ?? r?.qty_on_hand ?? 0)}</b>
+            </div>
+          </div>
+        ))}
+
+        {(Array.isArray(lowStock) ? lowStock : []).length === 0 ? (
+          <div className="text-sm text-slate-600">No low stock alerts.</div>
+        ) : null}
+      </div>
+    </SectionCard>
+  );
+}
+
+function StuckSalesWidget({ stuck, rule, saleDetailsById, ensureSaleDetails }) {
+  function ageLabel(seconds) {
+    const s = Number(seconds || 0);
+    if (!Number.isFinite(s) || s <= 0) return "—";
+    const mins = Math.floor(s / 60);
+    const hrs = Math.floor(mins / 60);
+    const days = Math.floor(hrs / 24);
+    if (days > 0) return `${days}d ${hrs % 24}h`;
+    if (hrs > 0) return `${hrs}h ${mins % 60}m`;
+    return `${mins}m`;
+  }
+
+  const rows = Array.isArray(stuck) ? stuck : [];
+
+  return (
+    <SectionCard title="Stuck sales" hint={`Rule: ${rule || "aging sales"}.`}>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        {rows.map((s, idx) => {
+          const id = s?.id;
+          const details = id ? saleDetailsById?.[id] : null;
+          const items = details?.items || s?.items || [];
+          const top = firstItemLabel(items);
+
+          return (
+            <div
+              key={id || idx}
+              className="rounded-2xl border border-slate-200 bg-white p-4"
+              onMouseEnter={() => {
+                if (id) ensureSaleDetails?.(id);
+              }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="text-sm font-extrabold text-slate-900">
+                      Sale #{id ?? "—"}
+                    </div>
+                    <Pill tone={statusTone(s?.status)}>
+                      {String(s?.status ?? "—")}
+                    </Pill>
+                  </div>
+                  <div className="mt-1 text-xs text-slate-600">
+                    Age: <b>{ageLabel(s?.ageSeconds)}</b>
+                  </div>
+                  <div className="mt-1 text-xs text-slate-600">
+                    Created: {fmt(s?.createdAt)}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs font-semibold text-slate-600">
+                    Total
+                  </div>
+                  <div className="text-sm font-bold text-slate-900">
+                    {money(s?.totalAmount ?? 0)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="text-[11px] font-semibold text-slate-600">
+                  Top item
+                </div>
+                <div className="mt-1 text-sm font-semibold text-slate-900 truncate">
+                  {top.name}
+                </div>
+                <div className="mt-1 text-xs text-slate-600">
+                  Qty: <b>{top.qty || 0}</b>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {rows.length === 0 ? (
+          <div className="text-sm text-slate-600">No stuck sales (good).</div>
+        ) : null}
+      </div>
+    </SectionCard>
   );
 }
 
@@ -318,6 +654,10 @@ export default function ManagerPage() {
     setMsg(text || "");
   }
 
+  // header controls
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [refreshState, setRefreshState] = useState("idle"); // idle|loading|success
+
   // dashboard
   const [dash, setDash] = useState(null);
   const [dashLoading, setDashLoading] = useState(false);
@@ -328,8 +668,11 @@ export default function ManagerPage() {
   const [salesQ, setSalesQ] = useState("");
   const [salesPage, setSalesPage] = useState(1);
 
+  const [saleDetailsById, setSaleDetailsById] = useState({});
+  const [saleDetailsLoadingById, setSaleDetailsLoadingById] = useState({});
+
   const [cancelOpen, setCancelOpen] = useState(false);
-  const [canceling, setCanceling] = useState(false);
+  const [cancelingState, setCancelingState] = useState("idle"); // idle|loading|success
   const [cancelSaleId, setCancelSaleId] = useState(null);
   const [cancelReason, setCancelReason] = useState("");
 
@@ -344,10 +687,10 @@ export default function ManagerPage() {
   const [prodQ, setProdQ] = useState("");
 
   const [archOpen, setArchOpen] = useState(false);
-  const [archBusy, setArchBusy] = useState(false);
-  const [archMode, setArchMode] = useState("archive"); // archive | restore
+  const [archMode, setArchMode] = useState("archive"); // archive|restore
   const [archProduct, setArchProduct] = useState(null);
   const [archReason, setArchReason] = useState("");
+  const [archState, setArchState] = useState("idle"); // idle|loading|success
 
   // arrivals
   const [arrivals, setArrivals] = useState([]);
@@ -358,170 +701,34 @@ export default function ManagerPage() {
   const [paymentsSummary, setPaymentsSummary] = useState(null);
   const [paymentsBreakdown, setPaymentsBreakdown] = useState(null);
   const [payQ, setPayQ] = useState("");
-  const [payView, setPayView] = useState("overview"); // overview | list
+  const [payView, setPayView] = useState("overview"); // overview|list
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [loadingPaySummary, setLoadingPaySummary] = useState(false);
   const [loadingPayBreakdown, setLoadingPayBreakdown] = useState(false);
+
+  // inventory requests badge
+  const [invReqPendingCount, setInvReqPendingCount] = useState(0);
+  const [invReqCountLoading, setInvReqCountLoading] = useState(false);
+  const invReqInFlightRef = useRef(false);
+
+  // sound + desktop notifications gate
+  const userInteractedRef = useRef(false);
+  const prevInvReqPendingRef = useRef(0);
 
   // evidence (advanced)
   const [evEntity, setEvEntity] = useState("sale");
   const [evEntityId, setEvEntityId] = useState("");
   const [evFrom, setEvFrom] = useState("");
   const [evTo, setEvTo] = useState("");
-  const [evAction, setEvAction] = useState("");
   const [evUserId, setEvUserId] = useState("");
   const [evQ, setEvQ] = useState("");
   const [evLimit, setEvLimit] = useState(200);
-  // Evidence pickers (friendly selectors)
-const [evCandidates, setEvCandidates] = useState([]);
-const [evCandidatesLoading, setEvCandidatesLoading] = useState(false);
 
-const [evStaff, setEvStaff] = useState([]);
-const [evStaffLoading, setEvStaffLoading] = useState(false);
+  const [evCandidates, setEvCandidates] = useState([]);
+  const [evCandidatesLoading, setEvCandidatesLoading] = useState(false);
 
-const [refreshNonce, setRefreshNonce] = useState(0);
-const [refreshState, setRefreshState] = useState("idle"); // idle | loading | success
-
-
-function makeCandidateLabel(entity, row) {
-  // Keep it human. No IDs shown.
-  const when = fmt(row?.createdAt || row?.created_at || row?.openedAt || row?.opened_at);
-  if (entity === "sale") {
-    const name = (row?.customerName || row?.customer_name || "Customer").trim();
-    const total = money(row?.totalAmount ?? row?.total ?? 0);
-    return `Sale — ${name} — ${total} — ${when}`;
-  }
-  if (entity === "payment") {
-    const amount = money(row?.amount ?? 0);
-    const method = row?.method || "Payment";
- 
-    return `Payment — ${amount} — ${method} — ${when}`;
-  }
-  if (entity === "refund") {
-    const amount = money(row?.amount ?? 0);
-    const reason = row?.reason ? ` — ${String(row.reason).slice(0, 40)}` : "";
-    return `Refund — ${amount}${reason} — ${when}`;
-  }
-  if (entity === "cash_session") {
-    const status = row?.status || "Session";
-    return `Cash session — ${status} — ${when}`;
-  }
-  if (entity === "expense") {
-    const amount = money(row?.amount ?? 0);
-    const note = row?.note ? ` — ${String(row.note).slice(0, 40)}` : "";
-    return `Expense — ${amount}${note} — ${when}`;
-  }
-  if (entity === "deposit") {
-    const amount = money(row?.amount ?? 0);
-    return `Deposit — ${amount} — ${when}`;
-  }
-  if (entity === "credit") {
-    const amount = money(row?.amount ?? 0);
-    const name = (row?.customerName || "Customer").trim();
-    const status = row?.status || "Credit";
-    return `Credit — ${name} — ${amount} — ${status} — ${when}`;
-  }
-  if (entity === "product") {
-    const name = (row?.name || row?.productName || row?.title || "Product").trim();
-    const sku = row?.sku ? ` — SKU ${row.sku}` : "";
-    return `Product — ${name}${sku}`;
-  }
-  if (entity === "inventory") {
-    const name = (row?.productName || row?.product_name || row?.name || "Item").trim();
-    const sku = row?.sku ? ` — SKU ${row.sku}` : "";
-    const qty = row?.qtyOnHand ?? row?.qty_on_hand ?? row?.qty ?? row?.quantity;
-    return qty != null ? `Inventory — ${name}${sku} — Qty ${qty}` : `Inventory — ${name}${sku}`;
-  }
-  if (entity === "user") {
-    const name = (row?.name || "Staff").trim();
-    const email = row?.email ? ` — ${row.email}` : "";
-    return `Staff — ${name}${email}`;
-  }
-  return `Record — ${when}`;
-}
-
-async function loadEvidenceCandidates(entity) {
-  setEvCandidatesLoading(true);
-  try {
-    // Use endpoints you already have in manager
-    const map = {
-      sale: ENDPOINTS.SALES_LIST,
-      payment: ENDPOINTS.PAYMENTS_LIST,
-      refund: "/refunds", // if you have it, else remove this option
-      cash_session: "/cash-sessions", // if you have it, else remove this option
-      credit: "/credits",
-      product: ENDPOINTS.PRODUCTS_LIST,
-      inventory: ENDPOINTS.INVENTORY_LIST,
-      user: "/users",
-      expense: "/cash/expenses", // if you have it, else remove this option
-      deposit: "/cash/deposits", // if you have it, else remove this option
-    };
-
-    const path = map[entity];
-    if (!path) {
-      setEvCandidates([]);
-      return;
-    }
-
-    const data = await apiFetch(path, { method: "GET" });
-
-    // Normalize the list safely
-    const list =
-      (Array.isArray(data?.sales) && data.sales) ||
-      (Array.isArray(data?.payments) && data.payments) ||
-      (Array.isArray(data?.refunds) && data.refunds) ||
-      (Array.isArray(data?.sessions) && data.sessions) ||
-      (Array.isArray(data?.credits) && data.credits) ||
-      (Array.isArray(data?.products) && data.products) ||
-      (Array.isArray(data?.inventory) && data.inventory) ||
-      (Array.isArray(data?.users) && data.users) ||
-      (Array.isArray(data?.rows) && data.rows) ||
-      (Array.isArray(data?.items) && data.items) ||
-      [];
-
-    const top = list
-      .slice()
-      .sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0))
-      .slice(0, 30)
-      .map((row) => ({
-        id: row?.id,
-        label: makeCandidateLabel(entity, row),
-      }))
-      .filter((x) => x.id != null);
-
-    setEvCandidates(top);
-
-    // If current selection is not in list, clear it (prevents confusing “empty”)
-    if (evEntityId && !top.some((x) => String(x.id) === String(evEntityId))) {
-      setEvEntityId("");
-    }
-  } catch {
-    setEvCandidates([]);
-  } finally {
-    setEvCandidatesLoading(false);
-  }
-}
-
-async function loadEvidenceStaff() {
-  setEvStaffLoading(true);
-  try {
-    const data = await apiFetch("/users", { method: "GET" });
-    const list = Array.isArray(data?.users) ? data.users : [];
-    setEvStaff(list.map((u) => ({ id: u.id, name: u.name, email: u.email })));
-  } catch {
-    setEvStaff([]);
-  } finally {
-    setEvStaffLoading(false);
-  }
-}
-
-
-useEffect(() => {
-  if (section !== "evidence") return;
-  loadEvidenceStaff();
-  loadEvidenceCandidates(evEntity);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [section, evEntity, refreshNonce]);
+  const [evStaff, setEvStaff] = useState([]);
+  const [evStaffLoading, setEvStaffLoading] = useState(false);
 
   // role guard
   useEffect(() => {
@@ -566,14 +773,44 @@ useEffect(() => {
     };
   }, [router]);
 
-  const isAuthorized = !!me && String(me?.role || "").toLowerCase() === "manager";
+  const isAuthorized =
+    !!me && String(me?.role || "").toLowerCase() === "manager";
 
-  // loaders
+  // enable sound + notification permission only after first user interaction
+  useEffect(() => {
+    function onInteract() {
+      userInteractedRef.current = true;
+
+      try {
+        if ("Notification" in window && Notification.permission === "default") {
+          Notification.requestPermission().catch(() => {});
+        }
+      } catch {
+        // ignore
+      }
+
+      window.removeEventListener("pointerdown", onInteract);
+      window.removeEventListener("keydown", onInteract);
+    }
+
+    window.addEventListener("pointerdown", onInteract);
+    window.addEventListener("keydown", onInteract);
+
+    return () => {
+      window.removeEventListener("pointerdown", onInteract);
+      window.removeEventListener("keydown", onInteract);
+    };
+  }, []);
+
+  /* ---------- loaders ---------- */
+
   const loadDashboard = useCallback(async () => {
     setDashLoading(true);
     toast("info", "");
     try {
-      const data = await apiFetch(ENDPOINTS.MANAGER_DASHBOARD, { method: "GET" });
+      const data = await apiFetch(ENDPOINTS.MANAGER_DASHBOARD, {
+        method: "GET",
+      });
       setDash(data?.dashboard || null);
     } catch (e) {
       setDash(null);
@@ -614,7 +851,9 @@ useEffect(() => {
   const loadProducts = useCallback(
     async (opts = {}) => {
       const includeInactive =
-        typeof opts.includeInactive === "boolean" ? opts.includeInactive : showArchivedProducts;
+        typeof opts.includeInactive === "boolean"
+          ? opts.includeInactive
+          : showArchivedProducts;
 
       setLoadingProd(true);
       toast("info", "");
@@ -654,13 +893,18 @@ useEffect(() => {
   const loadPaymentsSummary = useCallback(async () => {
     setLoadingPaySummary(true);
     try {
-      const data = await apiFetch(ENDPOINTS.PAYMENTS_SUMMARY, { method: "GET" });
+      const data = await apiFetch(ENDPOINTS.PAYMENTS_SUMMARY, {
+        method: "GET",
+      });
       setPaymentsSummary(data?.summary || data || null);
     } catch (e) {
       setPaymentsSummary(null);
       const text = e?.data?.error || e?.message || "";
       if (String(text).toLowerCase().includes("not found")) return;
-      toast("danger", e?.data?.error || e?.message || "Cannot load payment summary");
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Cannot load payment summary",
+      );
     } finally {
       setLoadingPaySummary(false);
     }
@@ -669,13 +913,18 @@ useEffect(() => {
   const loadPaymentsBreakdown = useCallback(async () => {
     setLoadingPayBreakdown(true);
     try {
-      const data = await apiFetch(ENDPOINTS.PAYMENTS_BREAKDOWN, { method: "GET" });
+      const data = await apiFetch(ENDPOINTS.PAYMENTS_BREAKDOWN, {
+        method: "GET",
+      });
       setPaymentsBreakdown(data?.breakdown || data || null);
     } catch (e) {
       setPaymentsBreakdown(null);
       const text = e?.data?.error || e?.message || "";
       if (String(text).toLowerCase().includes("not found")) return;
-      toast("danger", e?.data?.error || e?.message || "Cannot load payment breakdown");
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Cannot load payment breakdown",
+      );
     } finally {
       setLoadingPayBreakdown(false);
     }
@@ -685,7 +934,9 @@ useEffect(() => {
     setLoadingArrivals(true);
     toast("info", "");
     try {
-      const data = await apiFetch(ENDPOINTS.INVENTORY_ARRIVALS_LIST, { method: "GET" });
+      const data = await apiFetch(ENDPOINTS.INVENTORY_ARRIVALS_LIST, {
+        method: "GET",
+      });
       setArrivals(normalizeList(data, ["arrivals"]));
     } catch (e) {
       toast("danger", e?.data?.error || e?.message || "Cannot load arrivals");
@@ -695,68 +946,200 @@ useEffect(() => {
     }
   }, []);
 
-const refreshCurrent = useCallback(async () => {
-  toast("info", "");
-  setRefreshState("loading");
+  const ensureSaleDetails = useCallback(
+    async (saleId) => {
+      const id = Number(saleId);
+      if (!Number.isInteger(id) || id <= 0) return;
 
-  try {
-    // Tabs that load data INSIDE their own components
-   const componentTabs = new Set([
-  "cash_reports",
-  "credits",
-  "staff",
-  "audit",
-  "evidence",
-  "pricing",
-  "inv_requests",
-]);
-    if (componentTabs.has(section)) {
-      setRefreshNonce((n) => n + 1); // force remount + reload
-      setRefreshState("success");
-      setTimeout(() => setRefreshState("idle"), 900);
-      return;
-    }
+      if (saleDetailsById[id]) return;
+      if (saleDetailsLoadingById[id]) return;
 
-    if (section === "dashboard") {
-      await Promise.all([
-        loadDashboard(),
-        loadSales(),
-        loadInventory(),
-        loadProducts({ includeInactive: showArchivedProducts }),
-        loadPaymentsSummary(),
-        loadPayments(),
-        loadPaymentsBreakdown(),
+      setSaleDetailsLoadingById((p) => ({ ...p, [id]: true }));
+      try {
+        const data = await apiFetch(ENDPOINTS.SALE_GET(id), { method: "GET" });
+        const sale = data?.sale || data || null;
+        setSaleDetailsById((p) => ({ ...p, [id]: sale || { id, items: [] } }));
+      } catch {
+        setSaleDetailsById((p) => ({ ...p, [id]: { id, items: [] } }));
+      } finally {
+        setSaleDetailsLoadingById((p) => {
+          const copy = { ...p };
+          delete copy[id];
+          return copy;
+        });
+      }
+    },
+    [saleDetailsById, saleDetailsLoadingById],
+  );
+
+  const loadInvReqPendingCount = useCallback(async () => {
+    if (invReqInFlightRef.current) return;
+
+    invReqInFlightRef.current = true;
+    setInvReqCountLoading(true);
+
+    try {
+      const qs = new URLSearchParams();
+      qs.set("status", "PENDING");
+      qs.set("limit", "200");
+
+      const data = await apiFetch(
+        `${ENDPOINTS.INV_ADJ_REQ_LIST}?${qs.toString()}`,
+        { method: "GET" },
+      );
+      const rows = normalizeList(data, [
+        "requests",
+        "adjustRequests",
+        "inventoryAdjustRequests",
       ]);
-      setRefreshState("success");
-      setTimeout(() => setRefreshState("idle"), 900);
-      return;
+      const n = Array.isArray(rows) ? rows.length : 0;
+
+      // ✅ only update when changed (prevents “constant refresh feel”)
+      setInvReqPendingCount((prev) => (prev === n ? prev : n));
+    } catch {
+      // keep old value
+    } finally {
+      invReqInFlightRef.current = false;
+      setInvReqCountLoading(false);
+    }
+  }, []);
+
+  /* ---------- controlled polling (NOT always) ---------- */
+  useEffect(() => {
+    if (!isAuthorized) return;
+
+    // ✅ poll only where it matters, slower interval
+    const shouldPoll = section === "dashboard" || section === "inv_requests";
+    if (!shouldPoll) return;
+
+    loadInvReqPendingCount();
+
+    const t = setInterval(() => {
+      loadInvReqPendingCount();
+    }, 60_000);
+
+    return () => clearInterval(t);
+  }, [isAuthorized, section, loadInvReqPendingCount]);
+
+  // Beep + browser notification when pending approvals increases
+  useEffect(() => {
+    if (!isAuthorized) return;
+
+    const prev = Number(prevInvReqPendingRef.current || 0);
+    const cur = Number(invReqPendingCount || 0);
+
+    if (cur > prev) {
+      if (userInteractedRef.current) {
+        safePlayBeep({ volume: 0.06, freq: 920, durationMs: 160 });
+      }
+
+      if (!isDocumentFocused()) {
+        try {
+          if (
+            "Notification" in window &&
+            Notification.permission === "granted"
+          ) {
+            new Notification("Inventory approvals pending", {
+              body: `${cur} pending request${cur === 1 ? "" : "s"} need approval.`,
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }
     }
 
-    if (section === "sales") await loadSales();
-    if (section === "inventory") await Promise.all([loadInventory(), loadProducts({ includeInactive: showArchivedProducts })]);
-    if (section === "payments") await Promise.all([loadPayments(), loadPaymentsSummary(), loadPaymentsBreakdown()]);
-    if (section === "arrivals") await loadArrivals();
+    prevInvReqPendingRef.current = cur;
+  }, [invReqPendingCount, isAuthorized]);
 
-    setRefreshState("success");
-    setTimeout(() => setRefreshState("idle"), 900);
-  } catch (e) {
-    setRefreshState("idle");
-    toast("danger", e?.data?.error || e?.message || "Refresh failed");
-  }
-}, [
-  section,
-  showArchivedProducts,
-  loadDashboard,
-  loadSales,
-  loadInventory,
-  loadProducts,
-  loadPaymentsSummary,
-  loadPayments,
-  loadPaymentsBreakdown,
-  loadArrivals,
-]);
+  /* ---------- refresh button ---------- */
+  const refreshCurrent = useCallback(async () => {
+    toast("info", "");
+    setRefreshState("loading");
 
-  // load per section
+    try {
+      const componentTabs = new Set([
+        "cash_reports",
+        "credits",
+        "staff",
+        "audit",
+        "evidence",
+        "pricing",
+        "inv_requests",
+        "suppliers",
+      ]);
+
+      if (componentTabs.has(section)) {
+        if (section === "inv_requests") await loadInvReqPendingCount();
+        setRefreshNonce((n) => n + 1);
+        setRefreshState("success");
+        setTimeout(() => setRefreshState("idle"), 900);
+        return;
+      }
+
+      if (section === "dashboard") {
+        await Promise.all([
+          loadDashboard(),
+          loadSales(),
+          loadInventory(),
+          loadProducts({ includeInactive: showArchivedProducts }),
+          loadPaymentsSummary(),
+          loadPayments(),
+          loadPaymentsBreakdown(),
+          loadArrivals(),
+          loadInvReqPendingCount(),
+        ]);
+
+        const stuck = Array.isArray(dash?.sales?.stuck) ? dash.sales.stuck : [];
+        await Promise.all(
+          stuck
+            .slice(0, 12)
+            .map((x) => (x?.id ? ensureSaleDetails(x.id) : Promise.resolve())),
+        );
+
+        setRefreshState("success");
+        setTimeout(() => setRefreshState("idle"), 900);
+        return;
+      }
+
+      if (section === "sales") await loadSales();
+      if (section === "inventory") {
+        await Promise.all([
+          loadInventory(),
+          loadProducts({ includeInactive: showArchivedProducts }),
+        ]);
+      }
+      if (section === "payments")
+        await Promise.all([
+          loadPayments(),
+          loadPaymentsSummary(),
+          loadPaymentsBreakdown(),
+        ]);
+      if (section === "arrivals") await loadArrivals();
+
+      setRefreshState("success");
+      setTimeout(() => setRefreshState("idle"), 900);
+    } catch (e) {
+      setRefreshState("idle");
+      toast("danger", e?.data?.error || e?.message || "Refresh failed");
+    }
+  }, [
+    section,
+    showArchivedProducts,
+    loadDashboard,
+    loadSales,
+    loadInventory,
+    loadProducts,
+    loadPaymentsSummary,
+    loadPayments,
+    loadPaymentsBreakdown,
+    loadArrivals,
+    dash,
+    ensureSaleDetails,
+    loadInvReqPendingCount,
+  ]);
+
+  /* ---------- load per section ---------- */
   useEffect(() => {
     if (!isAuthorized) return;
 
@@ -768,6 +1151,8 @@ const refreshCurrent = useCallback(async () => {
       loadPaymentsSummary();
       loadPayments();
       loadPaymentsBreakdown();
+      loadArrivals();
+      loadInvReqPendingCount();
     }
 
     if (section === "sales") loadSales();
@@ -784,6 +1169,8 @@ const refreshCurrent = useCallback(async () => {
     }
 
     if (section === "arrivals") loadArrivals();
+
+    if (section === "inv_requests") loadInvReqPendingCount();
   }, [
     isAuthorized,
     section,
@@ -796,6 +1183,7 @@ const refreshCurrent = useCallback(async () => {
     loadPayments,
     loadPaymentsBreakdown,
     loadArrivals,
+    loadInvReqPendingCount,
   ]);
 
   // reload products when toggle changes in inventory
@@ -810,50 +1198,291 @@ const refreshCurrent = useCallback(async () => {
     setSalesPage(1);
   }, [salesQ]);
 
-  // cancel sale
-  function openCancel(saleId) {
-    setCancelSaleId(Number(saleId));
-    setCancelReason("");
-    setCancelOpen(true);
-    toast("info", "");
+  // prefetch sale details for visible sales (items + top product/qty)
+  useEffect(() => {
+    if (section !== "sales") return;
+
+    const qq = String(salesQ || "")
+      .trim()
+      .toLowerCase();
+    const list = (Array.isArray(sales) ? sales : [])
+      .slice()
+      .sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0))
+      .filter((s) => {
+        if (!qq) return true;
+
+        const hay = [
+          s?.id,
+          s?.status,
+          s?.customerName ?? s?.customer_name,
+          s?.customerPhone ?? s?.customer_phone,
+          s?.customerTin ?? s?.customer_tin,
+          s?.customerAddress ?? s?.customer_address,
+          s?.customer?.tin,
+          s?.customer?.address,
+          s?.customer?.customerTin,
+          s?.customer?.customer_tin,
+          s?.customer?.customerAddress,
+          s?.customer?.customer_address,
+          s?.customer?.taxId,
+          s?.customer?.tax_id,
+          s?.customer?.tinNumber,
+          s?.customer?.tin_number,
+        ]
+          .map((x) => String(x ?? ""))
+          .join(" ")
+          .toLowerCase();
+
+        return hay.includes(qq);
+      })
+      .slice(0, salesPage * PAGE_SIZE)
+      .slice(0, 20);
+
+    list.forEach((s) => {
+      if (s?.id) ensureSaleDetails(s.id);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section, sales, salesQ, salesPage]);
+
+  /* ---------- derived values ---------- */
+
+  const unpricedCount = useMemo(() => {
+    // ✅ count unpriced among ACTIVE products (archived do not matter for pricing gaps)
+    const list = Array.isArray(products) ? products : [];
+    let c = 0;
+    for (const p of list) {
+      if (isArchivedProduct(p)) continue;
+      const price =
+        p?.sellingPrice ??
+        p?.selling_price ??
+        p?.price ??
+        p?.unitPrice ??
+        p?.unit_price ??
+        null;
+      if (
+        price == null ||
+        !Number.isFinite(Number(price)) ||
+        Number(price) <= 0
+      )
+        c += 1;
+    }
+    return c;
+  }, [products]);
+
+  const breakdownTodayTotals = useMemo(
+    () => sumBreakdown(paymentsBreakdown?.today || []),
+    [paymentsBreakdown],
+  );
+  const breakdownYesterday = useMemo(
+    () => sumBreakdown(paymentsBreakdown?.yesterday || []),
+    [paymentsBreakdown],
+  );
+  const breakdownAll = useMemo(
+    () => sumBreakdown(paymentsBreakdown?.allTime || []),
+    [paymentsBreakdown],
+  );
+
+  const dashTodayTotal = useMemo(() => {
+    const rows =
+      dash?.payments?.breakdownToday || paymentsBreakdown?.today || [];
+    const b = sumBreakdown(rows);
+    return Object.values(b).reduce((s, x) => s + Number(x.total || 0), 0);
+  }, [dash, paymentsBreakdown]);
+
+  const dashLowStockCount = useMemo(() => {
+    return Array.isArray(dash?.inventory?.lowStock)
+      ? dash.inventory.lowStock.length
+      : 0;
+  }, [dash]);
+
+  const dashStuckSalesCount = useMemo(() => {
+    return Array.isArray(dash?.sales?.stuck) ? dash.sales.stuck.length : 0;
+  }, [dash]);
+
+  const salesSorted = useMemo(() => {
+    const list = Array.isArray(sales) ? sales : [];
+    return list.slice().sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0));
+  }, [sales]);
+
+  const filteredSales = useMemo(() => {
+    const qq = String(salesQ || "")
+      .trim()
+      .toLowerCase();
+    if (!qq) return salesSorted;
+
+    return salesSorted.filter((s) => {
+      const hay = [
+        s?.id,
+        s?.status,
+        s?.customerName ?? s?.customer_name,
+        s?.customerPhone ?? s?.customer_phone,
+        s?.customerTin ?? s?.customer_tin,
+        s?.customerAddress ?? s?.customer_address,
+        s?.customer?.tin,
+        s?.customer?.address,
+        s?.customer?.customerTin,
+        s?.customer?.customer_tin,
+        s?.customer?.customerAddress,
+        s?.customer?.customer_address,
+        s?.customer?.taxId,
+        s?.customer?.tax_id,
+        s?.customer?.tinNumber,
+        s?.customer?.tin_number,
+      ]
+        .map((x) => String(x ?? ""))
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(qq);
+    });
+  }, [salesSorted, salesQ]);
+
+  const salesShown = useMemo(
+    () => filteredSales.slice(0, salesPage * PAGE_SIZE),
+    [filteredSales, salesPage],
+  );
+  const canLoadMoreSales = useMemo(
+    () => salesShown.length < filteredSales.length,
+    [salesShown.length, filteredSales.length],
+  );
+
+  const paymentsWithItems = useMemo(() => {
+    const list = Array.isArray(payments) ? payments : [];
+    return list.map((p) => {
+      const saleId = p?.saleId ?? p?.sale_id ?? null;
+      const sale = saleId != null ? saleDetailsById?.[Number(saleId)] : null;
+      const items = sale?.items || [];
+      const top = firstItemLabel(items);
+      return { p, saleId, topItemName: top.name, topItemQty: top.qty };
+    });
+  }, [payments, saleDetailsById]);
+
+  // prefetch sale details for payments list (top 25)
+  useEffect(() => {
+    if (section !== "payments") return;
+    if (payView !== "list") return;
+
+    const list = (Array.isArray(payments) ? payments : []).slice(0, 25);
+    list.forEach((p) => {
+      const sid = p?.saleId ?? p?.sale_id ?? null;
+      if (sid != null) ensureSaleDetails(sid);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section, payView, payments]);
+
+  const arrivalsNormalized = useMemo(() => {
+    const list = Array.isArray(arrivals) ? arrivals : [];
+    return list.map((a) => {
+      const pid = a?.productId ?? a?.product_id ?? null;
+
+      const productName =
+        toStr(a?.productName || a?.product_name) ||
+        (pid != null ? productNameById(products, pid) : null) ||
+        (pid != null ? `Product #${pid}` : "—");
+
+      const qty =
+        a?.qtyReceived ?? a?.qty_received ?? a?.qty ?? a?.quantity ?? "—";
+      return {
+        raw: a,
+        id: a?.id ?? "—",
+        productName,
+        qty,
+        when: fmt(a?.createdAt || a?.created_at),
+      };
+    });
+  }, [arrivals, products]);
+
+  const arrivalsBadge = useMemo(() => {
+    const n = Array.isArray(arrivals) ? arrivals.length : 0;
+    return n > 0 ? String(Math.min(n, 99)) : null;
+  }, [arrivals]);
+
+  const pricingBadge = useMemo(
+    () => (unpricedCount > 0 ? String(Math.min(unpricedCount, 99)) : null),
+    [unpricedCount],
+  );
+
+  const invReqBadge = useMemo(() => {
+    const n = Number(invReqPendingCount || 0);
+    return n > 0 ? String(Math.min(n, 99)) : null;
+  }, [invReqPendingCount]);
+
+  function badgeForSectionKey(key) {
+    if (key === "pricing") return pricingBadge;
+    if (key === "arrivals") return arrivalsBadge;
+    if (key === "inv_requests") return invReqBadge;
+    return null;
   }
+
+  function getCustomerTin(s) {
+    const tin =
+      toStr(s?.customerTin ?? s?.customer_tin) ||
+      toStr(s?.customer?.tin) ||
+      toStr(s?.customer?.customerTin ?? s?.customer?.customer_tin) ||
+      toStr(s?.customer?.taxId ?? s?.customer?.tax_id) ||
+      toStr(s?.customer?.tinNumber ?? s?.customer?.tin_number);
+    return tin;
+  }
+
+  function getCustomerAddress(s) {
+    const addr =
+      toStr(s?.customerAddress ?? s?.customer_address) ||
+      toStr(s?.customer?.address) ||
+      toStr(s?.customer?.customerAddress ?? s?.customer?.customer_address) ||
+      toStr(s?.customer?.location ?? s?.customer?.location_text);
+    return addr;
+  }
+
+  /* ---------- actions ---------- */
 
   function canCancelSale(s) {
     const st = String(s?.status || "").toUpperCase();
     return st !== "COMPLETED";
   }
 
+  function openCancel(saleId) {
+    setCancelSaleId(Number(saleId));
+    setCancelReason("");
+    setCancelOpen(true);
+    setCancelingState("idle");
+    toast("info", "");
+  }
+
   async function confirmCancel() {
     if (!cancelSaleId) return;
 
-    setCanceling(true);
+    setCancelingState("loading");
     toast("info", "");
+
     try {
       await apiFetch(ENDPOINTS.SALE_CANCEL(cancelSaleId), {
         method: "POST",
-        body: cancelReason?.trim() ? { reason: cancelReason.trim() } : undefined,
+        body: cancelReason?.trim()
+          ? { reason: cancelReason.trim() }
+          : undefined,
       });
 
       toast("success", `Sale #${cancelSaleId} cancelled`);
+      setCancelingState("success");
+      setTimeout(() => setCancelingState("idle"), 900);
+
       setCancelOpen(false);
       setCancelSaleId(null);
       setCancelReason("");
 
       await loadSales();
     } catch (e) {
+      setCancelingState("idle");
       toast("danger", e?.data?.error || e?.message || "Cancel failed");
-    } finally {
-      setCanceling(false);
     }
   }
 
-  // archive / restore
   function openArchiveProduct(prod) {
     if (!prod?.id) return;
     setArchMode("archive");
     setArchProduct(prod);
     setArchReason("");
     setArchOpen(true);
+    setArchState("idle");
     toast("info", "");
   }
 
@@ -863,6 +1492,7 @@ const refreshCurrent = useCallback(async () => {
     setArchProduct(prod);
     setArchReason("");
     setArchOpen(true);
+    setArchState("idle");
     toast("info", "");
   }
 
@@ -870,8 +1500,9 @@ const refreshCurrent = useCallback(async () => {
     const pid = archProduct?.id;
     if (!pid) return;
 
-    setArchBusy(true);
+    setArchState("loading");
     toast("info", "");
+
     try {
       if (archMode === "archive") {
         await apiFetch(ENDPOINTS.PRODUCT_ARCHIVE(pid), {
@@ -884,136 +1515,197 @@ const refreshCurrent = useCallback(async () => {
         toast("success", `Restored product #${pid}`);
       }
 
+      setArchState("success");
+      setTimeout(() => setArchState("idle"), 900);
+
       setArchOpen(false);
       setArchProduct(null);
       setArchReason("");
 
-      await Promise.all([loadProducts({ includeInactive: showArchivedProducts }), loadInventory()]);
+      await Promise.all([
+        loadProducts({ includeInactive: showArchivedProducts }),
+        loadInventory(),
+      ]);
     } catch (e) {
+      setArchState("idle");
       toast("danger", e?.data?.error || e?.message || "Action failed");
-    } finally {
-      setArchBusy(false);
     }
   }
 
-  // derived
-  const salesSorted = useMemo(() => {
-    const list = Array.isArray(sales) ? sales : [];
-    return list.slice().sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0));
-  }, [sales]);
+  /* ---------- evidence helpers ---------- */
 
-  const filteredSales = useMemo(() => {
-    const qq = String(salesQ || "").trim().toLowerCase();
-    if (!qq) return salesSorted;
+  function makeCandidateLabel(entity, row) {
+    const when = fmt(
+      row?.createdAt || row?.created_at || row?.openedAt || row?.opened_at,
+    );
 
-    return salesSorted.filter((s) => {
-      const id = String(s?.id ?? "");
-      const status = String(s?.status ?? "").toLowerCase();
-      const name = String(s?.customerName ?? s?.customer_name ?? "").toLowerCase();
-      const phone = String(s?.customerPhone ?? s?.customer_phone ?? "").toLowerCase();
-      return id.includes(qq) || status.includes(qq) || name.includes(qq) || phone.includes(qq);
-    });
-  }, [salesSorted, salesQ]);
-
-  const salesShown = useMemo(() => {
-    return filteredSales.slice(0, salesPage * PAGE_SIZE);
-  }, [filteredSales, salesPage]);
-
-  const canLoadMoreSales = useMemo(() => {
-    return salesShown.length < filteredSales.length;
-  }, [salesShown.length, filteredSales.length]);
-
-  const filteredInventory = useMemo(() => {
-    const list = Array.isArray(inventory) ? inventory : [];
-    const qq = String(invQ || "").trim().toLowerCase();
-    if (!qq) return list;
-
-    return list.filter((p) => {
-      const name = String(p?.name || p?.productName || p?.product_name || "").toLowerCase();
-      const sku = String(p?.sku || "").toLowerCase();
-      return name.includes(qq) || sku.includes(qq);
-    });
-  }, [inventory, invQ]);
-
-  const filteredProducts = useMemo(() => {
-    const list = Array.isArray(products) ? products : [];
-    const qq = String(prodQ || "").trim().toLowerCase();
-
-    const byToggle = showArchivedProducts ? list.filter(isArchivedProduct) : list.filter((p) => !isArchivedProduct(p));
-    if (!qq) return byToggle;
-
-    return byToggle.filter((p) => {
-      const id = String(p?.id ?? "");
-      const name = String(p?.name || p?.productName || p?.title || "").toLowerCase();
-      const sku = String(p?.sku || "").toLowerCase();
-      return id.includes(qq) || name.includes(qq) || sku.includes(qq);
-    });
-  }, [products, prodQ, showArchivedProducts]);
-
-  function priceFor(invRow) {
-    const pid = invRow?.productId ?? invRow?.product_id ?? invRow?.id;
-    const sku = invRow?.sku;
-
-    const prod =
-      (pid != null
-        ? (Array.isArray(products) ? products : []).find((x) => String(x?.id) === String(pid))
-        : null) ||
-      (sku ? (Array.isArray(products) ? products : []).find((x) => String(x?.sku) === String(sku)) : null);
-
-    const price =
-      prod?.sellingPrice ??
-      prod?.selling_price ??
-      prod?.price ??
-      prod?.unitPrice ??
-      prod?.unit_price ??
-      null;
-
-    return price == null ? "—" : money(price);
+    if (entity === "sale") {
+      const name = (
+        row?.customerName ||
+        row?.customer_name ||
+        "Customer"
+      ).trim();
+      const total = money(row?.totalAmount ?? row?.total ?? 0);
+      return `Sale — ${name} — ${total} — ${when}`;
+    }
+    if (entity === "payment") {
+      const amount = money(row?.amount ?? 0);
+      const method = row?.method || "Payment";
+      return `Payment — ${amount} — ${method} — ${when}`;
+    }
+    if (entity === "refund") {
+      const amount = money(row?.amount ?? 0);
+      const reason = row?.reason ? ` — ${String(row.reason).slice(0, 40)}` : "";
+      return `Refund — ${amount}${reason} — ${when}`;
+    }
+    if (entity === "cash_session") {
+      const status = row?.status || "Session";
+      return `Cash session — ${status} — ${when}`;
+    }
+    if (entity === "expense") {
+      const amount = money(row?.amount ?? 0);
+      const note = row?.note ? ` — ${String(row.note).slice(0, 40)}` : "";
+      return `Expense — ${amount}${note} — ${when}`;
+    }
+    if (entity === "deposit") {
+      const amount = money(row?.amount ?? 0);
+      return `Deposit — ${amount} — ${when}`;
+    }
+    if (entity === "credit") {
+      const amount = money(row?.amount ?? 0);
+      const name = (row?.customerName || "Customer").trim();
+      const status = row?.status || "Credit";
+      return `Credit — ${name} — ${amount} — ${status} — ${when}`;
+    }
+    if (entity === "product") {
+      const name = (
+        row?.name ||
+        row?.productName ||
+        row?.title ||
+        "Product"
+      ).trim();
+      const sku = row?.sku ? ` — SKU ${row.sku}` : "";
+      return `Product — ${name}${sku}`;
+    }
+    if (entity === "inventory") {
+      const name = (
+        row?.productName ||
+        row?.product_name ||
+        row?.name ||
+        "Item"
+      ).trim();
+      const sku = row?.sku ? ` — SKU ${row.sku}` : "";
+      const qty =
+        row?.qtyOnHand ?? row?.qty_on_hand ?? row?.qty ?? row?.quantity;
+      return qty != null
+        ? `Inventory — ${name}${sku} — Qty ${qty}`
+        : `Inventory — ${name}${sku}`;
+    }
+    if (entity === "user") {
+      const name = (row?.name || "Staff").trim();
+      const email = row?.email ? ` — ${row.email}` : "";
+      return `Staff — ${name}${email}`;
+    }
+    return `Record — ${when}`;
   }
 
-  const filteredPayments = useMemo(() => {
-    const qq = String(payQ || "").trim().toLowerCase();
-    const list = Array.isArray(payments) ? payments : [];
-    if (!qq) return list;
+  async function loadEvidenceCandidates(entity) {
+    setEvCandidatesLoading(true);
+    try {
+      const map = {
+        sale: ENDPOINTS.SALES_LIST,
+        payment: ENDPOINTS.PAYMENTS_LIST,
+        refund: "/refunds",
+        cash_session: "/cash-sessions",
+        credit: "/credits",
+        product: ENDPOINTS.PRODUCTS_LIST,
+        inventory: ENDPOINTS.INVENTORY_LIST,
+        user: "/users",
+        expense: "/cash/expenses",
+        deposit: "/cash/deposits",
+      };
 
-    return list.filter((p) => {
-      const id = String(p?.id ?? "");
-      const saleId = String(p?.saleId ?? p?.sale_id ?? "");
-      const method = String(p?.method ?? "").toLowerCase();
-      const amount = String(p?.amount ?? "");
-      return id.includes(qq) || saleId.includes(qq) || method.includes(qq) || amount.includes(qq);
-    });
-  }, [payments, payQ]);
+      const path = map[entity];
+      if (!path) {
+        setEvCandidates([]);
+        return;
+      }
 
-  const breakdownTodayTotals = useMemo(() => sumBreakdown(paymentsBreakdown?.today || []), [paymentsBreakdown]);
-  const breakdownYesterday = useMemo(() => sumBreakdown(paymentsBreakdown?.yesterday || []), [paymentsBreakdown]);
-  const breakdownAll = useMemo(() => sumBreakdown(paymentsBreakdown?.allTime || []), [paymentsBreakdown]);
+      const data = await apiFetch(path, { method: "GET" });
 
-  const dashTodayTotal = useMemo(() => {
-    const rows = dash?.payments?.breakdownToday || [];
-    const b = sumBreakdown(rows);
-    return Object.values(b).reduce((s, x) => s + Number(x.total || 0), 0);
-  }, [dash]);
+      const list =
+        (Array.isArray(data?.sales) && data.sales) ||
+        (Array.isArray(data?.payments) && data.payments) ||
+        (Array.isArray(data?.refunds) && data.refunds) ||
+        (Array.isArray(data?.sessions) && data.sessions) ||
+        (Array.isArray(data?.credits) && data.credits) ||
+        (Array.isArray(data?.products) && data.products) ||
+        (Array.isArray(data?.inventory) && data.inventory) ||
+        (Array.isArray(data?.users) && data.users) ||
+        (Array.isArray(data?.rows) && data.rows) ||
+        (Array.isArray(data?.items) && data.items) ||
+        [];
 
-  const dashLowStockCount = useMemo(() => {
-    return Array.isArray(dash?.inventory?.lowStock) ? dash.inventory.lowStock.length : 0;
-  }, [dash]);
+      const top = list
+        .slice()
+        .sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0))
+        .slice(0, 30)
+        .map((row) => ({ id: row?.id, label: makeCandidateLabel(entity, row) }))
+        .filter((x) => x.id != null);
 
-  const dashStuckSalesCount = useMemo(() => {
-    return Array.isArray(dash?.sales?.stuck) ? dash.sales.stuck.length : 0;
-  }, [dash]);
+      setEvCandidates(top);
+
+      if (evEntityId && !top.some((x) => String(x.id) === String(evEntityId))) {
+        setEvEntityId("");
+      }
+    } catch {
+      setEvCandidates([]);
+    } finally {
+      setEvCandidatesLoading(false);
+    }
+  }
+
+  async function loadEvidenceStaff() {
+    setEvStaffLoading(true);
+    try {
+      const data = await apiFetch("/users", { method: "GET" });
+      const list = Array.isArray(data?.users) ? data.users : [];
+      setEvStaff(list.map((u) => ({ id: u.id, name: u.name, email: u.email })));
+    } catch {
+      setEvStaff([]);
+    } finally {
+      setEvStaffLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (section !== "evidence") return;
+    loadEvidenceStaff();
+    loadEvidenceCandidates(evEntity);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section, evEntity, refreshNonce]);
+
+  /* ---------- guard ---------- */
+
+  if (bootLoading) return <PageSkeleton />;
+  if (!isAuthorized)
+    return <div className="p-6 text-sm text-slate-600">Redirecting…</div>;
 
   const subtitle = `User: ${me?.email || "—"} • ${locationLabel(me)}`;
 
-  if (bootLoading) return <PageSkeleton />;
-
-  if (!isAuthorized) {
-    return <div className="p-6 text-sm text-slate-600">Redirecting…</div>;
-  }
-
   return (
     <div className="min-h-screen bg-slate-50 overflow-x-hidden">
-      <RoleBar title="Manager" subtitle={subtitle} user={me} />
+      <RoleBar
+        title="Manager"
+        subtitle={subtitle}
+        user={me}
+        right={
+          <div className="flex items-center gap-2">
+            {/* Bell uses SSE internally. If your /api proxy is wrong, fix .env.local or next.config.js. */}
+            <NotificationsBell enabled />
+          </div>
+        }
+      />
 
       <div className="mx-auto max-w-7xl px-4 sm:px-5 py-6">
         {msg ? (
@@ -1026,30 +1718,49 @@ const refreshCurrent = useCallback(async () => {
           {/* Sidebar */}
           <aside className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4 h-fit">
             <div className="text-sm font-semibold text-slate-900">Manager</div>
-            <div className="mt-1 text-xs text-slate-600">{locationLabel(me)}</div>
+            <div className="mt-1 text-xs text-slate-600">
+              {locationLabel(me)}
+            </div>
 
             {/* Mobile picker */}
             <div className="mt-4 lg:hidden">
-              <div className="text-xs font-semibold text-slate-600 mb-2">Section</div>
-              <Select value={section} onChange={(e) => setSection(e.target.value)}>
-                {[...SECTIONS, ...(showAdvanced ? ADVANCED_SECTIONS : [])].map((s) => (
-                  <option key={s.key} value={s.key}>
-                    {s.label}
-                  </option>
-                ))}
+              <div className="text-xs font-semibold text-slate-600 mb-2">
+                Section
+              </div>
+              <Select
+                value={section}
+                onChange={(e) => setSection(e.target.value)}
+              >
+                {[...SECTIONS, ...(showAdvanced ? ADVANCED_SECTIONS : [])].map(
+                  (s) => (
+                    <option key={s.key} value={s.key}>
+                      {s.label}
+                    </option>
+                  ),
+                )}
               </Select>
             </div>
 
             {/* Desktop nav */}
             <div className="mt-4 hidden lg:grid gap-2">
               {SECTIONS.map((s) => (
-                <NavItem key={s.key} active={section === s.key} label={s.label} onClick={() => setSection(s.key)} />
+                <NavItem
+                  key={s.key}
+                  active={section === s.key}
+                  label={s.label}
+                  badge={badgeForSectionKey(s.key)}
+                  onClick={() => setSection(s.key)}
+                />
               ))}
 
               <div className="mt-2 pt-3 border-t border-slate-200">
                 <label className="flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
                   <span>Advanced</span>
-                  <input type="checkbox" checked={showAdvanced} onChange={(e) => setShowAdvanced(e.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={showAdvanced}
+                    onChange={(e) => setShowAdvanced(e.target.checked)}
+                  />
                 </label>
 
                 {showAdvanced ? (
@@ -1072,7 +1783,7 @@ const refreshCurrent = useCallback(async () => {
             </div>
 
             <div className="mt-6 pt-4 border-t border-slate-200">
-             <AsyncButton
+              <AsyncButton
                 state={refreshState}
                 text="Refresh"
                 loadingText="Refreshing…"
@@ -1080,7 +1791,10 @@ const refreshCurrent = useCallback(async () => {
                 onClick={refreshCurrent}
                 className="w-full"
               />
-              <div className="mt-3 text-xs text-slate-600">Simple: open Dashboard first.</div>
+              <div className="mt-3 text-xs text-slate-600">
+                Tip: click once anywhere to enable sound + desktop notifications
+                (browser policy).
+              </div>
             </div>
           </aside>
 
@@ -1090,10 +1804,26 @@ const refreshCurrent = useCallback(async () => {
             {section === "dashboard" ? (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                  <StatCard label="Money today" value={dashLoading ? "…" : money(dashTodayTotal)} sub="All methods" />
-                  <StatCard label="Low stock" value={dashLoading ? "…" : String(dashLowStockCount)} sub="Need restock" />
-                  <StatCard label="Stuck sales" value={dashLoading ? "…" : String(dashStuckSalesCount)} sub="Need action" />
-                  <StatCard label="Tip" value="Check stock" sub="Then check sales" />
+                  <StatCard
+                    label="Money today"
+                    value={dashLoading ? "…" : money(dashTodayTotal)}
+                    sub="All methods"
+                  />
+                  <StatCard
+                    label="Low stock"
+                    value={dashLoading ? "…" : String(dashLowStockCount)}
+                    sub="Need restock"
+                  />
+                  <StatCard
+                    label="Stuck sales"
+                    value={dashLoading ? "…" : String(dashStuckSalesCount)}
+                    sub="Need action"
+                  />
+                  <StatCard
+                    label="Pricing gaps"
+                    value={pricingBadge ? pricingBadge : "0"}
+                    sub="Unpriced products"
+                  />
                 </div>
 
                 {dashLoading ? (
@@ -1108,8 +1838,9 @@ const refreshCurrent = useCallback(async () => {
                   <Banner kind="warn">No dashboard data.</Banner>
                 ) : (
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                    <TodayMixWidget breakdown={dash?.payments?.breakdownToday || []} />
-
+                    <TodayMixWidget
+                      breakdown={dash?.payments?.breakdownToday || []}
+                    />
                     <LowStockWidget
                       lowStock={dash?.inventory?.lowStock || []}
                       threshold={dash?.inventory?.lowStockThreshold ?? 5}
@@ -1117,7 +1848,91 @@ const refreshCurrent = useCallback(async () => {
                     />
 
                     <div className="xl:col-span-2">
-                      <StuckSalesWidget stuck={dash?.sales?.stuck || []} rule={dash?.sales?.stuckRule} />
+                      <StuckSalesWidget
+                        stuck={dash?.sales?.stuck || []}
+                        rule={dash?.sales?.stuckRule}
+                        saleDetailsById={saleDetailsById}
+                        ensureSaleDetails={ensureSaleDetails}
+                      />
+                    </div>
+
+                    <div className="xl:col-span-2">
+                      <SectionCard
+                        title="Manager quick actions"
+                        hint="Fast navigation to what blocks operations."
+                      >
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setSection("inv_requests")}
+                            className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-sm font-bold text-slate-900">
+                                Inventory requests
+                              </div>
+                              {invReqPendingCount > 0 ? (
+                                <Pill tone="warn">
+                                  {invReqPendingCount} pending
+                                </Pill>
+                              ) : (
+                                <Pill tone="success">Clear</Pill>
+                              )}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-600">
+                              Approve/decline adjustments.
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setSection("pricing")}
+                            className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-sm font-bold text-slate-900">
+                                Pricing
+                              </div>
+                              {unpricedCount > 0 ? (
+                                <Pill tone="warn">
+                                  {unpricedCount} unpriced
+                                </Pill>
+                              ) : (
+                                <Pill tone="success">All priced</Pill>
+                              )}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-600">
+                              Fix missing selling prices.
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setSection("arrivals")}
+                            className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                          >
+                            <div className="text-sm font-bold text-slate-900">
+                              Stock arrivals
+                            </div>
+                            <div className="mt-1 text-xs text-slate-600">
+                              See recent incoming stock.
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setSection("suppliers")}
+                            className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                          >
+                            <div className="text-sm font-bold text-slate-900">
+                              Suppliers
+                            </div>
+                            <div className="mt-1 text-xs text-slate-600">
+                              Bills + balances.
+                            </div>
+                          </button>
+                        </div>
+                      </SectionCard>
                     </div>
                   </div>
                 )}
@@ -1128,65 +1943,170 @@ const refreshCurrent = useCallback(async () => {
             {section === "sales" ? (
               <SectionCard
                 title="Sales"
-                hint="Shows 10 sales. Tap Load more for more."
+                hint="Shows 10 sales. Load more adds 10. Search is instant."
                 right={
-                  <button
+                  <AsyncButton
+                    variant="secondary"
+                    size="sm"
+                    state={loadingSales ? "loading" : "idle"}
+                    text="Reload"
+                    loadingText="Loading…"
+                    successText="Done"
                     onClick={loadSales}
-                    className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold hover:bg-slate-50"
-                  >
-                    Reload
-                  </button>
+                  />
                 }
               >
                 <div className="grid gap-3">
                   <Input
-                    placeholder="Search: id, status, name, phone"
+                    placeholder="Search: id, status, customer name, phone, tin, address"
                     value={salesQ}
                     onChange={(e) => setSalesQ(e.target.value)}
                   />
 
                   {loadingSales ? (
                     <div className="grid gap-3">
-                      <Skeleton className="h-20 w-full" />
-                      <Skeleton className="h-20 w-full" />
-                      <Skeleton className="h-20 w-full" />
+                      <Skeleton className="h-24 w-full" />
+                      <Skeleton className="h-24 w-full" />
+                      <Skeleton className="h-24 w-full" />
                     </div>
                   ) : (
-                    <div className="grid gap-3">
-                      {salesShown.map((s) => (
-                        <div key={s?.id} className="rounded-2xl border border-slate-200 bg-white p-4">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="text-sm font-bold text-slate-900">Sale #{s?.id ?? "—"}</div>
-                              <div className="mt-1 text-xs text-slate-600">
-                                Status: <b>{String(s?.status ?? "—")}</b> • Time: {fmt(s?.createdAt || s?.created_at)}
-                              </div>
-                              <div className="mt-2 text-xs text-slate-600">
-                                Customer: {(s?.customerName || s?.customer_name || "").trim() || "—"}
-                                {(s?.customerPhone || s?.customer_phone) ? ` • ${s?.customerPhone || s?.customer_phone}` : ""}
-                              </div>
-                            </div>
+                    <>
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                        {salesShown.map((s) => {
+                          const sid = s?.id;
+                          const st = String(s?.status || "—");
+                          const details = sid ? saleDetailsById[sid] : null;
+                          const its = details?.items || s?.items || [];
+                          const isItemsLoading = sid
+                            ? !!saleDetailsLoadingById[sid]
+                            : false;
 
-                            <div className="shrink-0 text-right">
-                              <div className="text-sm font-bold text-slate-900">{money(s?.totalAmount ?? s?.total ?? 0)}</div>
-                              <button
-                                disabled={!canCancelSale(s)}
-                                onClick={() => openCancel(s?.id)}
-                                className={cx(
-                                  "mt-2 rounded-xl px-3 py-2 text-xs font-semibold border",
-                                  canCancelSale(s)
-                                    ? "border-slate-200 hover:bg-slate-50"
-                                    : "border-slate-100 bg-slate-100 text-slate-400 cursor-not-allowed",
-                                )}
-                              >
-                                Cancel
-                              </button>
+                          const customerName =
+                            (
+                              s?.customerName ||
+                              s?.customer_name ||
+                              ""
+                            ).trim() || "—";
+                          const customerPhone = toStr(
+                            s?.customerPhone || s?.customer_phone,
+                          );
+                          const customerTin = getCustomerTin(s);
+                          const customerAddress = getCustomerAddress(s);
+
+                          const top = firstItemLabel(its);
+
+                          return (
+                            <div
+                              key={sid}
+                              className="rounded-2xl border border-slate-200 bg-white p-4"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <div className="text-sm font-extrabold text-slate-900">
+                                      Sale #{sid ?? "—"}
+                                    </div>
+                                    <Pill tone={statusTone(st)}>{st}</Pill>
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-600">
+                                    Time:{" "}
+                                    <b>{fmt(s?.createdAt || s?.created_at)}</b>
+                                  </div>
+                                </div>
+
+                                <div className="text-right">
+                                  <div className="text-xs font-semibold text-slate-600">
+                                    Total
+                                  </div>
+                                  <div className="text-lg font-extrabold text-slate-900">
+                                    {money(s?.totalAmount ?? s?.total ?? 0)}
+                                  </div>
+                                  <div className="text-[11px] text-slate-500">
+                                    RWF
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                  <div className="text-[11px] font-semibold text-slate-600">
+                                    Top item
+                                  </div>
+                                  <div className="mt-1 text-sm font-semibold text-slate-900 truncate">
+                                    {isItemsLoading ? "Loading…" : top.name}
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-600">
+                                    Qty:{" "}
+                                    <b>{isItemsLoading ? "…" : top.qty || 0}</b>
+                                  </div>
+                                </div>
+
+                                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                  <div className="text-[11px] font-semibold text-slate-600">
+                                    Customer
+                                  </div>
+                                  <div className="mt-1 text-sm font-semibold text-slate-900 truncate">
+                                    {customerName}
+                                  </div>
+                                  <div className="mt-1 text-xs text-slate-600">
+                                    {customerPhone ? (
+                                      <span>
+                                        Phone: <b>{customerPhone}</b>
+                                      </span>
+                                    ) : (
+                                      <span>Phone: —</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="mt-2 rounded-xl border border-slate-200 bg-white p-3">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-700">
+                                  <div>
+                                    TIN: <b>{customerTin || "—"}</b>
+                                  </div>
+                                  <div className="truncate">
+                                    Address: <b>{customerAddress || "—"}</b>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="mt-3 flex items-center justify-between gap-2">
+                                <div className="flex gap-2">
+                                  {sid && !details && !isItemsLoading ? (
+                                    <AsyncButton
+                                      variant="secondary"
+                                      size="sm"
+                                      state="idle"
+                                      text="Load items"
+                                      loadingText="Loading…"
+                                      successText="Done"
+                                      onClick={() => ensureSaleDetails(sid)}
+                                    />
+                                  ) : null}
+                                </div>
+
+                                <AsyncButton
+                                  variant="danger"
+                                  size="sm"
+                                  state="idle"
+                                  text="Cancel"
+                                  loadingText="Cancelling…"
+                                  successText="Done"
+                                  disabled={!canCancelSale(s)}
+                                  onClick={() => openCancel(sid)}
+                                />
+                              </div>
                             </div>
-                          </div>
+                          );
+                        })}
+                      </div>
+
+                      {salesShown.length === 0 ? (
+                        <div className="text-sm text-slate-600">
+                          No sales found.
                         </div>
-                      ))}
-
-                      {salesShown.length === 0 ? <div className="text-sm text-slate-600">No sales found.</div> : null}
+                      ) : null}
 
                       {canLoadMoreSales ? (
                         <button
@@ -1197,7 +2117,7 @@ const refreshCurrent = useCallback(async () => {
                           Load more
                         </button>
                       ) : null}
-                    </div>
+                    </>
                   )}
                 </div>
               </SectionCard>
@@ -1208,18 +2128,27 @@ const refreshCurrent = useCallback(async () => {
               <div className="grid gap-4">
                 <SectionCard
                   title="Payments"
-                  hint="This is read-only."
+                  hint="Overview + list. List shows top product + qty from the sale."
                   right={
-                    <button
+                    <AsyncButton
+                      variant="primary"
+                      size="sm"
+                      state={
+                        loadingPayments ||
+                        loadingPaySummary ||
+                        loadingPayBreakdown
+                          ? "loading"
+                          : "idle"
+                      }
+                      text="Refresh"
+                      loadingText="Refreshing…"
+                      successText="Done"
                       onClick={() => {
                         loadPayments();
                         loadPaymentsSummary();
                         loadPaymentsBreakdown();
                       }}
-                      className="rounded-xl bg-slate-900 text-white px-4 py-2 text-sm font-semibold hover:bg-slate-800"
-                    >
-                      Refresh
-                    </button>
+                    />
                   }
                 >
                   <div className="flex flex-wrap gap-2">
@@ -1228,7 +2157,9 @@ const refreshCurrent = useCallback(async () => {
                       onClick={() => setPayView("overview")}
                       className={cx(
                         "rounded-xl border px-4 py-2 text-sm font-semibold",
-                        payView === "overview" ? "bg-slate-900 text-white border-slate-900" : "hover:bg-slate-50",
+                        payView === "overview"
+                          ? "bg-slate-900 text-white border-slate-900"
+                          : "hover:bg-slate-50",
                       )}
                     >
                       Overview
@@ -1238,7 +2169,9 @@ const refreshCurrent = useCallback(async () => {
                       onClick={() => setPayView("list")}
                       className={cx(
                         "rounded-xl border px-4 py-2 text-sm font-semibold",
-                        payView === "list" ? "bg-slate-900 text-white border-slate-900" : "hover:bg-slate-50",
+                        payView === "list"
+                          ? "bg-slate-900 text-white border-slate-900"
+                          : "hover:bg-slate-50",
                       )}
                     >
                       List
@@ -1250,84 +2183,168 @@ const refreshCurrent = useCallback(async () => {
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         <StatCard
                           label="Today"
-                          value={loadingPaySummary ? "…" : String(paymentsSummary?.today?.count ?? 0)}
-                          sub={`Total: ${money(paymentsSummary?.today?.total ?? 0)}`}
+                          value={
+                            loadingPaySummary
+                              ? "…"
+                              : String(paymentsSummary?.today?.count ?? 0)
+                          }
+                          sub={`Total: ${money(paymentsSummary?.today?.total ?? 0)} RWF`}
                         />
                         <StatCard
                           label="Yesterday"
-                          value={loadingPaySummary ? "…" : String(paymentsSummary?.yesterday?.count ?? 0)}
-                          sub={`Total: ${money(paymentsSummary?.yesterday?.total ?? 0)}`}
+                          value={
+                            loadingPaySummary
+                              ? "…"
+                              : String(paymentsSummary?.yesterday?.count ?? 0)
+                          }
+                          sub={`Total: ${money(paymentsSummary?.yesterday?.total ?? 0)} RWF`}
                         />
                         <StatCard
                           label="All time"
-                          value={loadingPaySummary ? "…" : String(paymentsSummary?.allTime?.count ?? 0)}
-                          sub={`Total: ${money(paymentsSummary?.allTime?.total ?? 0)}`}
+                          value={
+                            loadingPaySummary
+                              ? "…"
+                              : String(paymentsSummary?.allTime?.count ?? 0)
+                          }
+                          sub={`Total: ${money(paymentsSummary?.allTime?.total ?? 0)} RWF`}
                         />
                       </div>
 
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                        <PayBreakdownCard title="Today" loading={loadingPayBreakdown} buckets={breakdownTodayTotals} />
-                        <PayBreakdownCard title="Yesterday" loading={loadingPayBreakdown} buckets={breakdownYesterday} />
-                        <PayBreakdownCard title="All time" loading={loadingPayBreakdown} buckets={breakdownAll} />
+                        <PayBreakdownCard
+                          title="Today"
+                          loading={loadingPayBreakdown}
+                          buckets={breakdownTodayTotals}
+                        />
+                        <PayBreakdownCard
+                          title="Yesterday"
+                          loading={loadingPayBreakdown}
+                          buckets={breakdownYesterday}
+                        />
+                        <PayBreakdownCard
+                          title="All time"
+                          loading={loadingPayBreakdown}
+                          buckets={breakdownAll}
+                        />
                       </div>
                     </div>
                   ) : (
                     <div className="mt-4 grid gap-3">
                       <Input
-                        placeholder="Search: id, sale, method, amount"
+                        placeholder="Search: payment id, sale id, method, amount"
                         value={payQ}
                         onChange={(e) => setPayQ(e.target.value)}
                       />
 
                       {loadingPayments ? (
                         <div className="grid gap-3">
-                          <Skeleton className="h-20 w-full" />
-                          <Skeleton className="h-20 w-full" />
-                          <Skeleton className="h-20 w-full" />
+                          <Skeleton className="h-24 w-full" />
+                          <Skeleton className="h-24 w-full" />
+                          <Skeleton className="h-24 w-full" />
                         </div>
                       ) : (
-                        <div className="grid gap-3">
-                          {(filteredPayments || []).slice(0, 80).map((p, idx) => (
-                            <div key={p?.id || idx} className="rounded-2xl border border-slate-200 bg-white p-4">
-                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
-                                <div>
-                                  <div className="text-xs font-semibold text-slate-600">Payment</div>
-                                  <div className="text-sm font-bold text-slate-900">{p?.id ?? "—"}</div>
-                                </div>
+                        <>
+                          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+                            {paymentsWithItems
+                              .filter(({ p }) => {
+                                const qq = String(payQ || "")
+                                  .trim()
+                                  .toLowerCase();
+                                if (!qq) return true;
+                                const id = String(p?.id ?? "");
+                                const saleId = String(
+                                  p?.saleId ?? p?.sale_id ?? "",
+                                );
+                                const method = String(
+                                  p?.method ?? "",
+                                ).toLowerCase();
+                                const amount = String(p?.amount ?? "");
+                                return (
+                                  id.includes(qq) ||
+                                  saleId.includes(qq) ||
+                                  method.includes(qq) ||
+                                  amount.includes(qq)
+                                );
+                              })
+                              .slice(0, 60)
+                              .map(
+                                (
+                                  { p, saleId, topItemName, topItemQty },
+                                  idx,
+                                ) => {
+                                  const method = String(
+                                    p?.method ?? "—",
+                                  ).toUpperCase();
+                                  const amount = Number(p?.amount ?? 0) || 0;
+                                  const time = p?.createdAt || p?.created_at;
 
-                                <div>
-                                  <div className="text-xs font-semibold text-slate-600">Sale</div>
-                                  <div className="text-sm font-semibold text-slate-900">
-                                    #{p?.saleId ?? p?.sale_id ?? "—"}
-                                  </div>
-                                </div>
+                                  return (
+                                    <div
+                                      key={p?.id || idx}
+                                      className="rounded-2xl border border-slate-200 bg-white p-4"
+                                    >
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <div className="text-sm font-extrabold text-slate-900">
+                                              Payment #{p?.id ?? "—"}
+                                            </div>
+                                            <Pill tone="info">{method}</Pill>
+                                          </div>
+                                          <div className="mt-1 text-xs text-slate-600">
+                                            Sale: <b>#{saleId ?? "—"}</b> •
+                                            Time: <b>{fmt(time)}</b>
+                                          </div>
+                                        </div>
 
-                                <div>
-                                  <div className="text-xs font-semibold text-slate-600">Method</div>
-                                  <div className="text-sm text-slate-900">{p?.method ?? "—"}</div>
-                                </div>
+                                        <div className="text-right">
+                                          <div className="text-xs font-semibold text-slate-600">
+                                            Amount
+                                          </div>
+                                          <div className="text-lg font-extrabold text-slate-900">
+                                            {money(amount)}
+                                          </div>
+                                          <div className="text-[11px] text-slate-500">
+                                            RWF
+                                          </div>
+                                        </div>
+                                      </div>
 
-                                <div className="sm:text-right">
-                                  <div className="text-xs font-semibold text-slate-600">Amount</div>
-                                  <div className="text-sm font-bold text-slate-900">{money(p?.amount ?? 0)}</div>
-                                </div>
+                                      <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                        <div className="text-[11px] font-semibold text-slate-600">
+                                          Top item
+                                        </div>
+                                        <div className="mt-1 text-sm font-semibold text-slate-900 truncate">
+                                          {topItemName || "—"}
+                                        </div>
+                                        <div className="mt-1 text-xs text-slate-600">
+                                          Qty: <b>{topItemQty || 0}</b>
+                                        </div>
+                                      </div>
 
-                                <div className="lg:text-right">
-                                  <div className="text-xs font-semibold text-slate-600">Time</div>
-                                  <div className="text-sm text-slate-700">{fmt(p?.createdAt || p?.created_at)}</div>
-                                </div>
-                              </div>
+                                      {toStr(p?.note) ? (
+                                        <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-700">
+                                          <b>Note:</b> {toStr(p.note)}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  );
+                                },
+                              )}
+                          </div>
+
+                          {paymentsWithItems.length === 0 ? (
+                            <div className="text-sm text-slate-600">
+                              No payments.
                             </div>
-                          ))}
-
-                          {(filteredPayments || []).length === 0 ? (
-                            <div className="text-sm text-slate-600">No payments.</div>
                           ) : null}
 
-                          {(filteredPayments || []).length > 80 ? (
-                            <div className="text-xs text-slate-600">Showing first 80 results (to keep it fast).</div>
+                          {paymentsWithItems.length > 60 ? (
+                            <div className="text-xs text-slate-600">
+                              Showing first 60 results (to keep it fast).
+                            </div>
                           ) : null}
-                        </div>
+                        </>
                       )}
                     </div>
                   )}
@@ -1342,18 +2359,25 @@ const refreshCurrent = useCallback(async () => {
                   title="Inventory"
                   hint="Name, SKU, qty, selling price."
                   right={
-                    <button
+                    <AsyncButton
+                      variant="secondary"
+                      size="sm"
+                      state={loadingInv || loadingProd ? "loading" : "idle"}
+                      text="Reload"
+                      loadingText="Loading…"
+                      successText="Done"
                       onClick={() => {
                         loadInventory();
                         loadProducts({ includeInactive: showArchivedProducts });
                       }}
-                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold hover:bg-slate-50"
-                    >
-                      Reload
-                    </button>
+                    />
                   }
                 >
-                  <Input placeholder="Search by name or SKU" value={invQ} onChange={(e) => setInvQ(e.target.value)} />
+                  <Input
+                    placeholder="Search by name or SKU"
+                    value={invQ}
+                    onChange={(e) => setInvQ(e.target.value)}
+                  />
 
                   <div className="mt-3">
                     {loadingInv || loadingProd ? (
@@ -1364,40 +2388,108 @@ const refreshCurrent = useCallback(async () => {
                       </div>
                     ) : (
                       <div className="grid gap-3">
-                        {filteredInventory.map((p, idx) => {
-                          const pid = p?.productId ?? p?.product_id ?? p?.id ?? "—";
-                          const name = p?.productName || p?.product_name || p?.name || "—";
-                          const sku = p?.sku || "—";
-                          const qty = p?.qtyOnHand ?? p?.qty_on_hand ?? p?.qty ?? p?.quantity ?? 0;
-                          const selling = priceFor(p);
+                        {(Array.isArray(inventory) ? inventory : [])
+                          .filter((p) => {
+                            const qq = String(invQ || "")
+                              .trim()
+                              .toLowerCase();
+                            if (!qq) return true;
+                            const name = String(
+                              p?.name ||
+                                p?.productName ||
+                                p?.product_name ||
+                                "",
+                            ).toLowerCase();
+                            const sku = String(p?.sku || "").toLowerCase();
+                            return name.includes(qq) || sku.includes(qq);
+                          })
+                          .map((p, idx) => {
+                            const pid =
+                              p?.productId ?? p?.product_id ?? p?.id ?? "—";
+                            const name =
+                              p?.productName ||
+                              p?.product_name ||
+                              p?.name ||
+                              "—";
+                            const sku = p?.sku || "—";
+                            const qty =
+                              p?.qtyOnHand ??
+                              p?.qty_on_hand ??
+                              p?.qty ??
+                              p?.quantity ??
+                              0;
 
-                          return (
-                            <div key={p?.id || `${pid}-${idx}`} className="rounded-2xl border border-slate-200 bg-white p-4">
-                              <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="text-sm font-bold text-slate-900 truncate">{name}</div>
-                                  <div className="mt-1 text-xs text-slate-600">
-                                    ID: <b>{String(pid)}</b> • SKU: <b>{sku}</b>
-                                  </div>
-                                </div>
+                            const selling = (() => {
+                              const prod =
+                                (pid != null
+                                  ? (Array.isArray(products)
+                                      ? products
+                                      : []
+                                    ).find((x) => String(x?.id) === String(pid))
+                                  : null) ||
+                                (sku
+                                  ? (Array.isArray(products)
+                                      ? products
+                                      : []
+                                    ).find(
+                                      (x) => String(x?.sku) === String(sku),
+                                    )
+                                  : null);
 
-                                <div className="flex gap-4">
-                                  <div className="text-right">
-                                    <div className="text-xs font-semibold text-slate-600">Qty</div>
-                                    <div className="text-sm font-bold text-slate-900">{Number(qty)}</div>
+                              const price =
+                                prod?.sellingPrice ??
+                                prod?.selling_price ??
+                                prod?.price ??
+                                prod?.unitPrice ??
+                                prod?.unit_price ??
+                                null;
+
+                              return price == null ? "—" : money(price);
+                            })();
+
+                            return (
+                              <div
+                                key={p?.id || `${pid}-${idx}`}
+                                className="rounded-2xl border border-slate-200 bg-white p-4"
+                              >
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-bold text-slate-900 truncate">
+                                      {name}
+                                    </div>
+                                    <div className="mt-1 text-xs text-slate-600">
+                                      SKU: <b>{sku}</b>
+                                    </div>
                                   </div>
-                                  <div className="text-right">
-                                    <div className="text-xs font-semibold text-slate-600">Selling</div>
-                                    <div className="text-sm font-bold text-slate-900">{selling}</div>
+
+                                  <div className="flex gap-4">
+                                    <div className="text-right">
+                                      <div className="text-xs font-semibold text-slate-600">
+                                        Qty
+                                      </div>
+                                      <div className="text-sm font-bold text-slate-900">
+                                        {Number(qty)}
+                                      </div>
+                                    </div>
+                                    <div className="text-right">
+                                      <div className="text-xs font-semibold text-slate-600">
+                                        Selling
+                                      </div>
+                                      <div className="text-sm font-bold text-slate-900">
+                                        {selling}
+                                      </div>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
 
-                        {filteredInventory.length === 0 ? (
-                          <div className="text-sm text-slate-600">No inventory items.</div>
+                        {(Array.isArray(inventory) ? inventory : []).length ===
+                        0 ? (
+                          <div className="text-sm text-slate-600">
+                            No inventory items.
+                          </div>
                         ) : null}
                       </div>
                     )}
@@ -1412,7 +2504,9 @@ const refreshCurrent = useCallback(async () => {
                       <input
                         type="checkbox"
                         checked={showArchivedProducts}
-                        onChange={(e) => setShowArchivedProducts(e.target.checked)}
+                        onChange={(e) =>
+                          setShowArchivedProducts(e.target.checked)
+                        }
                       />
                       Show archived
                     </label>
@@ -1433,55 +2527,99 @@ const refreshCurrent = useCallback(async () => {
                       </div>
                     ) : (
                       <div className="grid gap-3">
-                        {filteredProducts.map((p) => {
-                          const archived = isArchivedProduct(p);
-                          const selling =
-                            p?.sellingPrice ??
-                            p?.selling_price ??
-                            p?.price ??
-                            p?.unitPrice ??
-                            p?.unit_price ??
-                            null;
+                        {(Array.isArray(products) ? products : [])
+                          .filter((p) => {
+                            const qq = String(prodQ || "")
+                              .trim()
+                              .toLowerCase();
+                            const byToggle = showArchivedProducts
+                              ? isArchivedProduct(p)
+                              : !isArchivedProduct(p);
+                            if (!byToggle) return false;
+                            if (!qq) return true;
 
-                          return (
-                            <div key={p?.id} className="rounded-2xl border border-slate-200 bg-white p-4">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="text-sm font-bold text-slate-900 truncate">
-                                    {p?.name || p?.productName || p?.title || "—"}
-                                  </div>
-                                  <div className="mt-1 text-xs text-slate-600">
-                                    ID: <b>{p?.id ?? "—"}</b> • SKU: <b>{p?.sku || "—"}</b>
-                                  </div>
-                                  <div className="mt-1 text-xs text-slate-600">
-                                    Selling: <b>{selling == null ? "—" : money(selling)}</b>
-                                  </div>
-                                </div>
+                            const id = String(p?.id ?? "");
+                            const name = String(
+                              p?.name || p?.productName || p?.title || "",
+                            ).toLowerCase();
+                            const sku = String(p?.sku || "").toLowerCase();
+                            return (
+                              id.includes(qq) ||
+                              name.includes(qq) ||
+                              sku.includes(qq)
+                            );
+                          })
+                          .map((p) => {
+                            const archived = isArchivedProduct(p);
+                            const selling =
+                              p?.sellingPrice ??
+                              p?.selling_price ??
+                              p?.price ??
+                              p?.unitPrice ??
+                              p?.unit_price ??
+                              null;
+                            const isUnpriced =
+                              selling == null ||
+                              !Number.isFinite(Number(selling)) ||
+                              Number(selling) <= 0;
 
-                                <div className="shrink-0">
-                                  {archived ? (
-                                    <button
-                                      onClick={() => openRestoreProduct(p)}
-                                      className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50"
-                                    >
-                                      Restore
-                                    </button>
-                                  ) : (
-                                    <button
-                                      onClick={() => openArchiveProduct(p)}
-                                      className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50"
-                                    >
-                                      Archive
-                                    </button>
-                                  )}
+                            return (
+                              <div
+                                key={p?.id}
+                                className="rounded-2xl border border-slate-200 bg-white p-4"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <div className="text-sm font-bold text-slate-900 truncate">
+                                        {p?.name ||
+                                          p?.productName ||
+                                          p?.title ||
+                                          "—"}
+                                      </div>
+                                      {archived ? (
+                                        <Pill tone="danger">ARCHIVED</Pill>
+                                      ) : (
+                                        <Pill tone="success">ACTIVE</Pill>
+                                      )}
+                                      {isUnpriced ? (
+                                        <Pill tone="warn">UNPRICED</Pill>
+                                      ) : null}
+                                    </div>
+
+                                    <div className="mt-1 text-xs text-slate-600">
+                                      SKU: <b>{p?.sku || "—"}</b> • Selling:{" "}
+                                      <b>
+                                        {selling == null ? "—" : money(selling)}
+                                      </b>
+                                    </div>
+                                  </div>
+
+                                  <div className="shrink-0">
+                                    <AsyncButton
+                                      variant="secondary"
+                                      size="sm"
+                                      state="idle"
+                                      text={archived ? "Restore" : "Archive"}
+                                      loadingText="Working…"
+                                      successText="Done"
+                                      onClick={() =>
+                                        archived
+                                          ? openRestoreProduct(p)
+                                          : openArchiveProduct(p)
+                                      }
+                                    />
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
 
-                        {filteredProducts.length === 0 ? (
-                          <div className="text-sm text-slate-600">No products here.</div>
+                        {(Array.isArray(products) ? products : []).length ===
+                        0 ? (
+                          <div className="text-sm text-slate-600">
+                            No products.
+                          </div>
                         ) : null}
                       </div>
                     )}
@@ -1492,14 +2630,45 @@ const refreshCurrent = useCallback(async () => {
 
             {/* PRICING */}
             {section === "pricing" ? (
-              <SectionCard title="Pricing" hint="Set selling prices.">
+              <SectionCard
+                title="Pricing"
+                hint="Set selling prices."
+                right={
+                  unpricedCount > 0 ? (
+                    <Pill tone="warn">{unpricedCount} unpriced</Pill>
+                  ) : (
+                    <Pill tone="success">All priced</Pill>
+                  )
+                }
+              >
                 <ProductPricingPanel key={`pricing-${refreshNonce}`} />
               </SectionCard>
             ) : null}
 
             {/* INVENTORY REQUESTS */}
             {section === "inv_requests" ? (
-              <SectionCard title="Inventory requests" hint="Approve or decline stock requests.">
+              <SectionCard
+                title="Inventory requests"
+                hint="Approve or decline requests. Badge shows pending (PENDING) only."
+                right={
+                  <div className="flex items-center gap-2">
+                    {invReqPendingCount > 0 ? (
+                      <Pill tone="warn">{invReqPendingCount} pending</Pill>
+                    ) : (
+                      <Pill tone="success">Clear</Pill>
+                    )}
+                    <AsyncButton
+                      variant="secondary"
+                      size="sm"
+                      state={invReqCountLoading ? "loading" : "idle"}
+                      text="Refresh count"
+                      loadingText="Refreshing…"
+                      successText="Done"
+                      onClick={loadInvReqPendingCount}
+                    />
+                  </div>
+                }
+              >
                 <InventoryAdjustRequestsPanel key={`invreq-${refreshNonce}`} />
               </SectionCard>
             ) : null}
@@ -1508,14 +2677,17 @@ const refreshCurrent = useCallback(async () => {
             {section === "arrivals" ? (
               <SectionCard
                 title="Stock arrivals"
-                hint="New stock that came in (with files)."
+                hint="Shows product name + qty. Grid view."
                 right={
-                  <button
+                  <AsyncButton
+                    variant="secondary"
+                    size="sm"
+                    state={loadingArrivals ? "loading" : "idle"}
+                    text="Reload"
+                    loadingText="Loading…"
+                    successText="Done"
                     onClick={loadArrivals}
-                    className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold hover:bg-slate-50"
-                  >
-                    {loadingArrivals ? "Loading…" : "Reload"}
-                  </button>
+                  />
                 }
               >
                 {loadingArrivals ? (
@@ -1525,41 +2697,79 @@ const refreshCurrent = useCallback(async () => {
                     <Skeleton className="h-20 w-full" />
                   </div>
                 ) : (
-                  <div className="grid gap-3">
-                    {(arrivals || []).map((a) => {
-                      const id = a?.id ?? "—";
-                      const productId = a?.productId ?? a?.product_id ?? "—";
-                      const qty = a?.qtyReceived ?? a?.qty_received ?? "—";
-                      const when = fmt(a?.createdAt || a?.created_at);
-
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {arrivalsNormalized.map((a) => {
+                      const raw = a.raw;
                       return (
-                        <details key={id} className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <details
+                          key={String(a.id)}
+                          className="rounded-2xl border border-slate-200 bg-white p-4"
+                        >
                           <summary className="cursor-pointer list-none">
-                            <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <div className="text-sm font-bold text-slate-900">Arrival #{id}</div>
+                                <div className="text-sm font-extrabold text-slate-900 truncate">
+                                  {a.productName}
+                                </div>
                                 <div className="mt-1 text-xs text-slate-600">
-                                  Product: <b>#{productId}</b> • Qty: <b>{qty}</b>
+                                  Qty: <b>{String(a.qty)}</b>
+                                </div>
+                                <div className="mt-1 text-xs text-slate-500">
+                                  {a.when}
                                 </div>
                               </div>
-                              <div className="text-xs text-slate-500">{when}</div>
+                              <div className="text-right">
+                                <div className="text-xs text-slate-600">
+                                  Arrival
+                                </div>
+                                <div className="text-sm font-bold text-slate-900">
+                                  #{a.id}
+                                </div>
+                              </div>
                             </div>
                           </summary>
 
                           <div className="mt-4 grid gap-3">
-                            {a?.notes ? (
+                            {raw?.notes ? (
                               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                                <b>Notes:</b> {a.notes}
+                                <b>Notes:</b> {raw.notes}
                               </div>
                             ) : null}
 
                             <div>
-                              <div className="text-xs font-semibold text-slate-600">Files</div>
+                              <div className="text-xs font-semibold text-slate-600">
+                                Files
+                              </div>
                               <div className="mt-2 flex flex-wrap gap-2">
-                                {Array.isArray(a?.documents) && a.documents.length > 0 ? (
-                                  a.documents.map((d) => <ArrivalDocCard key={d?.id || d?.fileUrl || d?.url} doc={d} />)
+                                {Array.isArray(raw?.documents) &&
+                                raw.documents.length > 0 ? (
+                                  raw.documents.map((d) => (
+                                    <a
+                                      key={d?.id || d?.fileUrl || d?.url}
+                                      href={(() => {
+                                        const rawUrl =
+                                          d?.fileUrl || d?.url || "";
+                                        if (!rawUrl) return "#";
+                                        const API_BASE =
+                                          process.env
+                                            .NEXT_PUBLIC_API_BASE_URL ||
+                                          process.env.NEXT_PUBLIC_API_BASE ||
+                                          "http://localhost:4000";
+                                        return /^https?:\/\//i.test(rawUrl)
+                                          ? rawUrl
+                                          : `${String(API_BASE).replace(/\/$/, "")}${rawUrl.startsWith("/") ? "" : "/"}${rawUrl}`;
+                                      })()}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50"
+                                    >
+                                      Open file
+                                    </a>
+                                  ))
                                 ) : (
-                                  <div className="text-sm text-slate-600">No files.</div>
+                                  <div className="text-sm text-slate-600">
+                                    No files.
+                                  </div>
                                 )}
                               </div>
                             </div>
@@ -1568,36 +2778,78 @@ const refreshCurrent = useCallback(async () => {
                       );
                     })}
 
-                    {(arrivals || []).length === 0 ? (
-                      <div className="text-sm text-slate-600">No arrivals yet.</div>
+                    {arrivalsNormalized.length === 0 ? (
+                      <div className="text-sm text-slate-600">
+                        No arrivals yet.
+                      </div>
                     ) : null}
                   </div>
                 )}
               </SectionCard>
             ) : null}
 
+            {/* SUPPLIERS */}
+            {section === "suppliers" ? (
+              <SuppliersPanel
+                title="Suppliers"
+                subtitle="Manager: bills only. Supplier creation and payments are handled by Owner/Admin."
+                capabilities={{
+                  canCreateSupplier: false,
+                  canCreateBill: true,
+                  canRecordBillPayment: false,
+                }}
+                endpoints={{
+                  SUPPLIERS_LIST: ENDPOINTS.SUPPLIERS_LIST,
+                  SUPPLIER_CREATE: ENDPOINTS.SUPPLIER_CREATE,
+                  SUPPLIER_SUMMARY: ENDPOINTS.SUPPLIER_SUMMARY,
+                  SUPPLIER_BILLS_LIST: ENDPOINTS.SUPPLIER_BILLS_LIST,
+                  SUPPLIER_BILL_CREATE: ENDPOINTS.SUPPLIER_BILL_CREATE,
+                }}
+              />
+            ) : null}
+
             {/* CASH REPORTS */}
             {section === "cash_reports" ? (
-              <SectionCard title="Cash reports" hint="Cash summary for this location.">
-                <CashReportsPanel key={`cash-${refreshNonce}`} title="Manager Cash Reports" />
+              <SectionCard
+                title="Cash reports"
+                hint="Cash summary for this location."
+              >
+                <CashReportsPanel
+                  key={`cash-${refreshNonce}`}
+                  title="Manager Cash Reports"
+                />
               </SectionCard>
             ) : null}
 
             {/* CREDITS */}
             {section === "credits" ? (
-              <SectionCard title="Credits" hint="Approve or decline credit requests.">
-               <CreditsPanel
+              <SectionCard
+                title="Credits"
+                hint="Approve or decline credit requests."
+              >
+                <CreditsPanel
                   key={`credits-${refreshNonce}`}
                   title="Credits (Manager)"
-                  capabilities={{ canView: true, canCreate: false, canDecide: true, canSettle: false }}
+                  capabilities={{
+                    canView: true,
+                    canCreate: false,
+                    canDecide: true,
+                    canSettle: false,
+                  }}
                 />
               </SectionCard>
             ) : null}
 
             {/* STAFF */}
             {section === "staff" ? (
-              <SectionCard title="Staff" hint="Online status needs backend data (like lastSeenAt).">
-                <ManagerUsersPanel key={`staff-${refreshNonce}`} title="Staff list (view-only)" />
+              <SectionCard
+                title="Staff"
+                hint="Online status depends on backend lastSeenAt."
+              >
+                <ManagerUsersPanel
+                  key={`staff-${refreshNonce}`}
+                  title="Staff list (view-only)"
+                />
                 <div className="mt-3 text-xs text-slate-600">
                   For real “Online / Last seen”, backend must send lastSeenAt.
                 </div>
@@ -1607,184 +2859,205 @@ const refreshCurrent = useCallback(async () => {
             {/* ADVANCED: AUDIT */}
             {section === "audit" ? (
               <SectionCard title="Actions history" hint="Read-only logs.">
-                <AuditLogsPanel key={`audit-${refreshNonce}`} title="Actions history" subtitle="Manager view (read-only)." defaultLimit={50}
-                currentLocationLabel={locationLabel(me)}
+                <AuditLogsPanel
+                  key={`audit-${refreshNonce}`}
+                  title="Actions history"
+                  subtitle="Manager view (read-only)."
+                  defaultLimit={50}
+                  currentLocationLabel={locationLabel(me)}
                 />
               </SectionCard>
             ) : null}
 
             {/* ADVANCED: EVIDENCE */}
-           {section === "evidence" ? (
- <SectionCard 
- key={`evidence-${refreshNonce}`}
-    title="Proof & History"
-    hint="Use this only when something looks wrong. It shows what happened, when it happened, and who did it."
-  >
-    <div className="grid gap-4">
-      {/* Friendly explanation */}
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-800">
-        <div className="font-semibold text-slate-900">What is this?</div>
-        <div className="mt-1 text-slate-700">
-          This is a <b>proof page</b>. It helps you confirm:
-          <ul className="list-disc ml-5 mt-2 text-slate-700">
-            <li><b>What changed</b> (price, stock, sale, payment, refund…)</li>
-            <li><b>Who did it</b> (which staff member)</li>
-            <li><b>When it happened</b></li>
-          </ul>
-        </div>
-        <div className="mt-2 text-xs text-slate-600">
-          Tip: Start by choosing the record below. You don’t need to type anything.
-        </div>
-      </div>
+            {section === "evidence" ? (
+              <SectionCard
+                key={`evidence-${refreshNonce}`}
+                title="Proof & History"
+                hint="Use this only when something looks wrong. It shows what happened, when it happened, and who did it."
+              >
+                <div className="grid gap-4">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-800">
+                    <div className="font-semibold text-slate-900">
+                      What is this?
+                    </div>
+                    <div className="mt-1 text-slate-700">
+                      This is a <b>proof page</b>. It helps you confirm what
+                      changed, who did it, and when it happened.
+                    </div>
+                  </div>
 
-      {/* Main filters */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div>
-          <div className="text-xs font-semibold text-slate-600 mb-1">What are you checking?</div>
-          <Select
-            value={evEntity}
-            onChange={(e) => setEvEntity(e.target.value)}
-            aria-label="Select record type"
-          >
-            <option value="sale">Sales</option>
-            <option value="payment">Payments</option>
-            <option value="refund">Refunds</option>
-            <option value="credit">Credits</option>
-            <option value="cash_session">Cash sessions</option>
-            <option value="expense">Expenses</option>
-            <option value="deposit">Deposits</option>
-            <option value="inventory">Inventory</option>
-            <option value="product">Products</option>
-            <option value="user">Staff</option>
-          </Select>
-        </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <div className="text-xs font-semibold text-slate-600 mb-1">
+                        What are you checking?
+                      </div>
+                      <Select
+                        value={evEntity}
+                        onChange={(e) => setEvEntity(e.target.value)}
+                        aria-label="Select record type"
+                      >
+                        <option value="sale">Sales</option>
+                        <option value="payment">Payments</option>
+                        <option value="refund">Refunds</option>
+                        <option value="credit">Credits</option>
+                        <option value="cash_session">Cash sessions</option>
+                        <option value="expense">Expenses</option>
+                        <option value="deposit">Deposits</option>
+                        <option value="inventory">Inventory</option>
+                        <option value="product">Products</option>
+                        <option value="user">Staff</option>
+                      </Select>
+                    </div>
 
-        <div className="md:col-span-2">
-          <div className="text-xs font-semibold text-slate-600 mb-1">Choose the record (no typing)</div>
+                    <div className="md:col-span-2">
+                      <div className="text-xs font-semibold text-slate-600 mb-1">
+                        Choose the record
+                      </div>
+                      {Array.isArray(evCandidates) &&
+                      evCandidates.length > 0 ? (
+                        <Select
+                          value={String(evEntityId || "")}
+                          onChange={(e) => setEvEntityId(e.target.value)}
+                          aria-label="Select a record"
+                        >
+                          <option value="">Select one…</option>
+                          {evCandidates.map((c) => (
+                            <option key={String(c.id)} value={String(c.id)}>
+                              {c.label}
+                            </option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-600">
+                          {evCandidatesLoading
+                            ? "Loading…"
+                            : "No records found."}
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
-          {/* If you haven't added the picker states/hook below, keep this Input as a fallback */}
-          {Array.isArray(evCandidates) && evCandidates.length > 0 ? (
-            <Select
-              value={String(evEntityId || "")}
-              onChange={(e) => setEvEntityId(e.target.value)}
-              aria-label="Select a record"
-            >
-              <option value="">Select one…</option>
-              {evCandidates.map((c) => (
-                <option key={String(c.id)} value={String(c.id)}>
-                  {c.label}
-                </option>
-              ))}
-            </Select>
-          ) : (
-            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-600">
-              {evCandidatesLoading ? "Loading records…" : "No records found for this type (try another type or date range)."}
-            </div>
-          )}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <div>
+                      <div className="text-xs font-semibold text-slate-600 mb-1">
+                        From
+                      </div>
+                      <Input
+                        type="date"
+                        value={evFrom}
+                        onChange={(e) => setEvFrom(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-slate-600 mb-1">
+                        To
+                      </div>
+                      <Input
+                        type="date"
+                        value={evTo}
+                        onChange={(e) => setEvTo(e.target.value)}
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <div className="text-xs font-semibold text-slate-600 mb-1">
+                        Staff member (optional)
+                      </div>
+                      {Array.isArray(evStaff) && evStaff.length > 0 ? (
+                        <Select
+                          value={evUserId}
+                          onChange={(e) => setEvUserId(e.target.value)}
+                        >
+                          <option value="">Any staff</option>
+                          {evStaff.map((u) => (
+                            <option key={String(u.id)} value={String(u.id)}>
+                              {u.name} — {u.email}
+                            </option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-600">
+                          {evStaffLoading
+                            ? "Loading…"
+                            : "Staff list not available."}
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
-          {/* Hidden field keeps existing evidence URL logic working */}
-          <input type="hidden" value={String(evEntityId || "")} readOnly />
-        </div>
-      </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="md:col-span-2">
+                      <div className="text-xs font-semibold text-slate-600 mb-1">
+                        Search words (optional)
+                      </div>
+                      <Input
+                        placeholder="Example: cancelled, price change"
+                        value={evQ}
+                        onChange={(e) => setEvQ(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-slate-600 mb-1">
+                        Results limit
+                      </div>
+                      <Select
+                        value={String(evLimit)}
+                        onChange={(e) =>
+                          setEvLimit(Number(e.target.value || 200))
+                        }
+                      >
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                        <option value="300">300</option>
+                      </Select>
+                    </div>
+                  </div>
 
-      {/* Time + staff */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <div>
-          <div className="text-xs font-semibold text-slate-600 mb-1">From</div>
-          <Input type="date" value={evFrom} onChange={(e) => setEvFrom(e.target.value)} />
-        </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      className="rounded-xl bg-slate-900 text-white px-4 py-2.5 text-sm font-semibold hover:bg-slate-800"
+                      onClick={() => {
+                        const id = String(evEntityId || "").trim();
+                        if (!id) {
+                          toast("warn", "Please choose a record first.");
+                          return;
+                        }
+                        router.push(
+                          buildEvidenceUrl({
+                            entity: evEntity,
+                            entityId: id,
+                            from: evFrom,
+                            to: evTo,
+                            userId: evUserId,
+                            q: evQ,
+                            limit: evLimit,
+                          }),
+                        );
+                      }}
+                    >
+                      View proof →
+                    </button>
 
-        <div>
-          <div className="text-xs font-semibold text-slate-600 mb-1">To</div>
-          <Input type="date" value={evTo} onChange={(e) => setEvTo(e.target.value)} />
-        </div>
-
-        <div className="md:col-span-2">
-          <div className="text-xs font-semibold text-slate-600 mb-1">Staff member (optional)</div>
-          {Array.isArray(evStaff) && evStaff.length > 0 ? (
-            <Select value={evUserId} onChange={(e) => setEvUserId(e.target.value)}>
-              <option value="">Any staff</option>
-              {evStaff.map((u) => (
-                <option key={String(u.id)} value={String(u.id)}>
-                  {u.name} — {u.email}
-                </option>
-              ))}
-            </Select>
-          ) : (
-            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-600">
-              {evStaffLoading ? "Loading staff…" : "Staff list not available."}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Optional search */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="md:col-span-2">
-          <div className="text-xs font-semibold text-slate-600 mb-1">Search words (optional)</div>
-          <Input
-            placeholder="Example: cancelled, price change, refund"
-            value={evQ}
-            onChange={(e) => setEvQ(e.target.value)}
-          />
-        </div>
-
-        <div>
-          <div className="text-xs font-semibold text-slate-600 mb-1">Results (advanced)</div>
-          <Select value={String(evLimit)} onChange={(e) => setEvLimit(Number(e.target.value || 200))}>
-            <option value="50">50 rows</option>
-            <option value="100">100 rows</option>
-            <option value="200">200 rows</option>
-            <option value="300">300 rows</option>
-          </Select>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          className="rounded-xl bg-slate-900 text-white px-4 py-2.5 text-sm font-semibold hover:bg-slate-800"
-          onClick={() => {
-            const id = String(evEntityId || "").trim();
-            if (!id) {
-              toast("warn", "Please choose a record first.");
-              return;
-            }
-
-            router.push(
-              buildEvidenceUrl({
-                entity: evEntity,
-                entityId: id,
-                from: evFrom,
-                to: evTo,
-                userId: evUserId,
-                q: evQ,
-                limit: evLimit,
-              })
-            );
-          }}
-        >
-          View proof →
-        </button>
-
-        <button
-          className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"
-          onClick={() => {
-            setEvEntity("sale");
-            setEvEntityId("");
-            setEvFrom("");
-            setEvTo("");
-            setEvUserId("");
-            setEvQ("");
-            setEvLimit(200);
-            toast("info", "");
-          }}
-        >
-          Clear
-        </button>
-      </div>
-    </div>
-  </SectionCard>
-) : null}
+                    <button
+                      className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"
+                      onClick={() => {
+                        setEvEntity("sale");
+                        setEvEntityId("");
+                        setEvFrom("");
+                        setEvTo("");
+                        setEvUserId("");
+                        setEvQ("");
+                        setEvLimit(200);
+                        toast("info", "");
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              </SectionCard>
+            ) : null}
           </main>
         </div>
       </div>
@@ -1794,8 +3067,12 @@ const refreshCurrent = useCallback(async () => {
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm max-w-md w-full overflow-hidden">
             <div className="p-4 border-b border-slate-200">
-              <div className="text-sm font-semibold text-slate-900">Cancel sale #{cancelSaleId}</div>
-              <div className="text-xs text-slate-600 mt-1">Rule: do NOT cancel COMPLETED sales.</div>
+              <div className="text-sm font-semibold text-slate-900">
+                Cancel sale #{cancelSaleId}
+              </div>
+              <div className="text-xs text-slate-600 mt-1">
+                Rule: do NOT cancel COMPLETED sales.
+              </div>
             </div>
 
             <div className="p-4">
@@ -1811,20 +3088,22 @@ const refreshCurrent = useCallback(async () => {
                     setCancelOpen(false);
                     setCancelSaleId(null);
                     setCancelReason("");
+                    setCancelingState("idle");
                   }}
                   className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"
-                  disabled={canceling}
+                  disabled={cancelingState === "loading"}
                 >
                   Close
                 </button>
 
-                <button
+                <AsyncButton
+                  variant="danger"
+                  state={cancelingState}
+                  text="Confirm cancel"
+                  loadingText="Cancelling…"
+                  successText="Cancelled"
                   onClick={confirmCancel}
-                  className="rounded-xl bg-rose-600 text-white px-4 py-2.5 text-sm font-semibold hover:bg-rose-700 disabled:opacity-60"
-                  disabled={canceling}
-                >
-                  {canceling ? "Cancelling…" : "Confirm cancel"}
-                </button>
+                />
               </div>
             </div>
           </div>
@@ -1837,10 +3116,15 @@ const refreshCurrent = useCallback(async () => {
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm max-w-md w-full overflow-hidden">
             <div className="p-4 border-b border-slate-200">
               <div className="text-sm font-semibold text-slate-900">
-                {archMode === "archive" ? "Archive" : "Restore"} product #{archProduct?.id}
+                {archMode === "archive" ? "Archive" : "Restore"} product #
+                {archProduct?.id}
               </div>
               <div className="text-xs text-slate-600 mt-1">
-                Product: {archProduct?.name || archProduct?.productName || archProduct?.title || "—"}
+                Product:{" "}
+                {archProduct?.name ||
+                  archProduct?.productName ||
+                  archProduct?.title ||
+                  "—"}
               </div>
             </div>
 
@@ -1852,7 +3136,9 @@ const refreshCurrent = useCallback(async () => {
                   onChange={(e) => setArchReason(e.target.value)}
                 />
               ) : (
-                <div className="text-sm text-slate-700">This will make the product active again.</div>
+                <div className="text-sm text-slate-700">
+                  This will make the product active again.
+                </div>
               )}
 
               <div className="mt-4 flex gap-2 justify-end">
@@ -1861,150 +3147,31 @@ const refreshCurrent = useCallback(async () => {
                     setArchOpen(false);
                     setArchProduct(null);
                     setArchReason("");
+                    setArchState("idle");
                   }}
                   className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"
-                  disabled={archBusy}
+                  disabled={archState === "loading"}
                 >
                   Close
                 </button>
 
-                <button
+                <AsyncButton
+                  variant={archMode === "archive" ? "primary" : "success"}
+                  state={archState}
+                  text={
+                    archMode === "archive"
+                      ? "Confirm archive"
+                      : "Confirm restore"
+                  }
+                  loadingText="Working…"
+                  successText="Done"
                   onClick={confirmArchiveRestore}
-                  className={cx(
-                    "rounded-xl px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60",
-                    archMode === "archive" ? "bg-slate-900 hover:bg-slate-800" : "bg-emerald-600 hover:bg-emerald-700",
-                  )}
-                  disabled={archBusy}
-                >
-                  {archBusy ? "Working…" : archMode === "archive" ? "Confirm archive" : "Confirm restore"}
-                </button>
+                />
               </div>
             </div>
           </div>
         </div>
       ) : null}
     </div>
-  );
-}
-
-/* ---------- Widgets ---------- */
-
-function PayBreakdownCard({ title, loading, buckets }) {
-  const order = ["CASH", "MOMO", "BANK", "CARD", "OTHER"];
-  const total = order.reduce((s, k) => s + Number(buckets?.[k]?.total || 0), 0);
-
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-      <div className="text-sm font-semibold text-slate-900">{title}</div>
-      <div className="mt-1 text-xs text-slate-600">Total: {loading ? "…" : money(total)}</div>
-
-      <div className="mt-3 grid gap-2">
-        {order.map((k) => (
-          <div key={k} className="flex items-center justify-between text-sm">
-            <div className="text-slate-700">{k}</div>
-            <div className="text-slate-900 font-semibold">{loading ? "…" : money(buckets?.[k]?.total || 0)}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TodayMixWidget({ breakdown }) {
-  const buckets = useMemo(() => sumBreakdown(breakdown || []), [breakdown]);
-  const totalToday = Object.values(buckets).reduce((s, x) => s + Number(x.total || 0), 0);
-
-  function pct(total) {
-    const t = Number(total || 0);
-    if (!Number.isFinite(t) || t <= 0) return 0;
-    if (totalToday <= 0) return 0;
-    return Math.round((t / totalToday) * 100);
-  }
-
-  return (
-    <SectionCard title="Today payment mix" hint="How money came in today.">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        {["CASH", "MOMO", "BANK", "CARD", "OTHER"].map((k) => (
-          <div key={k} className="rounded-2xl border border-slate-200 bg-white p-3">
-            <div className="text-xs font-semibold text-slate-600">{k}</div>
-            <div className="mt-1 text-lg font-bold text-slate-900">{buckets[k].count}</div>
-            <div className="text-sm text-slate-700 mt-1">Total: {money(buckets[k].total)}</div>
-            <div className="text-xs text-slate-500 mt-1">{pct(buckets[k].total)}%</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-4 text-sm text-slate-700">
-        <b>Today total:</b> {money(totalToday)}
-      </div>
-    </SectionCard>
-  );
-}
-
-function LowStockWidget({ lowStock, threshold, products }) {
-  function nameFor(productId) {
-    const pid = String(productId || "");
-    const p = (Array.isArray(products) ? products : []).find((x) => String(x?.id) === pid) || null;
-    return p?.name || p?.productName || p?.title || `Product #${pid}`;
-  }
-
-  return (
-    <SectionCard title="Low stock" hint={`Items with qty ≤ ${threshold}.`}>
-      <div className="grid gap-2">
-        {(Array.isArray(lowStock) ? lowStock : []).map((r, idx) => (
-          <div key={`${r?.productId || idx}`} className="rounded-2xl border border-slate-200 bg-white p-3">
-            <div className="text-sm font-semibold text-slate-900">{nameFor(r?.productId)}</div>
-            <div className="mt-1 text-xs text-slate-600">
-              ID: <b>{r?.productId ?? "—"}</b> • Qty: <b>{Number(r?.qtyOnHand ?? r?.qty_on_hand ?? 0)}</b>
-            </div>
-          </div>
-        ))}
-
-        {(Array.isArray(lowStock) ? lowStock : []).length === 0 ? (
-          <div className="text-sm text-slate-600">No low stock alerts.</div>
-        ) : null}
-      </div>
-    </SectionCard>
-  );
-}
-
-function StuckSalesWidget({ stuck, rule }) {
-  function ageLabel(seconds) {
-    const s = Number(seconds || 0);
-    if (!Number.isFinite(s) || s <= 0) return "—";
-    const mins = Math.floor(s / 60);
-    const hrs = Math.floor(mins / 60);
-    const days = Math.floor(hrs / 24);
-    if (days > 0) return `${days}d ${hrs % 24}h`;
-    if (hrs > 0) return `${hrs}h ${mins % 60}m`;
-    return `${mins}m`;
-  }
-
-  return (
-    <SectionCard title="Stuck sales" hint={`Rule: ${rule || "aging sales"}.`}>
-      <div className="grid gap-3">
-        {(Array.isArray(stuck) ? stuck : []).map((s, idx) => (
-          <div key={s?.id || idx} className="rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-bold text-slate-900">Sale #{s?.id ?? "—"}</div>
-                <div className="mt-1 text-xs text-slate-600">
-                  Status: <b>{s?.status ?? "—"}</b> • Age: <b>{ageLabel(s?.ageSeconds)}</b>
-                </div>
-                <div className="mt-1 text-xs text-slate-600">Created: {fmt(s?.createdAt)}</div>
-              </div>
-              <div className="text-right">
-                <div className="text-xs font-semibold text-slate-600">Total</div>
-                <div className="text-sm font-bold text-slate-900">{money(s?.totalAmount ?? 0)}</div>
-              </div>
-            </div>
-          </div>
-        ))}
-
-        {(Array.isArray(stuck) ? stuck : []).length === 0 ? (
-          <div className="text-sm text-slate-600">No stuck sales (good).</div>
-        ) : null}
-      </div>
-    </SectionCard>
   );
 }
