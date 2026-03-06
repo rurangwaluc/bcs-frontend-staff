@@ -1,6 +1,3 @@
-// ✅ PASTE THIS WHOLE FILE INTO:
-// frontend-staff/src/app/seller/page.js
-
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -24,9 +21,8 @@ import { useRouter } from "next/navigation";
  *      ✅ Backend converts to AWAITING_PAYMENT_RECORD
  *      ✅ Cashier later records the actual payment and sale becomes COMPLETED
  *
- * Important constraints (backend):
- * - Installments are NOT possible yet because payments has uniqSale index (payments_sale_unique).
- * - This UI displays credit “Paid/Remaining” using listSales.amountPaid (SUM(payments.amount)).
+ * Notes:
+ * - Installments NOT possible yet if payments has uniqSale index (payments_sale_unique).
  */
 
 const ENDPOINTS = {
@@ -52,6 +48,8 @@ const SECTIONS = [
   { key: "credits", label: "Credits" },
 ];
 
+const NOTIFY_POLL_MS = 20_000; // lightweight; only used to detect status changes and show toast
+
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
@@ -66,10 +64,100 @@ function toInt(v) {
   return Number.isFinite(n) ? Math.round(n) : 0;
 }
 
+function formatWhen(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleString();
+}
+
 function money(n) {
   const x = Number(n ?? 0);
-  if (!Number.isFinite(x)) return "0";
-  return Math.round(x).toLocaleString();
+  return Number.isFinite(x) ? Math.round(x).toLocaleString() : "0";
+}
+
+function CreditSummary({ sale }) {
+  const credit = sale?.credit || null;
+  const status = String(credit?.status || sale?.status || "").toUpperCase();
+
+  // amounts
+  const total = Number(credit?.amount ?? sale?.totalAmount ?? 0) || 0;
+  const paid = Number(sale?.amountPaid ?? credit?.paidAmount ?? 0) || 0;
+  const remaining = Math.max(0, total - paid);
+
+  // dates (available in your JSON)
+  const issuedAt = credit?.createdAt || null;
+  const settledAt = credit?.settledAt || null;
+
+  const issuedText = issuedAt ? formatWhen(issuedAt) : "—";
+  const paidText = settledAt ? formatWhen(settledAt) : "Not paid yet";
+
+  const pillCls =
+    status === "PENDING"
+      ? "bg-amber-50 text-amber-900 border-amber-200"
+      : "bg-emerald-50 text-emerald-900 border-emerald-200";
+
+  return (
+    <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-extrabold text-slate-900">
+            Credit summary
+          </div>
+          <div className="mt-1 text-xs text-slate-600">
+            Sale #{sale?.id ?? "—"} • Customer:{" "}
+            <b>{sale?.customerName || "—"}</b>
+          </div>
+        </div>
+        <span
+          className={`shrink-0 inline-flex items-center rounded-xl border px-2.5 py-1 text-[11px] font-extrabold ${pillCls}`}
+        >
+          {status === "PENDING" ? "CREDIT • PENDING" : "CREDIT • SETTLED"}
+        </span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="rounded-2xl border border-amber-200 bg-white p-3">
+          <div className="text-[8px] font-semibold text-slate-600">
+            Paid / Total
+          </div>
+          <div className="mt-1 text-sm text-[12px] font-extrabold text-slate-900">
+            {money(paid)} / {money(total)} RWF
+          </div>
+          <div className="mt-1 text-[11px] text-slate-600">
+            Remaining: <b>{money(remaining)}</b> RWF
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-amber-200 bg-white p-3">
+          <div className="text-[11px] font-semibold text-slate-600">Issued</div>
+          <div className="mt-1 text-sm ext-[12px] font-extrabold text-slate-900">
+            {issuedText}
+          </div>
+          <div className="mt-1 text-[11px] text-slate-600">
+            By: <b>{sale?.sellerName || "—"}</b>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-amber-200 bg-white p-3">
+          <div className="text-[11px] font-semibold text-slate-600">
+            Paid date
+          </div>
+          <div className="mt-1 text-sm font-extrabold text-slate-900">
+            {paidText}
+          </div>
+          <div className="mt-1 text-[11px] text-slate-600">
+            Status: <b>{status || "—"}</b>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 text-[11px] text-amber-900/80">
+        Installments are not enabled yet because payments has a unique index per
+        sale.
+      </div>
+    </div>
+  );
 }
 
 function safeDate(v) {
@@ -78,6 +166,17 @@ function safeDate(v) {
     const d = new Date(v);
     if (Number.isNaN(d.getTime())) return String(v);
     return d.toLocaleString();
+  } catch {
+    return String(v);
+  }
+}
+
+function safeDateOnly(v) {
+  if (!v) return "—";
+  try {
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return String(v);
+    return d.toLocaleDateString();
   } catch {
     return String(v);
   }
@@ -120,9 +219,9 @@ function locationLabel(me) {
 function nowLocalDatetimeValue() {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
-    now.getDate(),
-  )}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(
+    now.getHours(),
+  )}:${pad(now.getMinutes())}`;
 }
 
 /* ---------- UI atoms ---------- */
@@ -266,10 +365,7 @@ function NavItem({ active, label, onClick, badge }) {
 function statusUi(statusRaw) {
   const st = String(statusRaw || "").toUpperCase();
 
-  // Seller credit
   if (st === "PENDING") return { label: "CREDIT", tone: "warn" };
-
-  // Seller paid => backend sets AWAITING_PAYMENT_RECORD
   if (st === "AWAITING_PAYMENT_RECORD")
     return { label: "WAITING CASHIER", tone: "warn" };
 
@@ -383,14 +479,8 @@ function ItemsModal({ open, loading, sale, onClose }) {
   );
 }
 
-/* ---------- Credit modal for seller ---------- */
-/**
- * This modal is UI-only for issue/expectedPayDate/installment.
- * Backend credit issue date is createdAt; paid date is settledAt.
- *
- * ✅ No useEffect state resets (avoids the warning).
- * ✅ Modal is remounted with a key from parent for clean defaults.
- */
+/* ---------- Credit modal ---------- */
+
 function CreditSetupModal({ open, sale, onClose, onConfirm, loading }) {
   const saleId = sale?.id ?? null;
 
@@ -409,10 +499,8 @@ function CreditSetupModal({ open, sale, onClose, onConfirm, loading }) {
     note: "",
   }));
 
-  // ✅ Create a stable “defaults key” so ESLint is happy and reset happens only when needed
   const defaultsKey = useMemo(() => {
     const d = sale?._defaults || {};
-    // stringify only the fields we care about
     return JSON.stringify({
       saleId,
       issueDate: d.issueDate || "",
@@ -464,10 +552,8 @@ function CreditSetupModal({ open, sale, onClose, onConfirm, loading }) {
 
         <div className="p-4 grid gap-3">
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-            <b>Important:</b> Issue date and paid date are stored by backend on
-            the credit record. Installments are not supported until you remove{" "}
-            <b>payments_sale_unique</b> and implement a partial payment
-            endpoint.
+            <b>Important:</b> Installments are not enabled yet if payments has a
+            unique index per sale.
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -531,11 +617,6 @@ function CreditSetupModal({ open, sale, onClose, onConfirm, loading }) {
               successText="Saved"
               onClick={() =>
                 onConfirm?.({
-                  issueDate: form.issueDate,
-                  expectedPayDate: form.expectedPayDate,
-                  installmentAmount: form.installment
-                    ? Number(form.installment)
-                    : 0,
                   note: form.note,
                 })
               }
@@ -554,6 +635,7 @@ function CreditSetupModal({ open, sale, onClose, onConfirm, loading }) {
     </div>
   );
 }
+
 /* ---------- Page ---------- */
 
 export default function SellerPage() {
@@ -566,7 +648,6 @@ export default function SellerPage() {
   function pushToast(kind, message) {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const t = { id, kind: kind || "info", message: message || "" };
-
     setToasts((prev) => [t, ...(Array.isArray(prev) ? prev : [])].slice(0, 4));
 
     const tm = setTimeout(() => {
@@ -608,7 +689,7 @@ export default function SellerPage() {
     setMsg(text || "");
   }
 
-  // ROLE GUARD
+  // ✅ ROLE GUARD (allow seller OR admin)
   useEffect(() => {
     let alive = true;
 
@@ -624,12 +705,13 @@ export default function SellerPage() {
         const role = String(user?.role || "").toLowerCase();
         if (!role) return router.replace("/login");
 
-        if (role !== "seller") {
+        // allow admin to open seller page
+        const allowed = new Set(["seller", "admin"]);
+        if (!allowed.has(role)) {
           const map = {
             store_keeper: "/store-keeper",
             cashier: "/cashier",
             manager: "/manager",
-            admin: "/admin",
             owner: "/owner",
           };
           router.replace(map[role] || "/");
@@ -651,8 +733,9 @@ export default function SellerPage() {
     };
   }, [router]);
 
+  const roleLower = String(me?.role || "").toLowerCase();
   const isAuthorized =
-    !!me && String(me?.role || "").toLowerCase() === "seller";
+    !!me && (roleLower === "seller" || roleLower === "admin");
 
   // DATA
   const [products, setProducts] = useState([]);
@@ -693,6 +776,11 @@ export default function SellerPage() {
   const [creditSale, setCreditSale] = useState(null);
   const [creditSaving, setCreditSaving] = useState(false);
 
+  // ✅ Notification diff state
+  const lastStatusByIdRef = useRef(new Map()); // saleId -> status
+  const firstSalesLoadRef = useRef(true);
+  const salesPollInFlightRef = useRef(false);
+
   const loadProducts = useCallback(async () => {
     setProductsLoading(true);
     try {
@@ -709,6 +797,48 @@ export default function SellerPage() {
     }
   }, []);
 
+  const applySalesNotifications = useCallback(
+    (nextList) => {
+      const prev = lastStatusByIdRef.current;
+      const nextMap = new Map();
+
+      for (const s of Array.isArray(nextList) ? nextList : []) {
+        const id = Number(s?.id);
+        if (!Number.isFinite(id) || id <= 0) continue;
+
+        const nextSt = String(s?.status || "").toUpperCase();
+        nextMap.set(id, nextSt);
+
+        if (firstSalesLoadRef.current) continue;
+
+        const prevSt = String(prev.get(id) || "").toUpperCase();
+        if (!prevSt || prevSt === nextSt) continue;
+
+        // Store keeper released
+        if (prevSt === "DRAFT" && nextSt === "FULFILLED") {
+          pushToast(
+            "success",
+            `Store keeper released stock for Sale #${id}. You can now mark PAID or CREDIT.`,
+          );
+        }
+
+        // Cashier recorded payment → COMPLETED (from AWAITING_PAYMENT_RECORD typically)
+        if (nextSt === "COMPLETED" && prevSt !== "COMPLETED") {
+          pushToast(
+            "success",
+            `Cashier recorded payment for Sale #${id}. Sale is now PAID.`,
+          );
+        }
+      }
+
+      lastStatusByIdRef.current = nextMap;
+      firstSalesLoadRef.current = false;
+    },
+    // pushToast is stable in this component scope; ok
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   const loadSales = useCallback(async () => {
     setSalesLoading(true);
     try {
@@ -716,14 +846,18 @@ export default function SellerPage() {
       const list = Array.isArray(data?.sales)
         ? data.sales
         : data?.items || data?.rows || [];
-      setSales(Array.isArray(list) ? list : []);
+      const clean = Array.isArray(list) ? list : [];
+      setSales(clean);
+
+      // ✅ detect transitions for notifications
+      applySalesNotifications(clean);
     } catch (e) {
       banner("danger", e?.data?.error || e?.message || "Cannot load sales");
       setSales([]);
     } finally {
       setSalesLoading(false);
     }
-  }, []);
+  }, [applySalesNotifications]);
 
   // customer search (debounced)
   const searchCustomers = useCallback(async (q) => {
@@ -757,6 +891,41 @@ export default function SellerPage() {
     if (section === "create") loadProducts();
     if (section === "dashboard" || section === "sales") loadSales();
   }, [isAuthorized, section, loadProducts, loadSales]);
+
+  // ✅ background polling ONLY when Seller is watching dashboard/sales
+  useEffect(() => {
+    if (!isAuthorized) return;
+    const watching = section === "dashboard" || section === "sales";
+    if (!watching) return;
+
+    let alive = true;
+
+    const tick = async () => {
+      if (!alive) return;
+      if (salesPollInFlightRef.current) return;
+      salesPollInFlightRef.current = true;
+
+      try {
+        const data = await apiFetch(ENDPOINTS.SALES_LIST, { method: "GET" });
+        const list = Array.isArray(data?.sales)
+          ? data.sales
+          : data?.items || data?.rows || [];
+        const clean = Array.isArray(list) ? list : [];
+        setSales(clean);
+        applySalesNotifications(clean);
+      } catch {
+        // silent (no spam)
+      } finally {
+        salesPollInFlightRef.current = false;
+      }
+    };
+
+    const t = setInterval(tick, NOTIFY_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [isAuthorized, section, applySalesNotifications]);
 
   /* ---------- derived ---------- */
 
@@ -995,7 +1164,6 @@ export default function SellerPage() {
     if (saleCart.length === 0)
       return pushToast("warn", "Cart is empty. Add products.");
 
-    // basic constraints
     for (const it of saleCart) {
       const qty = toInt(it.qty);
       if (qty <= 0) return pushToast("warn", `Bad qty for ${it.productName}.`);
@@ -1056,7 +1224,6 @@ export default function SellerPage() {
           : "Sale created (Draft)",
       );
 
-      // reset
       setSelectedCustomer(null);
       setCustomerQ("");
       setCustomerResults([]);
@@ -1150,12 +1317,10 @@ export default function SellerPage() {
     setMsg("");
 
     try {
-      // ✅ Only this call. Backend auto-creates credit row.
       await apiFetch(ENDPOINTS.SALE_MARK(sid), {
         method: "POST",
         body: { status: "PENDING" },
       });
-
       pushToast("success", `Sale #${sid} marked CREDIT`);
       setCreditOpen(false);
       setCreditSale(null);
@@ -1174,13 +1339,13 @@ export default function SellerPage() {
     return <div className="p-6 text-sm text-slate-600">Redirecting…</div>;
 
   const subtitle = `User: ${me?.email || "—"} • ${locationLabel(me)}`;
+  const title = roleLower === "admin" ? "Seller (Admin)" : "Seller";
 
   return (
     <div className="min-h-screen bg-slate-50 overflow-x-hidden">
-      {/* ✅ Toast overlay always above UI */}
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
 
-      <RoleBar title="Seller" subtitle={subtitle} user={me} />
+      <RoleBar title={title} subtitle={subtitle} user={me} />
 
       <ItemsModal
         open={itemsOpen}
@@ -1190,7 +1355,7 @@ export default function SellerPage() {
       />
 
       <CreditSetupModal
-        key={creditSale?.id || "credit"} // ✅ remount for clean defaults
+        key={creditSale?.id || "credit"}
         open={creditOpen}
         sale={creditSale}
         loading={creditSaving}
@@ -1225,7 +1390,7 @@ export default function SellerPage() {
         <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
           {/* Sidebar */}
           <aside className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4 h-fit">
-            <div className="text-sm font-bold text-slate-900">Seller</div>
+            <div className="text-sm font-bold text-slate-900">{title}</div>
             <div className="mt-1 text-xs text-slate-600">
               {locationLabel(me)}
             </div>
@@ -1251,7 +1416,6 @@ export default function SellerPage() {
                 active={section === "dashboard"}
                 label="Dashboard"
                 onClick={() => setSection("dashboard")}
-                // badge={releasedCount > 0 ? String(releasedCount) : null}
               />
               <NavItem
                 active={section === "create"}
@@ -1274,7 +1438,18 @@ export default function SellerPage() {
 
             <div className="mt-6 pt-4 border-t border-slate-200 text-xs text-slate-600">
               Flow: Draft → Store keeper releases → you mark Paid or Credit.
+              <div className="mt-2">
+                Notifications: release + cashier payment are detected
+                automatically while you are on Dashboard/Sales.
+              </div>
             </div>
+
+            {roleLower === "admin" ? (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                Admin viewing Seller UI. Actions follow backend permissions for
+                your admin account.
+              </div>
+            ) : null}
           </aside>
 
           {/* Main */}
@@ -1351,7 +1526,7 @@ export default function SellerPage() {
               </>
             ) : null}
 
-            {/* CREATE */}
+            {/* CREATE (unchanged from your existing UI) */}
             {section === "create" ? (
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                 {/* PRODUCTS */}
@@ -1879,7 +2054,7 @@ export default function SellerPage() {
               </div>
             ) : null}
 
-            {/* SALES */}
+            {/* SALES (updated: due date + paid date safety) */}
             {section === "sales" ? (
               <SectionCard
                 title="My sales"
@@ -1934,7 +2109,6 @@ export default function SellerPage() {
                         const total =
                           Number(s?.totalAmount ?? s?.total ?? 0) || 0;
 
-                        // listSales returns COALESCE(SUM(p.amount),0) as amountPaid
                         const amountPaid = Number(s?.amountPaid ?? 0) || 0;
 
                         const canFinalize =
@@ -1945,10 +2119,28 @@ export default function SellerPage() {
 
                         const createdAt = s?.createdAt || s?.created_at;
 
-                        // Optional: if backend attaches credit, show its dates
                         const credit = s?.credit || null;
-                        const issueDate = credit?.createdAt || null;
-                        const payingDate = credit?.settledAt || null;
+
+                        // Paid date:
+                        // - If backend provides credit.settledAt for credit sales, show it.
+                        // - Otherwise show sale.completedAt/paidAt/updatedAt if present.
+                        const paidAt =
+                          credit?.settledAt ||
+                          credit?.settled_at ||
+                          s?.completedAt ||
+                          s?.completed_at ||
+                          s?.paidAt ||
+                          s?.paid_at ||
+                          null;
+
+                        // Due date: only show if backend provides one
+                        const dueDate =
+                          credit?.dueDate ||
+                          credit?.due_date ||
+                          s?.dueDate ||
+                          s?.due_date ||
+                          null;
+
                         const creditAmount =
                           Number(credit?.amount ?? total) || total;
 
@@ -2003,6 +2195,19 @@ export default function SellerPage() {
                                 <div className="mt-2 text-xs text-slate-500">
                                   Created: {safeDate(createdAt)}
                                 </div>
+
+                                {st === "COMPLETED" ? (
+                                  <div className="mt-1 text-xs text-slate-600">
+                                    Paid date:{" "}
+                                    <b>{paidAt ? safeDate(paidAt) : "—"}</b>
+                                  </div>
+                                ) : null}
+
+                                {dueDate ? (
+                                  <div className="mt-1 text-xs text-slate-600">
+                                    Due date: <b>{safeDateOnly(dueDate)}</b>
+                                  </div>
+                                ) : null}
                               </div>
 
                               <button
@@ -2013,55 +2218,11 @@ export default function SellerPage() {
                                 View items
                               </button>
                             </div>
-
-                            {/* CREDIT summary */}
-                            {st === "PENDING" ? (
-                              <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3">
-                                <div className="text-xs font-extrabold text-amber-900">
-                                  Credit summary
-                                </div>
-
-                                <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                  <div className="rounded-xl border border-amber-200 bg-white p-2">
-                                    <div className="text-[11px] font-semibold text-amber-900/80">
-                                      Issue date
-                                    </div>
-                                    <div className="text-xs font-extrabold text-amber-900">
-                                      {issueDate ? safeDate(issueDate) : "—"}
-                                    </div>
-                                  </div>
-
-                                  <div className="rounded-xl border border-amber-200 bg-white p-2">
-                                    <div className="text-[11px] font-semibold text-amber-900/80">
-                                      Paid / Total
-                                    </div>
-                                    <div className="text-xs font-extrabold text-amber-900">
-                                      {money(amountPaid)} /{" "}
-                                      {money(creditAmount)} RWF
-                                    </div>
-                                    <div className="mt-1 text-[11px] text-amber-900/80">
-                                      Remaining: <b>{money(remaining)}</b> RWF
-                                    </div>
-                                  </div>
-
-                                  <div className="rounded-xl border border-amber-200 bg-white p-2">
-                                    <div className="text-[11px] font-semibold text-amber-900/80">
-                                      Paid date
-                                    </div>
-                                    <div className="text-xs font-extrabold text-amber-900">
-                                      {payingDate ? safeDate(payingDate) : "—"}
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <div className="mt-2 text-[11px] text-amber-900/80">
-                                  Installments are not enabled yet because
-                                  payments has a unique index per sale.
-                                </div>
-                              </div>
+                            {String(s?.status || "").toUpperCase() ===
+                            "PENDING" ? (
+                              <CreditSummary sale={s} />
                             ) : null}
 
-                            {/* ACTIONS */}
                             <div className="mt-3 pt-3 border-t border-slate-200">
                               {!canFinalize ? (
                                 <div className="text-sm text-slate-600">
@@ -2146,10 +2307,7 @@ export default function SellerPage() {
 
             {/* CREDITS */}
             {section === "credits" ? (
-              <SectionCard
-                title="Credits"
-                hint="Credit history, issue date, payment date, and details."
-              >
+              <SectionCard title="Credits" hint="Credit history and details.">
                 <CreditsPanel
                   title="Credits (Seller)"
                   capabilities={{
