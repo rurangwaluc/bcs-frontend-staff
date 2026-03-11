@@ -1,663 +1,205 @@
 "use client";
 
+import {
+  ENDPOINTS,
+  NOTIFY_POLL_MS,
+  SECTIONS,
+  SELLER_PAYMENT_METHODS,
+} from "../../components/staff/seller/seller-constants";
+import {
+  PageSkeleton,
+  SectionCard,
+} from "../../components/staff/seller/seller-ui";
+import {
+  isToday,
+  locationLabel,
+  nowLocalDatetimeValue,
+  toInt,
+  toStr,
+} from "../../components/staff/seller/seller-utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import AsyncButton from "../../components/AsyncButton";
 import CreditsPanel from "../../components/CreditsPanel";
 import RoleBar from "../../components/RoleBar";
+import SellerCreateSection from "../../components/staff/seller/SellerCreateSection";
+import SellerCreditSetupModal from "../../components/staff/seller/SellerCreditSetupModal";
+import SellerDashboardSection from "../../components/staff/seller/SellerDashboardSection";
+import SellerItemsModal from "../../components/staff/seller/SellerItemsModal";
+import SellerSalesSection from "../../components/staff/seller/SellerSalesSection";
 import ToastStack from "../../components/ToastStack";
 import { apiFetch } from "../../lib/api";
 import { getMe } from "../../lib/auth";
 import { useRouter } from "next/navigation";
 
-/**
- * SELLER FLOW (matches your backend):
- * - Create sale => DRAFT
- * - Store keeper fulfills => FULFILLED
- * - Seller:
- *    - Mark CREDIT => POST /sales/:id/mark { status: "PENDING" }
- *      ✅ Backend auto-creates credit row in markSale() when nextStatus === "PENDING"
- *    - Mark PAID   => POST /sales/:id/mark { status: "PAID", paymentMethod }
- *      ✅ Backend converts to AWAITING_PAYMENT_RECORD
- *      ✅ Cashier later records the actual payment and sale becomes COMPLETED
- *
- * Notes:
- * - Installments NOT possible yet if payments has uniqSale index (payments_sale_unique).
- */
+function canUseWindow() {
+  return typeof window !== "undefined";
+}
 
-const ENDPOINTS = {
-  PRODUCTS_LIST: "/products",
-  SALES_LIST: "/sales",
-  SALES_CREATE: "/sales",
-  SALE_GET: (id) => `/sales/${id}`,
-  SALE_MARK: (id) => `/sales/${id}/mark`,
-  CUSTOMERS_SEARCH: (q) => `/customers/search?q=${encodeURIComponent(q)}`,
-  CUSTOMERS_CREATE: "/customers",
-};
+function playAlertBeep({
+  frequency = 880,
+  duration = 180,
+  volume = 0.05,
+} = {}) {
+  if (!canUseWindow()) return;
 
-const PAYMENT_METHODS = [
-  { value: "CASH", label: "Cash" },
-  { value: "MOMO", label: "MoMo" },
-  { value: "BANK", label: "Bank" },
-];
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
 
-const SECTIONS = [
-  { key: "dashboard", label: "Dashboard" },
-  { key: "create", label: "Create sale" },
-  { key: "sales", label: "My sales" },
-  { key: "credits", label: "Credits" },
-];
+    const ctx = new AudioCtx();
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
 
-const NOTIFY_POLL_MS = 20_000; // lightweight; only used to detect status changes and show toast
+    oscillator.type = "sine";
+    oscillator.frequency.value = frequency;
+    gainNode.gain.value = volume;
+
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    oscillator.start();
+
+    window.setTimeout(
+      () => {
+        try {
+          oscillator.stop();
+          ctx.close?.();
+        } catch {
+          // ignore
+        }
+      },
+      Math.max(100, Number(duration) || 180),
+    );
+  } catch {
+    // ignore audio issues
+  }
+}
 
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
-function toStr(v) {
-  if (v === undefined || v === null) return "";
-  return String(v).trim();
-}
-
-function toInt(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.round(n) : 0;
-}
-
-function formatWhen(v) {
-  if (!v) return null;
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return String(v);
-  return d.toLocaleString();
-}
-
-function money(n) {
-  const x = Number(n ?? 0);
-  return Number.isFinite(x) ? Math.round(x).toLocaleString() : "0";
-}
-
-function CreditSummary({ sale }) {
-  const credit = sale?.credit || null;
-  const status = String(credit?.status || sale?.status || "").toUpperCase();
-
-  // amounts
-  const total = Number(credit?.amount ?? sale?.totalAmount ?? 0) || 0;
-  const paid = Number(sale?.amountPaid ?? credit?.paidAmount ?? 0) || 0;
-  const remaining = Math.max(0, total - paid);
-
-  // dates (available in your JSON)
-  const issuedAt = credit?.createdAt || null;
-  const settledAt = credit?.settledAt || null;
-
-  const issuedText = issuedAt ? formatWhen(issuedAt) : "—";
-  const paidText = settledAt ? formatWhen(settledAt) : "Not paid yet";
-
-  const pillCls =
-    status === "PENDING"
-      ? "bg-amber-50 text-amber-900 border-amber-200"
-      : "bg-emerald-50 text-emerald-900 border-emerald-200";
-
+function TopSectionSwitcher({
+  title,
+  me,
+  section,
+  setSection,
+  sections,
+  draftCount,
+  creditCount,
+}) {
   return (
-    <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-extrabold text-slate-900">
-            Credit summary
-          </div>
-          <div className="mt-1 text-xs text-slate-600">
-            Sale #{sale?.id ?? "—"} • Customer:{" "}
-            <b>{sale?.customerName || "—"}</b>
-          </div>
-        </div>
-        <span
-          className={`shrink-0 inline-flex items-center rounded-xl border px-2.5 py-1 text-[11px] font-extrabold ${pillCls}`}
-        >
-          {status === "PENDING" ? "CREDIT • PENDING" : "CREDIT • SETTLED"}
-        </span>
-      </div>
-
-      <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="rounded-2xl border border-amber-200 bg-white p-3">
-          <div className="text-[8px] font-semibold text-slate-600">
-            Paid / Total
-          </div>
-          <div className="mt-1 text-sm text-[12px] font-extrabold text-slate-900">
-            {money(paid)} / {money(total)} RWF
-          </div>
-          <div className="mt-1 text-[11px] text-slate-600">
-            Remaining: <b>{money(remaining)}</b> RWF
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-amber-200 bg-white p-3">
-          <div className="text-[11px] font-semibold text-slate-600">Issued</div>
-          <div className="mt-1 text-sm ext-[12px] font-extrabold text-slate-900">
-            {issuedText}
-          </div>
-          <div className="mt-1 text-[11px] text-slate-600">
-            By: <b>{sale?.sellerName || "—"}</b>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-amber-200 bg-white p-3">
-          <div className="text-[11px] font-semibold text-slate-600">
-            Paid date
-          </div>
-          <div className="mt-1 text-sm font-extrabold text-slate-900">
-            {paidText}
-          </div>
-          <div className="mt-1 text-[11px] text-slate-600">
-            Status: <b>{status || "—"}</b>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-3 text-[11px] text-amber-900/80">
-        Installments are not enabled yet because payments has a unique index per
-        sale.
-      </div>
-    </div>
-  );
-}
-
-function safeDate(v) {
-  if (!v) return "—";
-  try {
-    const d = new Date(v);
-    if (Number.isNaN(d.getTime())) return String(v);
-    return d.toLocaleString();
-  } catch {
-    return String(v);
-  }
-}
-
-function safeDateOnly(v) {
-  if (!v) return "—";
-  try {
-    const d = new Date(v);
-    if (Number.isNaN(d.getTime())) return String(v);
-    return d.toLocaleDateString();
-  } catch {
-    return String(v);
-  }
-}
-
-function isSameLocalDay(a, b) {
-  const da = new Date(a);
-  const db = new Date(b);
-  if (Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return false;
-  return (
-    da.getFullYear() === db.getFullYear() &&
-    da.getMonth() === db.getMonth() &&
-    da.getDate() === db.getDate()
-  );
-}
-
-function isToday(dateLike) {
-  if (!dateLike) return false;
-  return isSameLocalDay(dateLike, new Date());
-}
-
-function locationLabel(me) {
-  const loc = me?.location || null;
-
-  const name =
-    (loc?.name != null ? toStr(loc.name) : "") ||
-    (me?.locationName != null ? toStr(me.locationName) : "") ||
-    "";
-
-  const code =
-    (loc?.code != null ? toStr(loc.code) : "") ||
-    (me?.locationCode != null ? toStr(me.locationCode) : "") ||
-    "";
-
-  if (name && code) return `${name} (${code})`;
-  if (name) return name;
-  return "Store —";
-}
-
-function nowLocalDatetimeValue() {
-  const now = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(
-    now.getHours(),
-  )}:${pad(now.getMinutes())}`;
-}
-
-/* ---------- UI atoms ---------- */
-
-function Skeleton({ className = "" }) {
-  return (
-    <div
-      className={cx("animate-pulse rounded-xl bg-slate-200/70", className)}
-    />
-  );
-}
-
-function PageSkeleton() {
-  return (
-    <div className="min-h-screen bg-slate-50 overflow-x-hidden">
-      <div className="mx-auto max-w-7xl px-4 sm:px-5 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <Skeleton className="h-6 w-40" />
-            <Skeleton className="mt-3 h-4 w-52" />
-            <div className="mt-6 grid gap-3">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          </div>
-
-          <div>
-            <Skeleton className="h-12 w-full rounded-2xl" />
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-              <Skeleton className="h-24 w-full rounded-2xl" />
-              <Skeleton className="h-24 w-full rounded-2xl" />
-              <Skeleton className="h-24 w-full rounded-2xl" />
-              <Skeleton className="h-24 w-full rounded-2xl" />
-            </div>
-            <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
-              <Skeleton className="h-80 w-full rounded-2xl" />
-              <Skeleton className="h-80 w-full rounded-2xl" />
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Card({ label, value, sub }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="text-xs font-semibold text-slate-600">{label}</div>
-      <div className="mt-1 text-2xl font-bold text-slate-900">{value}</div>
-      {sub ? <div className="mt-1 text-xs text-slate-600">{sub}</div> : null}
-    </div>
-  );
-}
-
-function Input({ className = "", ...props }) {
-  return (
-    <input
-      {...props}
-      className={cx(
-        "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none",
-        "focus:ring-2 focus:ring-slate-300",
-        className,
-      )}
-    />
-  );
-}
-
-function TextArea({ className = "", ...props }) {
-  return (
-    <textarea
-      {...props}
-      className={cx(
-        "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none",
-        "focus:ring-2 focus:ring-slate-300",
-        className,
-      )}
-    />
-  );
-}
-
-function Select({ className = "", ...props }) {
-  return (
-    <select
-      {...props}
-      className={cx(
-        "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none",
-        "focus:ring-2 focus:ring-slate-300",
-        className,
-      )}
-    />
-  );
-}
-
-function SectionCard({ title, hint, right, children }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-4">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-slate-900">{title}</div>
-          {hint ? (
-            <div className="mt-1 text-xs text-slate-600">{hint}</div>
-          ) : null}
-        </div>
-        {right ? <div className="shrink-0">{right}</div> : null}
-      </div>
-      <div className="p-4">{children}</div>
-    </div>
-  );
-}
-
-function NavItem({ active, label, onClick, badge }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cx(
-        "w-full text-left rounded-xl px-3 py-2.5 text-sm font-semibold transition flex items-center justify-between gap-2",
-        active ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50",
-      )}
-    >
-      <span className="truncate">{label}</span>
-      {badge ? (
-        <span
-          className={cx(
-            "shrink-0 rounded-full px-2 py-0.5 text-xs font-bold",
-            active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-700",
-          )}
-        >
-          {badge}
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
-/* ---------- Status UI ---------- */
-
-function statusUi(statusRaw) {
-  const st = String(statusRaw || "").toUpperCase();
-
-  if (st === "PENDING") return { label: "CREDIT", tone: "warn" };
-  if (st === "AWAITING_PAYMENT_RECORD")
-    return { label: "WAITING CASHIER", tone: "warn" };
-
-  if (st === "DRAFT") return { label: "WAITING RELEASE", tone: "info" };
-  if (st === "FULFILLED") return { label: "RELEASED", tone: "success" };
-  if (st === "COMPLETED") return { label: "PAID", tone: "success" };
-  if (st === "CANCELLED") return { label: "CANCELLED", tone: "danger" };
-
-  return { label: st || "—", tone: "neutral" };
-}
-
-function StatusBadge({ status }) {
-  const { label, tone } = statusUi(status);
-
-  const cls =
-    tone === "success"
-      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-      : tone === "warn"
-        ? "bg-amber-50 text-amber-800 border-amber-200"
-        : tone === "danger"
-          ? "bg-rose-50 text-rose-800 border-rose-200"
-          : tone === "info"
-            ? "bg-sky-50 text-sky-800 border-sky-200"
-            : "bg-slate-50 text-slate-700 border-slate-200";
-
-  return (
-    <span
-      className={cx(
-        "inline-flex items-center rounded-xl border px-2.5 py-1 text-xs font-extrabold",
-        cls,
-      )}
-    >
-      {label}
-    </span>
-  );
-}
-
-/* ---------- Sale items modal ---------- */
-
-function ItemsModal({ open, loading, sale, onClose }) {
-  if (!open) return null;
-
-  const items = Array.isArray(sale?.items) ? sale.items : [];
-
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
-        <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-3">
+    <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
+      <div className="flex flex-col gap-4 p-4 sm:p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
-            <div className="text-sm font-bold text-slate-900">
-              Sale #{sale?.id ?? "—"} {loading ? "…" : ""}
+            <div className="text-lg font-black text-[var(--app-fg)]">
+              {title}
             </div>
-            <div className="text-xs text-slate-600 mt-1 truncate">
-              Status: {String(sale?.status || "—").toUpperCase()}
-            </div>
+            <div className="mt-1 text-sm app-muted">{locationLabel(me)}</div>
           </div>
 
-          <button
-            type="button"
-            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
-            onClick={onClose}
-          >
-            Close
-          </button>
-        </div>
-
-        <div className="p-4">
-          {loading ? (
-            <div className="grid gap-3">
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-16 w-full" />
-            </div>
-          ) : items.length === 0 ? (
-            <div className="text-sm text-slate-600">No items.</div>
-          ) : (
-            <div className="grid gap-2">
-              {items.map((it, idx) => (
-                <div
-                  key={it?.id || idx}
-                  className="rounded-2xl border border-slate-200 bg-white p-3 flex items-center justify-between gap-3"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-bold text-slate-900 truncate">
-                      {it?.productName ||
-                        it?.name ||
-                        `#${it?.productId ?? "—"}`}
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      {it?.sku ? `SKU: ${it.sku}` : "SKU: —"}
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <div className="text-lg font-extrabold text-slate-900">
-                      {toInt(it?.qty ?? 0)}
-                    </div>
-                    <div className="text-xs text-slate-500">qty</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="mt-4 text-xs text-slate-600">
-            Tip: Released sales can be marked PAID or CREDIT.
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] px-4 py-3 text-sm app-muted">
+            <span className="font-semibold text-[var(--app-fg)]">
+              Seller rule:
+            </span>{" "}
+            Create sales, follow releases, finalize payment or credit.
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
 
-/* ---------- Credit modal ---------- */
+        <div className="flex flex-wrap gap-2">
+          {sections.map((s) => {
+            const active = section === s.key;
+            const badge =
+              s.key === "dashboard"
+                ? draftCount > 0
+                  ? draftCount
+                  : 0
+                : s.key === "credits"
+                  ? creditCount > 0
+                    ? creditCount
+                    : 0
+                  : 0;
 
-function CreditSetupModal({ open, sale, onClose, onConfirm, loading }) {
-  const saleId = sale?.id ?? null;
+            return (
+              <button
+                key={s.key}
+                type="button"
+                onClick={() => setSection(s.key)}
+                className={cx(
+                  "app-focus inline-flex items-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-semibold transition",
+                  active
+                    ? "border-[var(--app-fg)] bg-[var(--app-fg)] text-[var(--app-bg)] shadow-sm"
+                    : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)] hover:bg-[var(--hover)]",
+                )}
+              >
+                <span>{s.label}</span>
 
-  const getLocalDateTime = useCallback(() => {
-    const now = new Date();
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(
-      now.getHours(),
-    )}:${pad(now.getMinutes())}`;
-  }, []);
-
-  const [form, setForm] = useState(() => ({
-    issueDate: "",
-    expectedPayDate: "",
-    installment: "",
-    note: "",
-  }));
-
-  const defaultsKey = useMemo(() => {
-    const d = sale?._defaults || {};
-    return JSON.stringify({
-      saleId,
-      issueDate: d.issueDate || "",
-      expectedPayDate: d.expectedPayDate || "",
-      installment: d.installment || "",
-      note: d.note || "",
-    });
-  }, [saleId, sale?._defaults]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    const d = sale?._defaults || {};
-    setForm({
-      issueDate: (d.issueDate && String(d.issueDate)) || getLocalDateTime(),
-      expectedPayDate: (d.expectedPayDate && String(d.expectedPayDate)) || "",
-      installment: (d.installment && String(d.installment)) || "",
-      note: (d.note && String(d.note)) || "",
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultsKey, getLocalDateTime]);
-
-  if (!open) return null;
-
-  const total = Number(sale?.totalAmount ?? sale?.total ?? 0) || 0;
-
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
-        <div className="p-4 border-b border-slate-200 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-sm font-extrabold text-slate-900">
-              Mark CREDIT • Sale #{sale?.id ?? "—"}
-            </div>
-            <div className="mt-1 text-xs text-slate-600">
-              Total: <b>{money(total)}</b> RWF
-            </div>
-          </div>
-          <button
-            type="button"
-            className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-extrabold text-slate-700 hover:bg-slate-50"
-            onClick={onClose}
-            disabled={loading}
-          >
-            Close
-          </button>
-        </div>
-
-        <div className="p-4 grid gap-3">
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-            <b>Important:</b> Installments are not enabled yet if payments has a
-            unique index per sale.
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <div className="text-xs font-semibold text-slate-600 mb-1">
-                Issue date (UI only)
-              </div>
-              <Input
-                type="datetime-local"
-                value={form.issueDate}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, issueDate: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <div className="text-xs font-semibold text-slate-600 mb-1">
-                Expected paying date (UI only)
-              </div>
-              <Input
-                type="date"
-                value={form.expectedPayDate}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, expectedPayDate: e.target.value }))
-                }
-              />
-            </div>
-          </div>
-
-          <div>
-            <div className="text-xs font-semibold text-slate-600 mb-1">
-              First installment amount (UI only)
-            </div>
-            <Input
-              type="number"
-              min="0"
-              value={form.installment}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, installment: e.target.value }))
-              }
-            />
-          </div>
-
-          <div>
-            <div className="text-xs font-semibold text-slate-600 mb-1">
-              Note (optional)
-            </div>
-            <TextArea
-              rows={2}
-              value={form.note}
-              onChange={(e) => setForm((p) => ({ ...p, note: e.target.value }))}
-            />
-          </div>
-
-          <div className="flex gap-2 flex-wrap">
-            <AsyncButton
-              variant="primary"
-              state={loading ? "loading" : "idle"}
-              text="Confirm CREDIT"
-              loadingText="Saving…"
-              successText="Saved"
-              onClick={() =>
-                onConfirm?.({
-                  note: form.note,
-                })
-              }
-            />
-            <button
-              type="button"
-              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
-              onClick={onClose}
-              disabled={loading}
-            >
-              Cancel
-            </button>
-          </div>
+                {badge > 0 ? (
+                  <span
+                    className={cx(
+                      "inline-flex min-w-[22px] items-center justify-center rounded-full px-2 py-0.5 text-[11px] font-extrabold",
+                      active
+                        ? "bg-white/15 text-white"
+                        : "bg-[var(--danger-fg)] text-white",
+                    )}
+                  >
+                    {badge}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
   );
 }
-
-/* ---------- Page ---------- */
 
 export default function SellerPage() {
   const router = useRouter();
 
-  // toast stack
   const [toasts, setToasts] = useState([]);
   const toastTimerRef = useRef(new Map());
+  const userInteractedRef = useRef(false);
 
-  function pushToast(kind, message) {
+  function pushToast(kind, message, opts = {}) {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const t = { id, kind: kind || "info", message: message || "" };
-    setToasts((prev) => [t, ...(Array.isArray(prev) ? prev : [])].slice(0, 4));
+
+    const nextToast = {
+      id,
+      kind: kind || "info",
+      message: message || "",
+      title: opts.title || "",
+      urgent: !!opts.urgent,
+    };
+
+    setToasts((prev) =>
+      [nextToast, ...(Array.isArray(prev) ? prev : [])].slice(0, 4),
+    );
+
+    const ttl = nextToast.urgent ? 8000 : 6000;
 
     const tm = setTimeout(() => {
       setToasts((prev) =>
         (Array.isArray(prev) ? prev : []).filter((x) => x.id !== id),
       );
       toastTimerRef.current.delete(id);
-    }, 6000);
+    }, ttl);
 
     toastTimerRef.current.set(id, tm);
+  }
+
+  function notifySeller(kind, message, opts = {}) {
+    pushToast(kind, message, opts);
+
+    if (userInteractedRef.current) {
+      playAlertBeep({
+        frequency: opts.frequency || (opts.urgent ? 1040 : 880),
+        duration: opts.duration || (opts.urgent ? 240 : 180),
+        volume: opts.volume || 0.05,
+      });
+    }
   }
 
   function dismissToast(id) {
@@ -676,6 +218,24 @@ export default function SellerPage() {
     };
   }, []);
 
+  useEffect(() => {
+    function markInteracted() {
+      userInteractedRef.current = true;
+      window.removeEventListener("pointerdown", markInteracted);
+      window.removeEventListener("keydown", markInteracted);
+    }
+
+    if (!canUseWindow()) return;
+
+    window.addEventListener("pointerdown", markInteracted);
+    window.addEventListener("keydown", markInteracted);
+
+    return () => {
+      window.removeEventListener("pointerdown", markInteracted);
+      window.removeEventListener("keydown", markInteracted);
+    };
+  }, []);
+
   const [bootLoading, setBootLoading] = useState(true);
   const [me, setMe] = useState(null);
 
@@ -685,16 +245,16 @@ export default function SellerPage() {
   const [section, setSection] = useState("dashboard");
 
   function banner(kind, text) {
-    setMsgKind(kind);
+    setMsgKind(kind || "info");
     setMsg(text || "");
   }
 
-  // ✅ ROLE GUARD (allow seller OR admin)
   useEffect(() => {
     let alive = true;
 
     async function run() {
       setBootLoading(true);
+
       try {
         const data = await getMe();
         if (!alive) return;
@@ -703,9 +263,11 @@ export default function SellerPage() {
         setMe(user);
 
         const role = String(user?.role || "").toLowerCase();
-        if (!role) return router.replace("/login");
+        if (!role) {
+          router.replace("/login");
+          return;
+        }
 
-        // allow admin to open seller page
         const allowed = new Set(["seller", "admin"]);
         if (!allowed.has(role)) {
           const map = {
@@ -728,6 +290,7 @@ export default function SellerPage() {
     }
 
     run();
+
     return () => {
       alive = false;
     };
@@ -737,7 +300,6 @@ export default function SellerPage() {
   const isAuthorized =
     !!me && (roleLower === "seller" || roleLower === "admin");
 
-  // DATA
   const [products, setProducts] = useState([]);
   const [productsLoading, setProductsLoading] = useState(false);
   const [prodQ, setProdQ] = useState("");
@@ -746,7 +308,6 @@ export default function SellerPage() {
   const [salesLoading, setSalesLoading] = useState(false);
   const [salesQ, setSalesQ] = useState("");
 
-  // customer search + create
   const [customerQ, setCustomerQ] = useState("");
   const [customerResults, setCustomerResults] = useState([]);
   const [customerLoading, setCustomerLoading] = useState(false);
@@ -766,18 +327,15 @@ export default function SellerPage() {
   const [markBtnState, setMarkBtnState] = useState({});
   const [salePayMethod, setSalePayMethod] = useState({});
 
-  // Sale items modal
   const [itemsOpen, setItemsOpen] = useState(false);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [itemsSale, setItemsSale] = useState(null);
 
-  // Credit modal
   const [creditOpen, setCreditOpen] = useState(false);
   const [creditSale, setCreditSale] = useState(null);
   const [creditSaving, setCreditSaving] = useState(false);
 
-  // ✅ Notification diff state
-  const lastStatusByIdRef = useRef(new Map()); // saleId -> status
+  const lastStatusByIdRef = useRef(new Map());
   const firstSalesLoadRef = useRef(true);
   const salesPollInFlightRef = useRef(false);
 
@@ -797,47 +355,52 @@ export default function SellerPage() {
     }
   }, []);
 
-  const applySalesNotifications = useCallback(
-    (nextList) => {
-      const prev = lastStatusByIdRef.current;
-      const nextMap = new Map();
+  const applySalesNotifications = useCallback((nextList) => {
+    const prev = lastStatusByIdRef.current;
+    const nextMap = new Map();
 
-      for (const s of Array.isArray(nextList) ? nextList : []) {
-        const id = Number(s?.id);
-        if (!Number.isFinite(id) || id <= 0) continue;
+    for (const s of Array.isArray(nextList) ? nextList : []) {
+      const id = Number(s?.id);
+      if (!Number.isFinite(id) || id <= 0) continue;
 
-        const nextSt = String(s?.status || "").toUpperCase();
-        nextMap.set(id, nextSt);
+      const nextSt = String(s?.status || "").toUpperCase();
+      nextMap.set(id, nextSt);
 
-        if (firstSalesLoadRef.current) continue;
+      if (firstSalesLoadRef.current) continue;
 
-        const prevSt = String(prev.get(id) || "").toUpperCase();
-        if (!prevSt || prevSt === nextSt) continue;
+      const prevSt = String(prev.get(id) || "").toUpperCase();
+      if (!prevSt || prevSt === nextSt) continue;
 
-        // Store keeper released
-        if (prevSt === "DRAFT" && nextSt === "FULFILLED") {
-          pushToast(
-            "success",
-            `Store keeper released stock for Sale #${id}. You can now mark PAID or CREDIT.`,
-          );
-        }
-
-        // Cashier recorded payment → COMPLETED (from AWAITING_PAYMENT_RECORD typically)
-        if (nextSt === "COMPLETED" && prevSt !== "COMPLETED") {
-          pushToast(
-            "success",
-            `Cashier recorded payment for Sale #${id}. Sale is now PAID.`,
-          );
-        }
+      if (prevSt === "DRAFT" && nextSt === "FULFILLED") {
+        notifySeller(
+          "success",
+          `Store keeper released stock for Sale #${id}. You can now mark paid or credit.`,
+          {
+            title: "Sale released",
+            urgent: true,
+            frequency: 980,
+            duration: 220,
+          },
+        );
       }
 
-      lastStatusByIdRef.current = nextMap;
-      firstSalesLoadRef.current = false;
-    },
-    // pushToast is stable in this component scope; ok
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
+      if (nextSt === "COMPLETED" && prevSt !== "COMPLETED") {
+        notifySeller(
+          "success",
+          `Cashier recorded payment for Sale #${id}. Sale is now paid.`,
+          {
+            title: "Payment completed",
+            urgent: true,
+            frequency: 1180,
+            duration: 260,
+          },
+        );
+      }
+    }
+
+    lastStatusByIdRef.current = nextMap;
+    firstSalesLoadRef.current = false;
+  }, []);
 
   const loadSales = useCallback(async () => {
     setSalesLoading(true);
@@ -848,8 +411,6 @@ export default function SellerPage() {
         : data?.items || data?.rows || [];
       const clean = Array.isArray(list) ? list : [];
       setSales(clean);
-
-      // ✅ detect transitions for notifications
       applySalesNotifications(clean);
     } catch (e) {
       banner("danger", e?.data?.error || e?.message || "Cannot load sales");
@@ -859,13 +420,13 @@ export default function SellerPage() {
     }
   }, [applySalesNotifications]);
 
-  // customer search (debounced)
   const searchCustomers = useCallback(async (q) => {
     const qq = String(q || "").trim();
     if (!qq) {
       setCustomerResults([]);
       return;
     }
+
     setCustomerLoading(true);
     try {
       const data = await apiFetch(ENDPOINTS.CUSTOMERS_SEARCH(qq), {
@@ -885,14 +446,12 @@ export default function SellerPage() {
     return () => clearTimeout(t);
   }, [customerQ, searchCustomers]);
 
-  // load per section
   useEffect(() => {
     if (!isAuthorized) return;
     if (section === "create") loadProducts();
     if (section === "dashboard" || section === "sales") loadSales();
   }, [isAuthorized, section, loadProducts, loadSales]);
 
-  // ✅ background polling ONLY when Seller is watching dashboard/sales
   useEffect(() => {
     if (!isAuthorized) return;
     const watching = section === "dashboard" || section === "sales";
@@ -914,27 +473,28 @@ export default function SellerPage() {
         setSales(clean);
         applySalesNotifications(clean);
       } catch {
-        // silent (no spam)
+        // silent polling failure
       } finally {
         salesPollInFlightRef.current = false;
       }
     };
 
     const t = setInterval(tick, NOTIFY_POLL_MS);
+
     return () => {
       alive = false;
       clearInterval(t);
     };
   }, [isAuthorized, section, applySalesNotifications]);
 
-  /* ---------- derived ---------- */
-
   const filteredProducts = useMemo(() => {
     const list = Array.isArray(products) ? products : [];
     const q = String(prodQ || "")
       .trim()
       .toLowerCase();
+
     if (!q) return list;
+
     return list.filter((p) => {
       const name = String(p?.name ?? "").toLowerCase();
       const sku = String(p?.sku ?? "").toLowerCase();
@@ -947,6 +507,7 @@ export default function SellerPage() {
     const q = String(salesQ || "")
       .trim()
       .toLowerCase();
+
     if (!q) return list;
 
     return list.filter((s) => {
@@ -980,6 +541,7 @@ export default function SellerPage() {
   }, [filteredSales]);
 
   const showAllSales = String(salesQ || "").trim().length > 0;
+
   const salesToShow = useMemo(() => {
     return showAllSales ? salesSorted.slice(0, 200) : salesSorted.slice(0, 10);
   }, [salesSorted, showAllSales]);
@@ -999,6 +561,7 @@ export default function SellerPage() {
     return todaySales.reduce((sum, s) => {
       const st = String(s?.status || "").toUpperCase();
       if (st === "CANCELLED") return sum;
+
       const v = Number(s?.totalAmount ?? s?.total ?? 0);
       return sum + (Number.isFinite(v) ? v : 0);
     }, 0);
@@ -1023,8 +586,6 @@ export default function SellerPage() {
       (s) => String(s?.status || "").toUpperCase() === "PENDING",
     ).length;
   }, [sales]);
-
-  /* ---------- cart helpers ---------- */
 
   function productToCartItem(p) {
     const productId = Number(p?.id);
@@ -1051,10 +612,17 @@ export default function SellerPage() {
 
   function addProductToSaleCart(p) {
     const productId = Number(p?.id);
-    if (!productId) return pushToast("warn", "Missing product id.");
-    if (saleCart.some((x) => Number(x.productId) === productId)) {
-      return pushToast("warn", "Already added.");
+
+    if (!productId) {
+      pushToast("warn", "Missing product id.");
+      return;
     }
+
+    if (saleCart.some((x) => Number(x.productId) === productId)) {
+      pushToast("warn", "Already added.");
+      return;
+    }
+
     setSaleCart((prev) => [...prev, productToCartItem(p)]);
     pushToast("success", "Added to cart.");
   }
@@ -1091,8 +659,6 @@ export default function SellerPage() {
     return saleCart.reduce((sum, it) => sum + previewLineTotal(it), 0);
   }, [saleCart]);
 
-  /* ---------- actions ---------- */
-
   async function createCustomerFromInputs() {
     if (createCustomerBtn === "loading") return;
 
@@ -1101,9 +667,15 @@ export default function SellerPage() {
     const tin = toStr(customerTin);
     const address = toStr(customerAddress);
 
-    if (name.length < 2) return pushToast("warn", "Customer name is required.");
-    if (phone.length < 6)
-      return pushToast("warn", "Customer phone is required.");
+    if (name.length < 2) {
+      pushToast("warn", "Customer name is required.");
+      return;
+    }
+
+    if (phone.length < 6) {
+      pushToast("warn", "Customer phone is required.");
+      return;
+    }
 
     setCreateCustomerBtn("loading");
     setMsg("");
@@ -1117,11 +689,13 @@ export default function SellerPage() {
         method: "POST",
         body,
       });
+
       const c = data?.customer || null;
 
       if (!c?.id) {
         setCreateCustomerBtn("idle");
-        return pushToast("danger", "Failed to create customer.");
+        pushToast("danger", "Failed to create customer.");
+        return;
       }
 
       setSelectedCustomer({
@@ -1155,34 +729,48 @@ export default function SellerPage() {
     const typedPhone = toStr(customerPhone);
 
     if (!selectedCustomer?.id) {
-      if (typedName.length < 2)
-        return pushToast("warn", "Customer name is required.");
-      if (typedPhone.length < 6)
-        return pushToast("warn", "Customer phone is required.");
+      if (typedName.length < 2) {
+        pushToast("warn", "Customer name is required.");
+        return;
+      }
+
+      if (typedPhone.length < 6) {
+        pushToast("warn", "Customer phone is required.");
+        return;
+      }
     }
 
-    if (saleCart.length === 0)
-      return pushToast("warn", "Cart is empty. Add products.");
+    if (saleCart.length === 0) {
+      pushToast("warn", "Cart is empty. Add products.");
+      return;
+    }
 
     for (const it of saleCart) {
       const qty = toInt(it.qty);
-      if (qty <= 0) return pushToast("warn", `Bad qty for ${it.productName}.`);
+      if (qty <= 0) {
+        pushToast("warn", `Bad qty for ${it.productName}.`);
+        return;
+      }
 
       const selling = toInt(it.sellingPrice);
       const unit = toInt(it.unitPrice);
-      if (unit > selling)
-        return pushToast(
+      if (unit > selling) {
+        pushToast(
           "warn",
           `Unit price above selling price for ${it.productName}.`,
         );
+        return;
+      }
 
       const maxPct = Number(it.maxDiscountPercent ?? 0) || 0;
       const pct = Number(it.discountPercent ?? 0) || 0;
-      if (pct > maxPct)
-        return pushToast(
+      if (pct > maxPct) {
+        pushToast(
           "warn",
           `Discount too high for ${it.productName}. Max ${maxPct}%.`,
         );
+        return;
+      }
     }
 
     const payload = {
@@ -1194,6 +782,7 @@ export default function SellerPage() {
       note: toStr(note) ? toStr(note).slice(0, 200) : null,
       items: saleCart.map((it) => {
         const out = { productId: Number(it.productId), qty: toInt(it.qty) };
+
         const up = Number(it.unitPrice);
         if (Number.isFinite(up)) out.unitPrice = up;
 
@@ -1215,6 +804,7 @@ export default function SellerPage() {
         method: "POST",
         body: payload,
       });
+
       const newSaleId = data?.sale?.id || data?.id || null;
 
       pushToast(
@@ -1285,14 +875,14 @@ export default function SellerPage() {
         body: { status: "PAID", paymentMethod: method },
       });
 
-      pushToast("success", `Sale #${sid} marked PAID (${method})`);
+      pushToast("success", `Sale #${sid} marked paid (${method})`);
       await loadSales();
 
       setMarkBtnState((p) => ({ ...p, [sid]: "success" }));
       setTimeout(() => setMarkBtnState((p) => ({ ...p, [sid]: "idle" })), 900);
     } catch (e) {
       setMarkBtnState((p) => ({ ...p, [sid]: "idle" }));
-      pushToast("danger", e?.data?.error || e?.message || "Mark PAID failed");
+      pushToast("danger", e?.data?.error || e?.message || "Mark paid failed");
     }
   }
 
@@ -1309,7 +899,7 @@ export default function SellerPage() {
     setCreditOpen(true);
   }
 
-  async function confirmCredit({ note }) {
+  async function confirmCredit() {
     const sid = Number(creditSale?.id);
     if (!sid) return;
 
@@ -1321,40 +911,41 @@ export default function SellerPage() {
         method: "POST",
         body: { status: "PENDING" },
       });
-      pushToast("success", `Sale #${sid} marked CREDIT`);
+
+      pushToast("success", `Sale #${sid} marked credit`);
       setCreditOpen(false);
       setCreditSale(null);
       await loadSales();
     } catch (e) {
-      pushToast("danger", e?.data?.error || e?.message || "Mark CREDIT failed");
+      pushToast("danger", e?.data?.error || e?.message || "Mark credit failed");
     } finally {
       setCreditSaving(false);
     }
   }
 
-  /* ---------- render ---------- */
-
   if (bootLoading) return <PageSkeleton />;
-  if (!isAuthorized)
-    return <div className="p-6 text-sm text-slate-600">Redirecting…</div>;
+
+  if (!isAuthorized) {
+    return <div className="p-6 text-sm app-muted">Redirecting…</div>;
+  }
 
   const subtitle = `User: ${me?.email || "—"} • ${locationLabel(me)}`;
   const title = roleLower === "admin" ? "Seller (Admin)" : "Seller";
 
   return (
-    <div className="min-h-screen bg-slate-50 overflow-x-hidden">
+    <div className="min-h-screen overflow-x-hidden bg-[var(--app-bg)]">
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
 
       <RoleBar title={title} subtitle={subtitle} user={me} />
 
-      <ItemsModal
+      <SellerItemsModal
         open={itemsOpen}
         loading={itemsLoading}
         sale={itemsSale}
         onClose={() => setItemsOpen(false)}
       />
 
-      <CreditSetupModal
+      <SellerCreditSetupModal
         key={creditSale?.id || "credit"}
         open={creditOpen}
         sale={creditSale}
@@ -1367,947 +958,109 @@ export default function SellerPage() {
         onConfirm={confirmCredit}
       />
 
-      <div className="mx-auto max-w-7xl px-4 sm:px-5 py-6">
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-5">
         {msg ? (
           <div className="mb-4">
             <div
-              className={cx(
-                "rounded-2xl border px-4 py-3 text-sm",
+              className={[
+                "rounded-3xl border px-4 py-3 text-sm",
                 msgKind === "success"
-                  ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+                  ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
                   : msgKind === "warn"
-                    ? "bg-amber-50 text-amber-900 border-amber-200"
+                    ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
                     : msgKind === "danger"
-                      ? "bg-rose-50 text-rose-900 border-rose-200"
-                      : "bg-slate-50 text-slate-800 border-slate-200",
-              )}
+                      ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
+                      : "border-[var(--border)] bg-[var(--card)] text-[var(--app-fg)]",
+              ].join(" ")}
             >
               {msg}
             </div>
           </div>
         ) : null}
 
-        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
-          {/* Sidebar */}
-          <aside className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4 h-fit">
-            <div className="text-sm font-bold text-slate-900">{title}</div>
-            <div className="mt-1 text-xs text-slate-600">
-              {locationLabel(me)}
-            </div>
+        <div className="grid gap-4">
+          <TopSectionSwitcher
+            title={title}
+            me={me}
+            section={section}
+            setSection={setSection}
+            sections={SECTIONS}
+            draftCount={draftCount}
+            creditCount={creditCount}
+          />
 
-            <div className="mt-4 lg:hidden">
-              <div className="text-xs font-semibold text-slate-600 mb-2">
-                Section
-              </div>
-              <Select
-                value={section}
-                onChange={(e) => setSection(e.target.value)}
-              >
-                {SECTIONS.map((s) => (
-                  <option key={s.key} value={s.key}>
-                    {s.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-
-            <div className="mt-4 hidden lg:grid gap-2">
-              <NavItem
-                active={section === "dashboard"}
-                label="Dashboard"
-                onClick={() => setSection("dashboard")}
-              />
-              <NavItem
-                active={section === "create"}
-                label="Create sale"
-                onClick={() => setSection("create")}
-              />
-              <NavItem
-                active={section === "sales"}
-                label="My sales"
-                onClick={() => setSection("sales")}
-                badge={draftCount > 0 ? String(draftCount) : null}
-              />
-              <NavItem
-                active={section === "credits"}
-                label="Credits"
-                onClick={() => setSection("credits")}
-                badge={creditCount > 0 ? String(creditCount) : null}
-              />
-            </div>
-
-            <div className="mt-6 pt-4 border-t border-slate-200 text-xs text-slate-600">
-              Flow: Draft → Store keeper releases → you mark Paid or Credit.
-              <div className="mt-2">
-                Notifications: release + cashier payment are detected
-                automatically while you are on Dashboard/Sales.
-              </div>
-            </div>
-
-            {roleLower === "admin" ? (
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
-                Admin viewing Seller UI. Actions follow backend permissions for
-                your admin account.
-              </div>
-            ) : null}
-          </aside>
-
-          {/* Main */}
           <main className="grid gap-4">
-            {/* DASHBOARD */}
             {section === "dashboard" ? (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                  <Card
-                    label="Today sales"
-                    value={salesLoading ? "…" : String(todaySalesCount)}
-                    sub="Created today"
-                  />
-                  <Card
-                    label="Today total"
-                    value={salesLoading ? "…" : money(todaySalesTotal)}
-                    sub="RWF"
-                  />
-                  <Card
-                    label="Waiting release"
-                    value={salesLoading ? "…" : String(draftCount)}
-                    sub="Draft sales"
-                  />
-                  <Card
-                    label="Released"
-                    value={salesLoading ? "…" : String(releasedCount)}
-                    sub="Ready to finalize"
-                  />
-                </div>
-
-                <SectionCard
-                  title="Today focus"
-                  hint="Finalize released sales to get paid faster."
-                  right={
-                    <AsyncButton
-                      variant="secondary"
-                      size="sm"
-                      state={salesLoading ? "loading" : "idle"}
-                      text="Refresh"
-                      loadingText="Refreshing…"
-                      successText="Done"
-                      onClick={loadSales}
-                    />
-                  }
-                >
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setSection("create")}
-                      className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
-                    >
-                      <div className="text-sm font-bold text-slate-900">
-                        Create sale
-                      </div>
-                      <div className="mt-1 text-xs text-slate-600">
-                        Make a draft sale for store keeper to release.
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setSection("sales")}
-                      className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
-                    >
-                      <div className="text-sm font-bold text-slate-900">
-                        Finalize sales
-                      </div>
-                      <div className="mt-1 text-xs text-slate-600">
-                        Mark paid or credit once released.
-                      </div>
-                    </button>
-                  </div>
-                </SectionCard>
-              </>
+              <SellerDashboardSection
+                salesLoading={salesLoading}
+                todaySalesCount={todaySalesCount}
+                todaySalesTotal={todaySalesTotal}
+                draftCount={draftCount}
+                releasedCount={releasedCount}
+                loadSales={loadSales}
+                setSection={setSection}
+              />
             ) : null}
 
-            {/* CREATE (unchanged from your existing UI) */}
             {section === "create" ? (
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                {/* PRODUCTS */}
-                <SectionCard
-                  title="Products"
-                  hint="Search and add to cart."
-                  right={
-                    <AsyncButton
-                      variant="secondary"
-                      size="sm"
-                      state={productsLoading ? "loading" : "idle"}
-                      text="Refresh"
-                      loadingText="Refreshing…"
-                      successText="Done"
-                      onClick={loadProducts}
-                    />
-                  }
-                >
-                  <div className="grid gap-3">
-                    <Input
-                      placeholder="Search by name or SKU"
-                      value={prodQ}
-                      onChange={(e) => setProdQ(e.target.value)}
-                    />
-
-                    {productsLoading ? (
-                      <div className="grid gap-3">
-                        <Skeleton className="h-20 w-full" />
-                        <Skeleton className="h-20 w-full" />
-                        <Skeleton className="h-20 w-full" />
-                      </div>
-                    ) : filteredProducts.length === 0 ? (
-                      <div className="text-sm text-slate-600">
-                        No products found.
-                      </div>
-                    ) : (
-                      <div className="grid gap-2">
-                        {filteredProducts.slice(0, 40).map((p) => {
-                          const selling =
-                            Number(p?.sellingPrice ?? p?.selling_price ?? 0) ||
-                            0;
-                          const maxp =
-                            Number(
-                              p?.maxDiscountPercent ??
-                                p?.max_discount_percent ??
-                                0,
-                            ) || 0;
-
-                          return (
-                            <div
-                              key={String(p?.id)}
-                              className="rounded-2xl border border-slate-200 bg-white p-3 flex items-start justify-between gap-3"
-                            >
-                              <div className="min-w-0">
-                                <div className="text-sm font-bold text-slate-900 truncate">
-                                  {p?.name || "—"}
-                                </div>
-                                <div className="mt-1 text-xs text-slate-600">
-                                  SKU: {p?.sku || "—"}
-                                </div>
-                                <div className="mt-2 text-xs text-slate-600">
-                                  Selling: <b>{money(selling)}</b> • Max
-                                  discount: <b>{maxp}%</b>
-                                </div>
-                              </div>
-
-                              <button
-                                type="button"
-                                className="shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-xs font-extrabold hover:bg-slate-50"
-                                onClick={() => addProductToSaleCart(p)}
-                              >
-                                Add
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {filteredProducts.length > 40 ? (
-                      <div className="text-xs text-slate-500">
-                        Showing first 40 results. Refine your search to find
-                        more.
-                      </div>
-                    ) : null}
-                  </div>
-                </SectionCard>
-
-                {/* CREATE SALE */}
-                <SectionCard
-                  title="Create sale (Draft)"
-                  hint="Customer + cart → create draft sale → store keeper releases stock."
-                >
-                  <form onSubmit={createSale} className="grid gap-4">
-                    {/* CUSTOMER */}
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-sm font-extrabold text-slate-900">
-                            Customer
-                          </div>
-                          <div className="mt-1 text-xs text-slate-600">
-                            Search existing customer or create a new one.
-                          </div>
-                        </div>
-
-                        {selectedCustomer?.id ? (
-                          <span className="shrink-0 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1 text-xs font-extrabold">
-                            Selected
-                          </span>
-                        ) : null}
-                      </div>
-
-                      <div className="mt-3 grid gap-2">
-                        <Input
-                          placeholder="Search customer (name, phone, TIN)"
-                          value={customerQ}
-                          onChange={(e) => setCustomerQ(e.target.value)}
-                        />
-
-                        {/* dropdown */}
-                        {toStr(customerQ) && !selectedCustomer ? (
-                          <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-                            <div className="max-h-64 overflow-auto">
-                              {customerLoading ? (
-                                <div className="p-3 text-sm text-slate-600">
-                                  Searching…
-                                </div>
-                              ) : customerResults.length ? (
-                                <div className="divide-y divide-slate-100">
-                                  {customerResults.map((c) => (
-                                    <div
-                                      key={c.id}
-                                      className="p-3 hover:bg-slate-50"
-                                    >
-                                      <div className="flex items-start justify-between gap-3">
-                                        <div className="min-w-0">
-                                          <div className="text-sm font-extrabold text-slate-900 truncate">
-                                            {c.name || "—"}
-                                          </div>
-
-                                          <div className="mt-1 text-xs text-slate-600 flex flex-wrap gap-x-2 gap-y-1">
-                                            <span className="font-semibold">
-                                              {c.phone || "—"}
-                                            </span>
-                                            {c.tin ? (
-                                              <span className="rounded-full bg-slate-50 border border-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-700">
-                                                TIN: {c.tin}
-                                              </span>
-                                            ) : null}
-                                          </div>
-
-                                          {c.address ? (
-                                            <div className="mt-1 text-xs text-slate-600 line-clamp-2">
-                                              {c.address}
-                                            </div>
-                                          ) : null}
-                                        </div>
-
-                                        <button
-                                          type="button"
-                                          className="shrink-0 rounded-xl bg-slate-900 text-white px-3 py-2 text-xs font-extrabold hover:bg-slate-800"
-                                          onClick={() => {
-                                            const name =
-                                              c?.name ?? c?.customerName ?? "";
-                                            const phone =
-                                              c?.phone ??
-                                              c?.customerPhone ??
-                                              "";
-                                            const tin =
-                                              c?.tin ??
-                                              c?.tinNumber ??
-                                              c?.taxId ??
-                                              "";
-                                            const address =
-                                              c?.address ??
-                                              c?.location ??
-                                              c?.customerAddress ??
-                                              "";
-
-                                            setSelectedCustomer(c);
-
-                                            setCustomerName(name);
-                                            setCustomerPhone(phone);
-                                            setCustomerTin(tin);
-                                            setCustomerAddress(address);
-
-                                            setCustomerQ(
-                                              `${name} ${phone}`.trim(),
-                                            );
-                                            setCustomerResults([]);
-                                          }}
-                                        >
-                                          Select
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div className="p-3">
-                                  <div className="text-sm font-semibold text-slate-900">
-                                    No customer found
-                                  </div>
-                                  <div className="mt-1 text-xs text-slate-600">
-                                    Fill details below and create, or use this
-                                    search value to prefill.
-                                  </div>
-
-                                  <button
-                                    type="button"
-                                    className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
-                                    onClick={() => {
-                                      const q = toStr(customerQ);
-                                      const digits = q.replace(/\D/g, "");
-                                      const looksLikePhone = digits.length >= 8;
-
-                                      setSelectedCustomer(null);
-                                      setCustomerResults([]);
-
-                                      if (looksLikePhone) {
-                                        setCustomerPhone(digits);
-                                        if (!toStr(customerName))
-                                          setCustomerName("");
-                                      } else {
-                                        setCustomerName(q);
-                                        if (!toStr(customerPhone))
-                                          setCustomerPhone("");
-                                      }
-
-                                      setCustomerTin("");
-                                      setCustomerAddress("");
-                                    }}
-                                  >
-                                    Use search value to create customer
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ) : null}
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div>
-                            <div className="text-xs font-semibold text-slate-600 mb-1">
-                              Name
-                            </div>
-                            <Input
-                              placeholder="Customer name"
-                              value={customerName}
-                              onChange={(e) => {
-                                setCustomerName(e.target.value);
-                                setSelectedCustomer(null);
-                              }}
-                            />
-                          </div>
-
-                          <div>
-                            <div className="text-xs font-semibold text-slate-600 mb-1">
-                              Phone
-                            </div>
-                            <Input
-                              placeholder="Customer phone"
-                              value={customerPhone}
-                              onChange={(e) => {
-                                setCustomerPhone(e.target.value);
-                                setSelectedCustomer(null);
-                              }}
-                            />
-                          </div>
-
-                          <div>
-                            <div className="text-xs font-semibold text-slate-600 mb-1">
-                              TIN
-                            </div>
-                            <Input
-                              placeholder="TIN (optional)"
-                              value={customerTin}
-                              onChange={(e) => {
-                                setCustomerTin(e.target.value);
-                                setSelectedCustomer(null);
-                              }}
-                            />
-                          </div>
-
-                          <div>
-                            <div className="text-xs font-semibold text-slate-600 mb-1">
-                              Address
-                            </div>
-                            <Input
-                              placeholder="Address / location (optional)"
-                              value={customerAddress}
-                              onChange={(e) => {
-                                setCustomerAddress(e.target.value);
-                                setSelectedCustomer(null);
-                              }}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <AsyncButton
-                            type="button"
-                            variant="primary"
-                            state={createCustomerBtn}
-                            text="Create customer"
-                            loadingText="Creating…"
-                            successText="Created"
-                            onClick={createCustomerFromInputs}
-                            disabled={
-                              !toStr(customerName) || !toStr(customerPhone)
-                            }
-                          />
-
-                          <button
-                            type="button"
-                            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
-                            onClick={() => {
-                              setSelectedCustomer(null);
-                              setCustomerQ("");
-                              setCustomerResults([]);
-                              setCustomerName("");
-                              setCustomerPhone("");
-                              setCustomerTin("");
-                              setCustomerAddress("");
-                            }}
-                          >
-                            Clear
-                          </button>
-
-                          {selectedCustomer?.id ? (
-                            <div className="text-xs text-emerald-700 font-extrabold self-center">
-                              {selectedCustomer.name} • {selectedCustomer.phone}
-                              {selectedCustomer.tin
-                                ? ` • TIN: ${selectedCustomer.tin}`
-                                : ""}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* NOTE */}
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <div className="text-sm font-extrabold text-slate-900">
-                        Note
-                      </div>
-                      <div className="mt-2">
-                        <TextArea
-                          rows={2}
-                          placeholder="Optional note (e.g., delivery, special request)"
-                          value={note}
-                          onChange={(e) => setNote(e.target.value)}
-                        />
-                      </div>
-                    </div>
-
-                    {/* CART (no horizontal scroll) */}
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-sm font-extrabold text-slate-900">
-                            Cart
-                          </div>
-                          <div className="mt-1 text-xs text-slate-600">
-                            Adjust qty/price/discount per item.
-                          </div>
-                        </div>
-
-                        <div className="shrink-0 text-right">
-                          <div className="text-xs text-slate-600">Subtotal</div>
-                          <div className="text-lg font-extrabold text-slate-900">
-                            {money(cartSubtotal)}
-                          </div>
-                        </div>
-                      </div>
-
-                      {saleCart.length === 0 ? (
-                        <div className="mt-3 text-sm text-slate-600">
-                          Cart is empty. Add products from the left.
-                        </div>
-                      ) : (
-                        <div className="mt-3 grid gap-3">
-                          {saleCart.map((it) => {
-                            const line = previewLineTotal(it);
-                            const maxPct =
-                              Number(it.maxDiscountPercent ?? 0) || 0;
-
-                            return (
-                              <div
-                                key={String(it.productId)}
-                                className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                              >
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <div className="text-sm font-extrabold text-slate-900 truncate">
-                                      {it.productName}
-                                    </div>
-                                    <div className="mt-1 text-xs text-slate-600">
-                                      SKU: {it.sku} • Selling:{" "}
-                                      <b>{money(it.sellingPrice)}</b>
-                                    </div>
-                                  </div>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => removeFromCart(it.productId)}
-                                    className="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-700 hover:bg-slate-50"
-                                  >
-                                    Remove
-                                  </button>
-                                </div>
-
-                                <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                  <div>
-                                    <div className="text-xs font-semibold text-slate-600 mb-1">
-                                      Qty
-                                    </div>
-                                    <Input
-                                      type="number"
-                                      min="1"
-                                      value={String(it.qty)}
-                                      onChange={(e) =>
-                                        updateCart(it.productId, {
-                                          qty: Number(e.target.value || 1),
-                                        })
-                                      }
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <div className="text-xs font-semibold text-slate-600 mb-1">
-                                      Unit price
-                                    </div>
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      max={it.sellingPrice || undefined}
-                                      value={String(it.unitPrice)}
-                                      onChange={(e) =>
-                                        updateCart(it.productId, {
-                                          unitPrice: Number(
-                                            e.target.value || 0,
-                                          ),
-                                        })
-                                      }
-                                    />
-                                    <div className="mt-1 text-[11px] text-slate-500">
-                                      ≤ selling price
-                                    </div>
-                                  </div>
-
-                                  <div>
-                                    <div className="text-xs font-semibold text-slate-600 mb-1">
-                                      Discount %
-                                    </div>
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      max={maxPct}
-                                      value={String(it.discountPercent || 0)}
-                                      onChange={(e) =>
-                                        updateCart(it.productId, {
-                                          discountPercent: Number(
-                                            e.target.value || 0,
-                                          ),
-                                        })
-                                      }
-                                    />
-                                    <div className="mt-1 text-[11px] text-slate-500">
-                                      max {maxPct}%
-                                    </div>
-                                  </div>
-
-                                  <div>
-                                    <div className="text-xs font-semibold text-slate-600 mb-1">
-                                      Discount amount
-                                    </div>
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      value={String(it.discountAmount || 0)}
-                                      onChange={(e) =>
-                                        updateCart(it.productId, {
-                                          discountAmount: Number(
-                                            e.target.value || 0,
-                                          ),
-                                        })
-                                      }
-                                    />
-                                  </div>
-                                </div>
-
-                                <div className="mt-3 flex items-center justify-between">
-                                  <div className="text-xs text-slate-600">
-                                    Line total
-                                  </div>
-                                  <div className="text-lg font-extrabold text-slate-900">
-                                    {money(line)}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-
-                    <AsyncButton
-                      type="submit"
-                      variant="primary"
-                      state={createSaleBtn}
-                      text="Create draft sale"
-                      loadingText="Creating…"
-                      successText="Created"
-                      disabled={saleCart.length === 0}
-                    />
-
-                    <div className="text-xs text-slate-600">
-                      After you create the sale, store keeper must release stock
-                      before you can mark paid/credit.
-                    </div>
-                  </form>
-                </SectionCard>
-              </div>
+              <SellerCreateSection
+                productsLoading={productsLoading}
+                loadProducts={loadProducts}
+                prodQ={prodQ}
+                setProdQ={setProdQ}
+                filteredProducts={filteredProducts}
+                addProductToSaleCart={addProductToSaleCart}
+                customerQ={customerQ}
+                setCustomerQ={setCustomerQ}
+                selectedCustomer={selectedCustomer}
+                customerLoading={customerLoading}
+                customerResults={customerResults}
+                setSelectedCustomer={setSelectedCustomer}
+                customerName={customerName}
+                setCustomerName={setCustomerName}
+                customerPhone={customerPhone}
+                setCustomerPhone={setCustomerPhone}
+                customerTin={customerTin}
+                setCustomerTin={setCustomerTin}
+                customerAddress={customerAddress}
+                setCustomerAddress={setCustomerAddress}
+                createCustomerBtn={createCustomerBtn}
+                createCustomerFromInputs={createCustomerFromInputs}
+                note={note}
+                setNote={setNote}
+                saleCart={saleCart}
+                cartSubtotal={cartSubtotal}
+                updateCart={updateCart}
+                removeFromCart={removeFromCart}
+                previewLineTotal={previewLineTotal}
+                createSale={createSale}
+                createSaleBtn={createSaleBtn}
+              />
             ) : null}
 
-            {/* SALES (updated: due date + paid date safety) */}
             {section === "sales" ? (
-              <SectionCard
-                title="My sales"
-                hint={
-                  showAllSales
-                    ? "Showing matches (up to 200). Clear search to see last 10."
-                    : "Showing last 10 sales (most recent first)."
-                }
-                right={
-                  <AsyncButton
-                    variant="secondary"
-                    size="sm"
-                    state={salesLoading ? "loading" : "idle"}
-                    text="Refresh"
-                    loadingText="Refreshing…"
-                    successText="Done"
-                    onClick={loadSales}
-                  />
-                }
-              >
-                <div className="grid gap-3">
-                  <Input
-                    placeholder="Search: id, credit, paid, customer name, phone"
-                    value={salesQ}
-                    onChange={(e) => setSalesQ(e.target.value)}
-                  />
-
-                  {salesLoading ? (
-                    <div className="grid gap-3">
-                      <Skeleton className="h-24 w-full" />
-                      <Skeleton className="h-24 w-full" />
-                      <Skeleton className="h-24 w-full" />
-                    </div>
-                  ) : salesToShow.length === 0 ? (
-                    <div className="text-sm text-slate-600">
-                      No sales found.
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                      {salesToShow.map((s) => {
-                        const id = s?.id;
-                        const st = String(s?.status || "").toUpperCase();
-
-                        const cname =
-                          s?.customerName ?? s?.customer_name ?? "Walk-in";
-                        const cphone =
-                          s?.customerPhone ?? s?.customer_phone ?? "";
-                        const customerLabel = [toStr(cname), toStr(cphone)]
-                          .filter(Boolean)
-                          .join(" • ");
-
-                        const total =
-                          Number(s?.totalAmount ?? s?.total ?? 0) || 0;
-
-                        const amountPaid = Number(s?.amountPaid ?? 0) || 0;
-
-                        const canFinalize =
-                          st === "FULFILLED" || st === "PENDING";
-
-                        const pm = salePayMethod[id] || "CASH";
-                        const btnState = markBtnState[id] || "idle";
-
-                        const createdAt = s?.createdAt || s?.created_at;
-
-                        const credit = s?.credit || null;
-
-                        // Paid date:
-                        // - If backend provides credit.settledAt for credit sales, show it.
-                        // - Otherwise show sale.completedAt/paidAt/updatedAt if present.
-                        const paidAt =
-                          credit?.settledAt ||
-                          credit?.settled_at ||
-                          s?.completedAt ||
-                          s?.completed_at ||
-                          s?.paidAt ||
-                          s?.paid_at ||
-                          null;
-
-                        // Due date: only show if backend provides one
-                        const dueDate =
-                          credit?.dueDate ||
-                          credit?.due_date ||
-                          s?.dueDate ||
-                          s?.due_date ||
-                          null;
-
-                        const creditAmount =
-                          Number(credit?.amount ?? total) || total;
-
-                        const remaining =
-                          st === "PENDING"
-                            ? Math.max(0, creditAmount - amountPaid)
-                            : null;
-
-                        const itemsPreview = Array.isArray(s?.itemsPreview)
-                          ? s.itemsPreview
-                          : null;
-
-                        return (
-                          <div
-                            key={String(id)}
-                            className="rounded-2xl border border-slate-200 bg-white p-4"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <div className="text-sm font-extrabold text-slate-900">
-                                    Sale #{id ?? "—"}
-                                  </div>
-                                  <StatusBadge status={st} />
-                                </div>
-
-                                <div className="mt-2 text-sm text-slate-700">
-                                  Customer:{" "}
-                                  <b className="break-words">
-                                    {customerLabel || "—"}
-                                  </b>
-                                </div>
-
-                                <div className="mt-1 text-sm text-slate-700">
-                                  Total: <b>{money(total)}</b> RWF
-                                </div>
-
-                                {itemsPreview?.length ? (
-                                  <div className="mt-2 text-xs text-slate-600">
-                                    <b>Items:</b>{" "}
-                                    {itemsPreview.slice(0, 3).map((it, idx) => (
-                                      <span key={idx}>
-                                        {idx ? " • " : ""}
-                                        {toStr(it?.productName) ||
-                                          "Item"} × {Number(it?.qty ?? 0)}
-                                      </span>
-                                    ))}
-                                    {itemsPreview.length > 3 ? " • …" : ""}
-                                  </div>
-                                ) : null}
-
-                                <div className="mt-2 text-xs text-slate-500">
-                                  Created: {safeDate(createdAt)}
-                                </div>
-
-                                {st === "COMPLETED" ? (
-                                  <div className="mt-1 text-xs text-slate-600">
-                                    Paid date:{" "}
-                                    <b>{paidAt ? safeDate(paidAt) : "—"}</b>
-                                  </div>
-                                ) : null}
-
-                                {dueDate ? (
-                                  <div className="mt-1 text-xs text-slate-600">
-                                    Due date: <b>{safeDateOnly(dueDate)}</b>
-                                  </div>
-                                ) : null}
-                              </div>
-
-                              <button
-                                type="button"
-                                className="shrink-0 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
-                                onClick={() => openSaleItems(id)}
-                              >
-                                View items
-                              </button>
-                            </div>
-                            {String(s?.status || "").toUpperCase() ===
-                            "PENDING" ? (
-                              <CreditSummary sale={s} />
-                            ) : null}
-
-                            <div className="mt-3 pt-3 border-t border-slate-200">
-                              {!canFinalize ? (
-                                <div className="text-sm text-slate-600">
-                                  {st === "DRAFT"
-                                    ? "Waiting for store keeper to release stock."
-                                    : "No action required."}
-                                </div>
-                              ) : (
-                                <div className="grid gap-2">
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    <div>
-                                      <div className="text-xs font-semibold text-slate-600 mb-1">
-                                        Payment method (for PAID)
-                                      </div>
-                                      <Select
-                                        value={pm}
-                                        onChange={(e) =>
-                                          setSalePayMethod((prev) => ({
-                                            ...prev,
-                                            [id]: e.target.value,
-                                          }))
-                                        }
-                                      >
-                                        {PAYMENT_METHODS.map((m) => (
-                                          <option key={m.value} value={m.value}>
-                                            {m.label}
-                                          </option>
-                                        ))}
-                                      </Select>
-                                    </div>
-
-                                    <div className="flex items-end gap-2">
-                                      <AsyncButton
-                                        variant="primary"
-                                        size="md"
-                                        state={btnState}
-                                        text={
-                                          st === "PENDING"
-                                            ? "Record payment (mark PAID)"
-                                            : "Mark PAID"
-                                        }
-                                        loadingText="Saving…"
-                                        successText="Saved"
-                                        onClick={() => markSalePaid(id, pm)}
-                                      />
-                                    </div>
-                                  </div>
-
-                                  {st === "FULFILLED" ? (
-                                    <button
-                                      type="button"
-                                      className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-extrabold text-amber-900 hover:bg-amber-100"
-                                      onClick={() => openCreditModal(s)}
-                                    >
-                                      Mark CREDIT (customer will pay later)
-                                    </button>
-                                  ) : null}
-
-                                  {st === "AWAITING_PAYMENT_RECORD" ? (
-                                    <div className="text-xs text-slate-600">
-                                      Waiting cashier to record payment. Sale
-                                      will become PAID after cashier records it.
-                                    </div>
-                                  ) : null}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {!showAllSales ? (
-                    <div className="text-xs text-slate-500">
-                      Tip: type in the search box to find older sales.
-                    </div>
-                  ) : null}
-                </div>
-              </SectionCard>
+              <SellerSalesSection
+                showAllSales={showAllSales}
+                salesLoading={salesLoading}
+                loadSales={loadSales}
+                salesQ={salesQ}
+                setSalesQ={setSalesQ}
+                salesToShow={salesToShow}
+                salePayMethod={salePayMethod}
+                setSalePayMethod={setSalePayMethod}
+                markBtnState={markBtnState}
+                markSalePaid={markSalePaid}
+                openCreditModal={openCreditModal}
+                openSaleItems={openSaleItems}
+                paymentMethods={SELLER_PAYMENT_METHODS}
+              />
             ) : null}
 
-            {/* CREDITS */}
             {section === "credits" ? (
-              <SectionCard title="Credits" hint="Credit history and details.">
+              <SectionCard
+                title="Credits"
+                hint="Credit history and detail view."
+              >
                 <CreditsPanel
                   title="Credits (Seller)"
                   capabilities={{

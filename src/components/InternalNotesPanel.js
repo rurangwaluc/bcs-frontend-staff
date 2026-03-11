@@ -2,18 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import AsyncButton from "./AsyncButton";
 import { apiFetch } from "../lib/api";
 
-/**
- * Backend:
- *  GET  /notes?entityType=sale|credit|customer&entityId=123&limit=50&cursor=...
- *  POST /notes { entityType, entityId, message }
- */
-
 function fmtDate(v) {
-  if (!v) return "-";
+  if (!v) return "—";
   try {
-    return new Date(v).toLocaleString();
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return String(v);
+    return d.toLocaleString();
   } catch {
     return String(v);
   }
@@ -30,9 +27,52 @@ function normRow(r) {
   };
 }
 
+function cx(...classes) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function Banner({ kind = "info", children }) {
+  const styles =
+    kind === "success"
+      ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
+      : kind === "danger"
+        ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
+        : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]";
+
+  return (
+    <div className={cx("rounded-2xl border px-4 py-3 text-sm", styles)}>
+      {children}
+    </div>
+  );
+}
+
+function TextArea({ className = "", ...props }) {
+  return (
+    <textarea
+      {...props}
+      className={cx(
+        "app-focus w-full rounded-2xl border border-[var(--border-strong)] bg-[var(--card)] px-3 py-2.5 text-sm text-[var(--app-fg)] outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.35)] dark:shadow-none",
+        "placeholder:text-[var(--muted-2)]",
+        className,
+      )}
+    />
+  );
+}
+
+function Skeleton({ className = "" }) {
+  return (
+    <div
+      className={cx(
+        "animate-pulse rounded-xl bg-slate-200/80 dark:bg-slate-800/70",
+        className,
+      )}
+    />
+  );
+}
+
 export default function InternalNotesPanel({
-  entityType, // "sale" | "credit" | "customer"
-  entityId, // number
+  entityType,
+  entityId,
   title = "Internal notes",
   canCreate = true,
   defaultLimit = 50,
@@ -42,7 +82,9 @@ export default function InternalNotesPanel({
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [msg, setMsg] = useState("");
+  const [msgKind, setMsgKind] = useState("info");
   const [draft, setDraft] = useState("");
+  const [submitState, setSubmitState] = useState("idle");
 
   const valid = useMemo(() => {
     const t = String(entityType || "")
@@ -78,6 +120,7 @@ export default function InternalNotesPanel({
     } catch (e) {
       setRows([]);
       setNextCursor(null);
+      setMsgKind("danger");
       setMsg(e?.data?.error || e?.message || "Failed to load notes");
     } finally {
       setLoading(false);
@@ -97,6 +140,7 @@ export default function InternalNotesPanel({
       setRows((prev) => prev.concat(list));
       setNextCursor(data?.nextCursor ?? null);
     } catch (e) {
+      setMsgKind("danger");
       setMsg(e?.data?.error || e?.message || "Failed to load more notes");
     } finally {
       setLoadingMore(false);
@@ -104,25 +148,34 @@ export default function InternalNotesPanel({
   }, [valid, nextCursor, loadingMore, baseQuery]);
 
   const submit = useCallback(async () => {
-    if (!valid.ok) return;
-    if (!canCreate) return;
+    if (!valid.ok || !canCreate) return;
 
     const message = String(draft || "").trim();
     if (!message) {
+      setMsgKind("danger");
       setMsg("Write a note first.");
       return;
     }
 
+    setSubmitState("loading");
     setMsg("");
+
     try {
       await apiFetch("/notes", {
         method: "POST",
         body: { entityType: valid.t, entityId: valid.id, message },
       });
+
       setDraft("");
-      setMsg("✅ Note added.");
+      setMsgKind("success");
+      setMsg("Note added.");
       await loadFirstPage();
+
+      setSubmitState("success");
+      setTimeout(() => setSubmitState("idle"), 900);
     } catch (e) {
+      setSubmitState("idle");
+      setMsgKind("danger");
       setMsg(e?.data?.error || e?.message || "Failed to add note");
     }
   }, [valid, canCreate, draft, loadFirstPage]);
@@ -136,9 +189,11 @@ export default function InternalNotesPanel({
 
   if (!valid.ok) {
     return (
-      <div className="bg-white rounded-xl shadow p-4">
-        <div className="font-semibold">{title}</div>
-        <div className="text-sm text-gray-600 mt-2">
+      <div className="overflow-hidden rounded-3xl border border-[var(--border-strong)] bg-[var(--card)] shadow-sm">
+        <div className="border-b border-[var(--border)] p-4">
+          <div className="text-sm font-black text-[var(--app-fg)]">{title}</div>
+        </div>
+        <div className="p-4 text-sm app-muted">
           Select a record to view notes.
         </div>
       </div>
@@ -146,44 +201,37 @@ export default function InternalNotesPanel({
   }
 
   return (
-    <div className="bg-white rounded-xl shadow overflow-hidden">
-      <div className="p-4 border-b flex items-start justify-between gap-3">
+    <div className="overflow-hidden rounded-3xl border border-[var(--border-strong)] bg-[var(--card)] shadow-sm">
+      <div className="flex flex-col gap-3 border-b border-[var(--border)] p-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <div className="font-semibold">{title}</div>
-          <div className="text-xs text-gray-500 mt-1">
+          <div className="text-sm font-black text-[var(--app-fg)]">{title}</div>
+          <div className="mt-1 text-xs app-muted">
             Staff-only notes for {valid.t} #{valid.id}
           </div>
         </div>
 
-        <button
+        <AsyncButton
+          variant="secondary"
+          size="sm"
+          state={loading ? "loading" : "idle"}
+          text="Refresh"
+          loadingText="Loading…"
+          successText="Done"
           onClick={loadFirstPage}
-          className="px-3 py-2 rounded-lg border text-sm hover:bg-gray-50"
-          disabled={loading}
-        >
-          {loading ? "Loading..." : "Refresh"}
-        </button>
+        />
       </div>
 
-      <div className="p-4 space-y-3">
-        {msg ? (
-          <div
-            className={
-              "p-3 rounded-lg text-sm " +
-              (String(msg).startsWith("✅")
-                ? "bg-green-50 text-green-800"
-                : "bg-red-50 text-red-700")
-            }
-          >
-            {msg}
-          </div>
-        ) : null}
+      <div className="space-y-4 p-4">
+        {msg ? <Banner kind={msgKind}>{msg}</Banner> : null}
 
         {canCreate ? (
-          <div className="border rounded-xl p-3">
-            <div className="text-xs text-gray-500">Add note</div>
+          <div className="rounded-3xl border border-[var(--border-strong)] bg-[var(--card-2)] p-4 shadow-sm">
+            <div className="text-xs font-semibold uppercase tracking-[0.08em] app-muted">
+              Add note
+            </div>
 
-            <textarea
-              className="mt-2 w-full border rounded-lg px-3 py-2 text-sm"
+            <TextArea
+              className="mt-3"
               rows={3}
               placeholder="Agreement, warning, follow-up…"
               value={draft}
@@ -191,44 +239,51 @@ export default function InternalNotesPanel({
               maxLength={2000}
             />
 
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <div className="text-xs text-gray-500">
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-xs app-muted">
                 {2000 - String(draft || "").length} chars left
               </div>
 
-              <button
+              <AsyncButton
+                variant="primary"
+                size="sm"
+                state={submitState}
+                text="Add note"
+                loadingText="Saving…"
+                successText="Saved"
                 onClick={submit}
-                className="px-4 py-2 rounded-lg bg-black text-white text-sm"
-              >
-                Add note
-              </button>
+              />
             </div>
           </div>
         ) : (
-          <div className="text-sm text-gray-600">
+          <div className="text-sm app-muted">
             You don’t have permission to add notes.
           </div>
         )}
 
-        <div className="border rounded-xl overflow-hidden">
-          <div className="px-3 py-2 bg-gray-50 text-xs text-gray-600 flex items-center justify-between">
+        <div className="overflow-hidden rounded-3xl border border-[var(--border-strong)] bg-[var(--card-2)] shadow-sm">
+          <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3 text-xs app-muted">
             <div>{rows.length} notes</div>
             <div>{nextCursor ? "More available" : "End"}</div>
           </div>
 
           {loading ? (
-            <div className="p-3 text-sm text-gray-600">Loading…</div>
+            <div className="grid gap-3 p-4">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+            </div>
           ) : rows.length === 0 ? (
-            <div className="p-3 text-sm text-gray-600">No notes yet.</div>
+            <div className="p-4 text-sm app-muted">No notes yet.</div>
           ) : (
-            <div className="divide-y">
+            <div className="divide-y divide-[var(--border)]">
               {rows.map((r) => (
-                <div key={r.id} className="p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="text-sm whitespace-pre-wrap">
+                <div key={r.id} className="bg-[var(--card)] p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="whitespace-pre-wrap text-sm text-[var(--app-fg)]">
                       {r.message}
                     </div>
-                    <div className="text-right text-xs text-gray-500 shrink-0">
+                    <div className="shrink-0 text-left text-xs app-muted sm:text-right">
                       <div>{fmtDate(r.createdAt)}</div>
                       <div>User #{r.createdBy ?? "-"}</div>
                     </div>
@@ -238,19 +293,17 @@ export default function InternalNotesPanel({
             </div>
           )}
 
-          <div className="p-3 border-t flex justify-end">
-            <button
+          <div className="flex justify-end border-t border-[var(--border)] p-4">
+            <AsyncButton
+              variant={nextCursor ? "primary" : "secondary"}
+              size="sm"
+              state={loadingMore ? "loading" : "idle"}
+              text="Load more"
+              loadingText="Loading…"
+              successText="Done"
               onClick={loadMore}
-              disabled={!nextCursor || loadingMore}
-              className={
-                "px-4 py-2 rounded-lg text-sm " +
-                (nextCursor
-                  ? "bg-black text-white"
-                  : "bg-gray-100 text-gray-400")
-              }
-            >
-              {loadingMore ? "Loading..." : "Load more"}
-            </button>
+              disabled={!nextCursor}
+            />
           </div>
         </div>
       </div>

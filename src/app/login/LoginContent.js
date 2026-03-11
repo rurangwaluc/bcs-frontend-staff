@@ -4,21 +4,96 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import AsyncButton from "../../components/AsyncButton";
+import ThemeToggle from "../../components/ThemeToggle";
 import { apiFetch } from "../../lib/api";
 
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
+function EyeIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 3l18 18" />
+      <path d="M10.6 10.7A3 3 0 0 0 12 15a3 3 0 0 0 2.2-.9" />
+      <path d="M9.9 5.2A10.6 10.6 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.1 4.2" />
+      <path d="M6.7 6.7C4.1 8.5 2 12 2 12s3.5 7 10 7a10.7 10.7 0 0 0 5.3-1.4" />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="4" y="10" width="16" height="10" rx="2" />
+      <path d="M8 10V7a4 4 0 1 1 8 0v3" />
+    </svg>
+  );
+}
+
+function MailIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m4 7 8 6 8-6" />
+    </svg>
+  );
+}
+
 function Banner({ kind = "danger", children }) {
   const styles =
     kind === "success"
-      ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+      ? "border-emerald-300 bg-emerald-100/70 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200"
       : kind === "warn"
-        ? "bg-amber-50 text-amber-900 border-amber-200"
+        ? "border-amber-300 bg-amber-100/70 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
         : kind === "info"
-          ? "bg-slate-50 text-slate-800 border-slate-200"
-          : "bg-rose-50 text-rose-900 border-rose-200";
+          ? "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]"
+          : "border-rose-300 bg-rose-100/70 text-rose-900 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200";
 
   return (
     <div className={cx("rounded-2xl border px-4 py-3 text-sm", styles)}>
@@ -27,31 +102,61 @@ function Banner({ kind = "danger", children }) {
   );
 }
 
-function Input({ label, hint, right, className = "", ...props }) {
+const Input = ({
+  label,
+  hint,
+  right,
+  leftIcon,
+  className = "",
+  inputRef,
+  ...props
+}) => {
   return (
     <label className="block">
-      <div className="flex items-end justify-between gap-3">
-        <div className="text-xs font-semibold text-slate-600">{label}</div>
-        {right ? <div className="shrink-0">{right}</div> : null}
+      <div className="mb-2 flex items-end justify-between gap-3">
+        <div className="text-xs font-semibold uppercase tracking-[0.14em] app-muted">
+          {label}
+        </div>
       </div>
 
-      <input
-        {...props}
-        className={cx(
-          "mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none",
-          "focus:ring-2 focus:ring-slate-300",
-          className,
-        )}
-      />
+      <div className="relative">
+        {leftIcon ? (
+          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4 text-[var(--muted)]">
+            {leftIcon}
+          </div>
+        ) : null}
 
-      {hint ? <div className="mt-2 text-xs text-slate-500">{hint}</div> : null}
+        <input
+          {...props}
+          ref={inputRef}
+          className={cx(
+            "app-focus h-12 w-full rounded-2xl border border-[var(--border)] bg-[var(--card)] text-sm text-[var(--app-fg)] outline-none transition",
+            "placeholder:text-[var(--muted-2)] hover:border-[var(--muted-2)]",
+            leftIcon ? "pl-11" : "pl-4",
+            right ? "pr-14" : "pr-4",
+            className,
+          )}
+        />
+
+        {right ? (
+          <div className="absolute inset-y-0 right-0 flex items-center pr-3">
+            {right}
+          </div>
+        ) : null}
+      </div>
+
+      {hint ? <div className="mt-2 text-xs app-muted">{hint}</div> : null}
     </label>
   );
-}
+};
 
 function normalizeRole(roleParam) {
-  const r = String(roleParam || "").trim().toLowerCase();
+  const r = String(roleParam || "")
+    .trim()
+    .toLowerCase();
+
   if (!r) return "Any role";
+
   const map = {
     store_keeper: "Store keeper",
     cashier: "Cashier",
@@ -60,28 +165,40 @@ function normalizeRole(roleParam) {
     admin: "Admin",
     owner: "Owner",
   };
+
   return map[r] || r;
 }
 
 function roleKey(roleParam) {
-  const r = String(roleParam || "").trim().toLowerCase();
+  const r = String(roleParam || "")
+    .trim()
+    .toLowerCase();
   return r || "";
 }
 
 function humanApiError(err) {
   const raw = err?.data?.error || err?.message || "Login failed";
-
-  // common cases you’ll see in real shops
   const t = String(raw).toLowerCase();
-  if (t.includes("invalid") || t.includes("credentials") || t.includes("password")) {
+
+  if (
+    t.includes("invalid") ||
+    t.includes("credentials") ||
+    t.includes("password")
+  ) {
     return { kind: "danger", text: "Wrong email or password." };
   }
+
   if (t.includes("forbidden") || t.includes("permission")) {
     return { kind: "danger", text: "You are not allowed to sign in here." };
   }
+
   if (t.includes("network") || t.includes("failed to fetch")) {
-    return { kind: "warn", text: "Cannot reach server. Check internet or backend." };
+    return {
+      kind: "warn",
+      text: "Cannot reach server. Check internet or backend.",
+    };
   }
+
   return { kind: "danger", text: raw };
 }
 
@@ -93,17 +210,13 @@ export default function LoginContent() {
   const roleHint = useMemo(() => normalizeRole(roleParam), [roleParam]);
   const desiredRoleKey = useMemo(() => roleKey(roleParam), [roleParam]);
 
-  // state (keep structure)
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const [msg, setMsg] = useState("");
   const [msgKind, setMsgKind] = useState("danger");
-
-  // 3-state button (idle/loading/success)
   const [btnState, setBtnState] = useState("idle");
 
-  // UX helpers
   const [showPw, setShowPw] = useState(false);
   const [capsOn, setCapsOn] = useState(false);
 
@@ -115,13 +228,14 @@ export default function LoginContent() {
     setBtnState("idle");
     setCapsOn(false);
 
-    // focus email on role change
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       try {
         emailRef.current?.focus?.();
       } catch {}
     }, 0);
-  }, [roleParam, setMsg, setMsgKind]);
+
+    return () => clearTimeout(timer);
+  }, [roleParam]);
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -135,6 +249,7 @@ export default function LoginContent() {
       setMsg("Enter your email.");
       return;
     }
+
     if (!pw) {
       setMsgKind("warn");
       setMsg("Enter your password.");
@@ -162,7 +277,6 @@ export default function LoginContent() {
         owner: "/owner",
       };
 
-      // ✅ Professional: role hint enforcement (warn, but still route correctly)
       if (desiredRoleKey && role && desiredRoleKey !== role) {
         setMsgKind("warn");
         setMsg(`You signed in as "${role}". Redirecting to your dashboard...`);
@@ -175,7 +289,7 @@ export default function LoginContent() {
 
       setTimeout(() => {
         router.replace(map[role] || "/");
-      }, 250);
+      }, 260);
     } catch (err) {
       const h = humanApiError(err);
       setBtnState("idle");
@@ -185,68 +299,117 @@ export default function LoginContent() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 overflow-x-hidden">
-      {/* Top bar */}
-      <div className="sticky top-0 z-40 border-b border-slate-200 bg-white">
-        <div className="mx-auto max-w-6xl px-4 sm:px-5 py-4 flex items-center justify-between gap-4">
+    <div className="min-h-screen overflow-x-hidden bg-[var(--app-bg)] text-[var(--app-fg)]">
+      <div className="sticky top-0 z-40 border-b border-[var(--border)] bg-[color:color-mix(in_oklab,var(--card)_88%,transparent)] backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-5">
           <div className="min-w-0">
-            <div className="text-base font-semibold text-slate-900">
+            <div className="text-base font-semibold text-[var(--app-fg)]">
               Business Control System
             </div>
-            <div className="text-xs text-slate-600 mt-0.5 truncate">
+            <div className="mt-0.5 truncate text-xs app-muted">
               Staff sign-in • Role hint: <b>{roleHint}</b>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => router.push("/")}
-            className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            Back
-          </button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle size="sm" />
+
+            <button
+              type="button"
+              onClick={() => router.push("/")}
+              className="app-focus rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+            >
+              Back
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Body */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-5 py-10">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_420px] gap-5">
-          {/* Left info */}
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm">
-            <div className="text-sm font-semibold text-slate-900">Secure access</div>
-            <div className="mt-2 text-sm leading-relaxed text-slate-600">
+      <div className="mx-auto max-w-6xl px-4 py-10 sm:px-5">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.05fr_430px]">
+          <div className="app-card rounded-[32px] p-6 sm:p-8 lg:p-10">
+            <div className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--card-2)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] app-muted">
+              Secure branch access
+            </div>
+
+            <h1 className="mt-5 text-2xl font-bold tracking-tight text-[var(--app-fg)] sm:text-4xl">
+              Sign in to your staff workspace.
+            </h1>
+
+            <p className="mt-4 max-w-2xl text-sm leading-7 app-muted sm:text-base">
               Your role controls what you can see and do. Actions are tracked.
-              Cash operations require cash sessions.
-            </div>
+              Cash operations require active cash sessions. Branch workflows
+              stay strict so staff cannot skip the real operational flow.
+            </p>
 
-            <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                <div className="text-sm font-semibold text-slate-900">Audit trail</div>
-                <div className="mt-1 text-xs text-slate-600">
-                  Every important action is logged.
+            <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="app-card-soft rounded-[24px] p-5">
+                <div className="text-sm font-semibold text-[var(--app-fg)]">
+                  Audit trail
+                </div>
+                <div className="mt-2 text-sm leading-6 app-muted">
+                  Every important action is logged clearly and tied to the user
+                  and branch.
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                <div className="text-sm font-semibold text-slate-900">Cash discipline</div>
-                <div className="mt-1 text-xs text-slate-600">
-                  Sessions → close → reconcile. No shortcuts.
+              <div className="app-card-soft rounded-[24px] p-5">
+                <div className="text-sm font-semibold text-[var(--app-fg)]">
+                  Cash discipline
+                </div>
+                <div className="mt-2 text-sm leading-6 app-muted">
+                  Sessions, ledger flow, and reconciliation are enforced instead
+                  of left to memory.
                 </div>
               </div>
             </div>
 
-            <div className="mt-6 text-xs text-slate-500">
-              Kigali retail mode: simple UI, strict rules.
+            <div className="mt-8 rounded-[24px] border border-[var(--border)] bg-[var(--card-2)] p-5">
+              <div className="text-xs font-semibold uppercase tracking-[0.14em] app-muted">
+                Built and maintained by
+              </div>
+
+              <div className="mt-2 text-base font-semibold text-[var(--app-fg)]">
+                <a
+                  href="https://webimpactlab.com"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold text-[var(--app-fg)] underline underline-offset-4"
+                >
+                  Web Impact Lab
+                </a>
+              </div>
+
+              <div className="mt-2 text-sm leading-6 app-muted">
+                Retail systems, operations software, and modern business tools.
+              </div>
+
+              <div className="mt-4">
+                <a
+                  href="https://wa.me/250785587830"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+                >
+                  WhatsApp: +250 785 587 830
+                </a>
+              </div>
             </div>
           </div>
 
-          {/* Right form */}
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm">
-            <div className="text-lg font-semibold text-slate-900">Login</div>
-            <div className="mt-1 text-xs text-slate-600">Use your admin-created account.</div>
+          <div className="app-card rounded-[32px] p-6 sm:p-8">
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] app-muted">
+              Welcome back
+            </div>
+            <div className="mt-2 text-2xl font-bold tracking-tight text-[var(--app-fg)]">
+              Login
+            </div>
+            <div className="mt-2 text-sm app-muted">
+              Use your admin-created account to continue.
+            </div>
 
             {msg ? (
-              <div className="mt-4">
+              <div className="mt-5">
                 <Banner kind={msgKind}>{msg}</Banner>
               </div>
             ) : null}
@@ -257,7 +420,7 @@ export default function LoginContent() {
               </div>
             ) : null}
 
-            <form onSubmit={onSubmit} className="mt-5 grid gap-4">
+            <form onSubmit={onSubmit} className="mt-6 grid gap-5">
               <Input
                 label="Email"
                 placeholder="name@shop.rw"
@@ -265,30 +428,38 @@ export default function LoginContent() {
                 onChange={(e) => setEmail(e.target.value)}
                 autoComplete="email"
                 inputMode="email"
-                ref={emailRef}
+                inputRef={emailRef}
+                leftIcon={<MailIcon />}
               />
 
               <Input
                 label="Password"
-                placeholder="Your password"
+                placeholder="Enter your password"
                 type={showPw ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
                 onKeyUp={(e) => {
                   try {
-                    setCapsOn(Boolean(e.getModifierState && e.getModifierState("CapsLock")));
+                    setCapsOn(
+                      Boolean(
+                        e.getModifierState && e.getModifierState("CapsLock"),
+                      ),
+                    );
                   } catch {
                     setCapsOn(false);
                   }
                 }}
+                leftIcon={<LockIcon />}
                 right={
                   <button
                     type="button"
-                    className="text-xs font-semibold text-slate-600 hover:text-slate-900"
+                    aria-label={showPw ? "Hide password" : "Show password"}
+                    title={showPw ? "Hide password" : "Show password"}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--card-2)] text-[var(--muted)] transition hover:bg-[var(--hover)] hover:text-[var(--app-fg)]"
                     onClick={() => setShowPw((v) => !v)}
                   >
-                    {showPw ? "Hide" : "Show"}
+                    {showPw ? <EyeOffIcon /> : <EyeIcon />}
                   </button>
                 }
               />
@@ -303,8 +474,9 @@ export default function LoginContent() {
                 disabled={!email.trim() || !password}
               />
 
-              <div className="text-xs text-slate-500">
-                Can’t sign in? Ask Admin to reset your password.
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-4 py-3 text-xs leading-6 app-muted">
+                Can’t sign in? Ask Admin to reset your password or confirm your
+                assigned role and branch access.
               </div>
             </form>
           </div>

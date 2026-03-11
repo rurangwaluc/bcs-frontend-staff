@@ -1,182 +1,79 @@
-// frontend-staff/src/components/ToastStack.js
 "use client";
-
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-
-import { createPortal } from "react-dom";
 
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
-const ToastCtx = createContext(null);
+function toneClasses(kind, urgent) {
+  if (kind === "success") {
+    return urgent
+      ? "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100"
+      : "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200";
+  }
 
-function genId() {
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  if (kind === "warn") {
+    return urgent
+      ? "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+      : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200";
+  }
+
+  if (kind === "danger" || kind === "error") {
+    return urgent
+      ? "border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-100"
+      : "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200";
+  }
+
+  return urgent
+    ? "border-sky-300 bg-sky-50 text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-100"
+    : "border-[var(--border)] bg-[var(--card)] text-[var(--app-fg)]";
 }
 
-function kindStyles(kind) {
-  const k = String(kind || "info").toLowerCase();
-  if (k === "success")
-    return "border-emerald-200 bg-emerald-50 text-emerald-950";
-  if (k === "warn" || k === "warning")
-    return "border-amber-200 bg-amber-50 text-amber-950";
-  if (k === "danger" || k === "error")
-    return "border-rose-200 bg-rose-50 text-rose-950";
-  return "border-slate-200 bg-white text-slate-900";
-}
-
-function ToastCard({ t, onClose }) {
-  const k = String(t.kind || "info").toLowerCase();
+export default function ToastStack({ toasts = [], onDismiss }) {
+  if (!Array.isArray(toasts) || toasts.length === 0) return null;
 
   return (
-    <div
-      className={cx(
-        "pointer-events-auto rounded-2xl border shadow-2xl overflow-hidden",
-        kindStyles(k),
-      )}
-    >
-      <div className="p-4 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-extrabold truncate">
-            {t.title ||
-              (k === "success"
-                ? "Success"
-                : k === "warn"
-                  ? "Warning"
-                  : k === "danger"
-                    ? "Error"
-                    : "Info")}
-          </div>
-          {t.message ? (
-            <div className="mt-1 text-sm opacity-90 break-words">
-              {t.message}
-            </div>
-          ) : null}
-        </div>
-
-        <button
-          type="button"
-          onClick={() => onClose(t.id)}
-          className="shrink-0 rounded-xl border px-3 py-1.5 text-xs font-extrabold bg-white/60 hover:bg-white"
+    <div className="pointer-events-none fixed right-4 top-4 z-[99999] flex w-[min(380px,calc(100vw-24px))] flex-col gap-3">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={cx(
+            "pointer-events-auto overflow-hidden rounded-3xl border shadow-[var(--shadow-float)] backdrop-blur-sm",
+            toast.urgent ? "ring-2 ring-white/40 dark:ring-white/10" : "",
+            toneClasses(toast.kind, toast.urgent),
+          )}
         >
-          Close
-        </button>
-      </div>
+          <div className="p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                {toast.title ? (
+                  <div className="text-sm font-black uppercase tracking-[0.08em]">
+                    {toast.title}
+                  </div>
+                ) : null}
+
+                <div
+                  className={cx(
+                    "break-words",
+                    toast.title ? "mt-1 text-sm" : "text-sm font-semibold",
+                  )}
+                >
+                  {toast.message}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => onDismiss?.(toast.id)}
+                className="app-focus shrink-0 rounded-2xl border border-current/15 bg-white/50 px-3 py-1.5 text-xs font-bold dark:bg-white/5"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+
+          {toast.urgent ? <div className="h-1 w-full bg-current/15" /> : null}
+        </div>
+      ))}
     </div>
   );
-}
-
-/**
- * ToastProvider + useToast()
- * - Wrap your app once with <ToastProvider>
- * - Use: const toast = useToast(); toast.success("Saved"); toast.error("Failed");
- */
-export function ToastProvider({ children }) {
-  const [toasts, setToasts] = useState([]);
-  const mountedRef = useRef(false);
-
-  const remove = useCallback((id) => {
-    setToasts((prev) =>
-      (Array.isArray(prev) ? prev : []).filter((t) => t.id !== id),
-    );
-  }, []);
-
-  const push = useCallback(
-    (kind, message, opts = {}) => {
-      const id = genId();
-      const toast = {
-        id,
-        kind: kind || "info",
-        title: opts.title || null,
-        message: message || "",
-        ttl: Number.isFinite(Number(opts.ttl)) ? Number(opts.ttl) : 5000,
-      };
-
-      setToasts((prev) => {
-        const arr = Array.isArray(prev) ? prev : [];
-        // keep max 4 visible
-        return [toast, ...arr].slice(0, 4);
-      });
-
-      const ttl = toast.ttl;
-      if (ttl > 0) {
-        setTimeout(() => remove(id), ttl);
-      }
-
-      return id;
-    },
-    [remove],
-  );
-
-  const api = useMemo(
-    () => ({
-      show: (message, opts) => push("info", message, opts),
-      success: (message, opts) => push("success", message, opts),
-      warn: (message, opts) => push("warn", message, opts),
-      error: (message, opts) => push("danger", message, opts),
-      remove,
-      clear: () => setToasts([]),
-    }),
-    [push, remove],
-  );
-
-  // Ensure portal is only used after mount (prevents SSR mismatch)
-  const [ready, setReady] = useState(false);
-  React.useEffect(() => {
-    mountedRef.current = true;
-    setReady(true);
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  return (
-    <ToastCtx.Provider value={api}>
-      {children}
-
-      {ready
-        ? createPortal(
-            <div className="fixed top-4 right-4 z-[2147483647] w-[360px] max-w-[92vw] pointer-events-none">
-              <div className="grid gap-2">
-                {toasts.map((t) => (
-                  <ToastCard key={t.id} t={t} onClose={remove} />
-                ))}
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
-    </ToastCtx.Provider>
-  );
-}
-
-export function useToast() {
-  const ctx = useContext(ToastCtx);
-  if (!ctx) {
-    // Keep it safe: don’t crash app if provider not mounted yet
-    return {
-      show: () => {},
-      success: () => {},
-      warn: () => {},
-      error: () => {},
-      remove: () => {},
-      clear: () => {},
-    };
-  }
-  return ctx;
-}
-
-// If you still import default ToastStack somewhere, keep compatibility:
-export default function ToastStack() {
-  // This component is now "provider-only" (rendered via ToastProvider).
-  // Keeping it as null prevents duplicate overlays.
-  return null;
 }

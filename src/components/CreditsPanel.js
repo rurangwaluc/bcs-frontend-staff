@@ -43,7 +43,7 @@ function statusLabel(status) {
   const st = String(status || "").toUpperCase();
   if (!st) return "ALL";
   if (st === "PENDING") return "Waiting approval";
-  if (st === "APPROVED") return "Approved (awaiting payment)";
+  if (st === "APPROVED") return "Approved";
   if (st === "SETTLED") return "Paid";
   if (st === "REJECTED") return "Rejected";
   return st;
@@ -55,14 +55,14 @@ function StatusBadge({ status }) {
 
   const cls =
     st === "PENDING"
-      ? "bg-amber-50 text-amber-800 border-amber-200"
+      ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
       : st === "APPROVED"
-        ? "bg-sky-50 text-sky-800 border-sky-200"
+        ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]"
         : st === "SETTLED"
-          ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+          ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
           : st === "REJECTED"
-            ? "bg-rose-50 text-rose-800 border-rose-200"
-            : "bg-slate-50 text-slate-700 border-slate-200";
+            ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
+            : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]";
 
   return (
     <span
@@ -79,12 +79,12 @@ function StatusBadge({ status }) {
 function Banner({ kind = "info", children }) {
   const styles =
     kind === "success"
-      ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+      ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
       : kind === "warn"
-        ? "bg-amber-50 text-amber-900 border-amber-200"
+        ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
         : kind === "danger"
-          ? "bg-rose-50 text-rose-900 border-rose-200"
-          : "bg-slate-50 text-slate-800 border-slate-200";
+          ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
+          : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]";
 
   return (
     <div className={cx("rounded-2xl border px-4 py-3 text-sm", styles)}>
@@ -98,8 +98,20 @@ function Input({ className = "", ...props }) {
     <input
       {...props}
       className={cx(
-        "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none",
-        "focus:ring-2 focus:ring-slate-300",
+        "app-focus w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-sm text-[var(--app-fg)] outline-none",
+        "placeholder:text-[var(--muted-2)]",
+        className,
+      )}
+    />
+  );
+}
+
+function Select({ className = "", ...props }) {
+  return (
+    <select
+      {...props}
+      className={cx(
+        "app-focus w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-sm text-[var(--app-fg)] outline-none",
         className,
       )}
     />
@@ -108,13 +120,13 @@ function Input({ className = "", ...props }) {
 
 function SectionCard({ title, hint, right, children }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-4">
+    <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
+      <div className="flex flex-col gap-3 border-b border-[var(--border)] p-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-slate-900">{title}</div>
-          {hint ? (
-            <div className="mt-1 text-xs text-slate-600">{hint}</div>
-          ) : null}
+          <div className="text-base font-black text-[var(--app-fg)]">
+            {title}
+          </div>
+          {hint ? <div className="mt-1 text-sm app-muted">{hint}</div> : null}
         </div>
         {right ? <div className="shrink-0">{right}</div> : null}
       </div>
@@ -125,9 +137,13 @@ function SectionCard({ title, hint, right, children }) {
 
 function MiniStat({ label, value }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-3">
-      <div className="text-xs font-semibold text-slate-600">{label}</div>
-      <div className="mt-1 text-sm font-bold text-slate-900">{value}</div>
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
+        {label}
+      </div>
+      <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
+        {value}
+      </div>
     </div>
   );
 }
@@ -135,7 +151,7 @@ function MiniStat({ label, value }) {
 function ItemsList({ items }) {
   const rows = Array.isArray(items) ? items : [];
   if (!rows.length) {
-    return <div className="text-sm text-slate-600">No items found.</div>;
+    return <div className="text-sm app-muted">No items found.</div>;
   }
 
   return (
@@ -150,36 +166,36 @@ function ItemsList({ items }) {
         return (
           <div
             key={it?.id || `${it?.productId}-${idx}`}
-            className="rounded-2xl border border-slate-200 bg-slate-50 p-3"
+            className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-sm font-extrabold text-slate-900 truncate">
+                <div className="truncate text-sm font-extrabold text-[var(--app-fg)]">
                   {name}
                 </div>
-                <div className="mt-1 text-xs text-slate-600 break-words">
+                <div className="mt-1 break-words text-xs app-muted">
                   SKU: <b>{sku}</b>
                 </div>
               </div>
 
-              <div className="shrink-0 text-right">
-                <div className="text-xs text-slate-600">Qty</div>
-                <div className="text-lg font-extrabold text-slate-900">
+              <div className="shrink-0 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-right">
+                <div className="text-[11px] app-muted">Qty</div>
+                <div className="text-lg font-extrabold text-[var(--app-fg)]">
                   {qty}
                 </div>
               </div>
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="rounded-xl border border-slate-200 bg-white p-2">
-                <div className="text-[11px] text-slate-600">Unit</div>
-                <div className="text-sm font-bold text-slate-900">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-2">
+                <div className="text-[11px] app-muted">Unit</div>
+                <div className="text-sm font-bold text-[var(--app-fg)]">
                   {money(unit)}
                 </div>
               </div>
-              <div className="rounded-xl border border-slate-200 bg-white p-2">
-                <div className="text-[11px] text-slate-600">Line</div>
-                <div className="text-sm font-bold text-slate-900">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-2">
+                <div className="text-[11px] app-muted">Line</div>
+                <div className="text-sm font-bold text-[var(--app-fg)]">
                   {money(line)}
                 </div>
               </div>
@@ -194,9 +210,7 @@ function ItemsList({ items }) {
 function PaymentsList({ payments }) {
   const rows = Array.isArray(payments) ? payments : [];
   if (!rows.length) {
-    return (
-      <div className="text-sm text-slate-600">No payments recorded yet.</div>
-    );
+    return <div className="text-sm app-muted">No payments recorded yet.</div>;
   }
 
   return (
@@ -209,29 +223,38 @@ function PaymentsList({ payments }) {
         return (
           <div
             key={p?.id || idx}
-            className="rounded-2xl border border-slate-200 bg-slate-50 p-3"
+            className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-extrabold text-slate-900">
-                  {money(amt)} RWF
-                </div>
-                <div className="mt-1 text-xs text-slate-600">
-                  Method: <b>{method}</b>
-                </div>
-                <div className="mt-1 text-xs text-slate-600">
-                  Date: <b>{formatDate(at)}</b>
-                </div>
-                {p?.note ? (
-                  <div className="mt-1 text-xs text-slate-600 break-words">
-                    Note: {toStr(p.note)}
-                  </div>
-                ) : null}
+            <div className="min-w-0">
+              <div className="text-sm font-extrabold text-[var(--app-fg)]">
+                {money(amt)} RWF
               </div>
+              <div className="mt-1 text-xs app-muted">
+                Method: <b>{method}</b>
+              </div>
+              <div className="mt-1 text-xs app-muted">
+                Date: <b>{formatDate(at)}</b>
+              </div>
+              {p?.note ? (
+                <div className="mt-1 break-words text-xs app-muted">
+                  Note: {toStr(p.note)}
+                </div>
+              ) : null}
             </div>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function CreditCardSkeleton() {
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3">
+      <div className="h-5 w-40 rounded-xl bg-slate-200/70 dark:bg-slate-700/60" />
+      <div className="mt-3 h-4 w-48 rounded-xl bg-slate-200/70 dark:bg-slate-700/60" />
+      <div className="mt-2 h-4 w-40 rounded-xl bg-slate-200/70 dark:bg-slate-700/60" />
+      <div className="mt-2 h-4 w-24 rounded-xl bg-slate-200/70 dark:bg-slate-700/60" />
     </div>
   );
 }
@@ -247,17 +270,13 @@ export default function CreditsPanel({
 }) {
   const [rows, setRows] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
-
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-
   const [msg, setMsg] = useState("");
   const [msgKind, setMsgKind] = useState("info");
-
-  const [status, setStatus] = useState(""); // ALL
+  const [status, setStatus] = useState("");
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(30);
-
   const [selectedId, setSelectedId] = useState(null);
   const [creditDetail, setCreditDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -271,8 +290,10 @@ export default function CreditsPanel({
     const params = new URLSearchParams();
     if (status) params.set("status", status);
     if (q) params.set("q", String(q).trim());
-    const lim = Math.min(200, Math.max(1, Number(limit || 30)));
-    params.set("limit", String(lim));
+    params.set(
+      "limit",
+      String(Math.min(200, Math.max(1, Number(limit || 30)))),
+    );
     return params.toString();
   }, [status, q, limit]);
 
@@ -282,8 +303,7 @@ export default function CreditsPanel({
     toast("info", "");
     try {
       const data = await apiFetch(`/credits?${queryString}`, { method: "GET" });
-      const list = normalizeList(data);
-      setRows(list);
+      setRows(normalizeList(data));
       setNextCursor(data?.nextCursor ?? null);
     } catch (e) {
       setRows([]);
@@ -303,8 +323,7 @@ export default function CreditsPanel({
         `/credits?${queryString}&cursor=${encodeURIComponent(String(nextCursor))}`,
         { method: "GET" },
       );
-      const list = normalizeList(data);
-      setRows((prev) => prev.concat(list));
+      setRows((prev) => prev.concat(normalizeList(data)));
       setNextCursor(data?.nextCursor ?? null);
     } catch (e) {
       toast(
@@ -337,12 +356,11 @@ export default function CreditsPanel({
 
   useEffect(() => {
     loadFirstPage();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!capabilities.canView) {
     return (
-      <SectionCard title={title} hint="">
+      <SectionCard title={title}>
         <Banner kind="warn">You cannot view credits.</Banner>
       </SectionCard>
     );
@@ -351,7 +369,6 @@ export default function CreditsPanel({
   const detail = creditDetail || null;
   const payments = Array.isArray(detail?.payments) ? detail.payments : [];
   const items = Array.isArray(detail?.items) ? detail.items : [];
-
   const paidSum = payments.reduce(
     (sum, p) => sum + (Number(p?.amount || 0) || 0),
     0,
@@ -363,11 +380,11 @@ export default function CreditsPanel({
     <div className="grid gap-4">
       <SectionCard
         title={title}
-        hint="Issue date + paid date + what items were taken."
+        hint="Issue date, payment progress, items taken and payment history."
         right={
           <button
             onClick={loadFirstPage}
-            className="rounded-xl bg-slate-900 text-white px-4 py-2 text-sm font-semibold hover:bg-slate-800 disabled:opacity-60"
+            className="app-focus rounded-2xl bg-[var(--app-fg)] px-4 py-2 text-sm font-semibold text-[var(--app-bg)] transition hover:opacity-90 disabled:opacity-60"
             disabled={loading}
           >
             {loading ? "Loading…" : "Refresh"}
@@ -378,18 +395,14 @@ export default function CreditsPanel({
       </SectionCard>
 
       <SectionCard title="Filters" hint="Search by customer name or phone.">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <select
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-slate-300"
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <Select value={status} onChange={(e) => setStatus(e.target.value)}>
             {STATUSES.map((s) => (
               <option key={s} value={s}>
                 {statusLabel(s)}
               </option>
             ))}
-          </select>
+          </Select>
 
           <Input
             placeholder="Search name or phone"
@@ -407,7 +420,7 @@ export default function CreditsPanel({
 
           <button
             onClick={loadFirstPage}
-            className="rounded-xl bg-slate-900 text-white px-4 py-2.5 text-sm font-semibold hover:bg-slate-800 disabled:opacity-60"
+            className="app-focus rounded-2xl bg-[var(--app-fg)] px-4 py-2.5 text-sm font-semibold text-[var(--app-bg)] transition hover:opacity-90 disabled:opacity-60"
             disabled={loading}
           >
             Apply
@@ -415,13 +428,22 @@ export default function CreditsPanel({
         </div>
       </SectionCard>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SectionCard title="Credits list" hint="Click a card to open details.">
-          <div className="grid gap-2">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+        <SectionCard
+          title="Credits list"
+          hint="Select a credit to open full detail."
+        >
+          <div className="grid gap-3">
             {loading ? (
-              <div className="text-sm text-slate-600">Loading…</div>
+              <>
+                <CreditCardSkeleton />
+                <CreditCardSkeleton />
+                <CreditCardSkeleton />
+              </>
             ) : rows.length === 0 ? (
-              <div className="text-sm text-slate-600">No credits found.</div>
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-5 text-sm app-muted">
+                No credits found.
+              </div>
             ) : (
               rows.map((c) => (
                 <button
@@ -429,40 +451,55 @@ export default function CreditsPanel({
                   type="button"
                   onClick={() => openCredit(c.id)}
                   className={cx(
-                    "w-full text-left rounded-2xl border p-3 hover:bg-slate-50",
+                    "w-full rounded-3xl border p-4 text-left transition",
                     selectedId === c.id
-                      ? "border-slate-400 bg-slate-50"
-                      : "border-slate-200 bg-white",
+                      ? "border-[var(--border-strong)] bg-[var(--card-2)] shadow-sm"
+                      : "border-[var(--border)] bg-[var(--card)] hover:bg-[var(--hover)]",
                   )}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <div className="text-sm font-extrabold text-slate-900 truncate">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="truncate text-base font-black text-[var(--app-fg)]">
                           {c.customerName || "—"}
                           {c.customerPhone ? ` • ${c.customerPhone}` : ""}
                         </div>
                         <StatusBadge status={c.status} />
                       </div>
 
-                      <div className="mt-2 text-xs text-slate-600">
-                        Issue date: <b>{formatDate(c.createdAt)}</b>
+                      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2">
+                          <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
+                            Issue date
+                          </div>
+                          <div className="mt-1 text-sm font-semibold text-[var(--app-fg)]">
+                            {formatDate(c.createdAt)}
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2">
+                          <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
+                            Paid date
+                          </div>
+                          <div className="mt-1 text-sm font-semibold text-[var(--app-fg)]">
+                            {c.settledAt ? formatDate(c.settledAt) : "—"}
+                          </div>
+                        </div>
                       </div>
-                      <div className="mt-1 text-xs text-slate-600">
-                        Paid date:{" "}
-                        <b>{c.settledAt ? formatDate(c.settledAt) : "—"}</b>
-                      </div>
-                      <div className="mt-1 text-xs text-slate-600">
+
+                      <div className="mt-2 text-xs app-muted">
                         Sale: <b>#{c.saleId ?? "—"}</b>
                       </div>
                     </div>
 
-                    <div className="text-right shrink-0">
-                      <div className="text-xs text-slate-600">Amount</div>
-                      <div className="text-sm font-extrabold text-slate-900">
+                    <div className="shrink-0 rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-right">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
+                        Amount
+                      </div>
+                      <div className="mt-1 text-base font-black text-[var(--app-fg)]">
                         {money(c.amount)}
                       </div>
-                      <div className="text-[11px] text-slate-500">RWF</div>
+                      <div className="text-[11px] app-muted">RWF</div>
                     </div>
                   </div>
                 </button>
@@ -470,18 +507,18 @@ export default function CreditsPanel({
             )}
           </div>
 
-          <div className="mt-3 flex items-center justify-between gap-2">
-            <div className="text-xs text-slate-600">
-              {nextCursor ? "More rows exist." : "End."}
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <div className="text-xs app-muted">
+              {nextCursor ? "More credits available." : "End of list."}
             </div>
             <button
               onClick={loadMore}
               disabled={!nextCursor || loadingMore}
               className={cx(
-                "rounded-xl px-4 py-2.5 text-sm font-semibold",
+                "app-focus rounded-2xl px-4 py-2.5 text-sm font-semibold transition",
                 nextCursor
-                  ? "bg-slate-900 text-white hover:bg-slate-800"
-                  : "bg-slate-100 text-slate-400",
+                  ? "bg-[var(--app-fg)] text-[var(--app-bg)] hover:opacity-90"
+                  : "bg-[var(--card-2)] text-[var(--muted-2)]",
               )}
             >
               {loadingMore ? "Loading…" : "Load more"}
@@ -491,34 +528,37 @@ export default function CreditsPanel({
 
         <SectionCard
           title="Credit detail"
-          hint="Items + payments (future-ready for installments)."
+          hint="Items, payments and internal notes."
         >
           {detailLoading ? (
-            <div className="text-sm text-slate-600">Loading…</div>
+            <div className="grid gap-3">
+              <CreditCardSkeleton />
+              <CreditCardSkeleton />
+            </div>
           ) : !detail ? (
-            <div className="text-sm text-slate-600">
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-5 text-sm app-muted">
               Pick a credit from the list.
             </div>
           ) : (
             <div className="grid gap-4">
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="flex items-center justify-between gap-3">
+              <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="text-sm font-extrabold text-slate-900">
+                    <div className="text-base font-black text-[var(--app-fg)]">
                       Credit #{detail.id}
                     </div>
-                    <div className="mt-1 text-xs text-slate-600">
+                    <div className="mt-1 text-sm app-muted">
                       Customer: <b>{detail.customerName || "—"}</b>{" "}
                       {detail.customerPhone ? `(${detail.customerPhone})` : ""}
                     </div>
-                    <div className="mt-1 text-xs text-slate-600">
+                    <div className="mt-1 text-sm app-muted">
                       Sale: <b>#{detail.saleId ?? "—"}</b>
                     </div>
                   </div>
                   <StatusBadge status={detail.status} />
                 </div>
 
-                <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   <MiniStat
                     label="Credit amount"
                     value={`${money(detail.amount)} RWF`}
@@ -533,13 +573,7 @@ export default function CreditsPanel({
                       detail.settledAt ? formatDate(detail.settledAt) : "—"
                     }
                   />
-                </div>
-
-                <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <MiniStat
-                    label="Paid (sum)"
-                    value={`${money(paidSum)} RWF`}
-                  />
+                  <MiniStat label="Paid sum" value={`${money(paidSum)} RWF`} />
                   <MiniStat
                     label="Remaining"
                     value={`${money(remaining)} RWF`}
@@ -548,26 +582,26 @@ export default function CreditsPanel({
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-sm font-extrabold text-slate-900">
+              <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
+                <div className="text-sm font-extrabold text-[var(--app-fg)]">
                   Items taken
                 </div>
-                <div className="mt-2">
+                <div className="mt-3">
                   <ItemsList items={items} />
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-sm font-extrabold text-slate-900">
+              <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
+                <div className="text-sm font-extrabold text-[var(--app-fg)]">
                   Payments
                 </div>
-                <div className="mt-2">
+                <div className="mt-3">
                   <PaymentsList payments={payments} />
                 </div>
               </div>
 
               {detail.note ? (
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm text-[var(--app-fg)]">
                   <b>Note:</b> {detail.note}
                 </div>
               ) : null}

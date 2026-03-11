@@ -1,11 +1,13 @@
 "use client";
 
-// frontend-staff/src/app/store-keeper/page.js
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import AsyncButton from "../../components/AsyncButton";
 import RoleBar from "../../components/RoleBar";
+import StoreKeeperAdjustmentsSection from "../../components/staff/storekeeper/StoreKeeperAdjustmentsSection";
+import StoreKeeperArrivalsSection from "../../components/staff/storekeeper/StoreKeeperArrivalsSection";
+import StoreKeeperInventorySection from "../../components/staff/storekeeper/StoreKeeperInventorySection";
+import StoreKeeperSalesSection from "../../components/staff/storekeeper/StoreKeeperSalesSection";
 import { apiFetch } from "../../lib/api";
 import { apiUpload } from "../../lib/apiUpload";
 import { connectSSE } from "../../lib/sse";
@@ -13,91 +15,6 @@ import { createPortal } from "react-dom";
 import { getMe } from "../../lib/auth";
 import { useRouter } from "next/navigation";
 
-/**
- * Option B:
- * - Seller creates DRAFT sale
- * - Store keeper fulfills sale (POST /sales/:id/fulfill)
- * - Seller finalizes later (mark PAID / CREDIT)
- */
-
-function getApiBase() {
-  // Must match your apiFetch base logic (localhost:4000 in dev)
-  return (
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    process.env.NEXT_PUBLIC_API_BASE ||
-    "http://localhost:4000"
-  ).replace(/\/$/, "");
-}
-
-// Minimal SSE parser for fetch streaming
-// async function connectSSE({ url, onEvent, signal }) {
-//   const res = await fetch(url, {
-//     method: "GET",
-//     credentials: "include",
-//     headers: { Accept: "text/event-stream" },
-//     signal,
-//   });
-
-//   if (!res.ok || !res.body) {
-//     throw new Error(`SSE failed: ${res.status}`);
-//   }
-
-//   const reader = res.body.getReader();
-//   const decoder = new TextDecoder("utf-8");
-
-//   let buf = "";
-//   let eventName = "message";
-//   let dataLines = [];
-
-//   const flush = () => {
-//     if (!dataLines.length) return;
-
-//     const dataRaw = dataLines.join("\n");
-//     dataLines = [];
-
-//     let payload = null;
-//     try {
-//       payload = JSON.parse(dataRaw);
-//     } catch {
-//       payload = dataRaw;
-//     }
-
-//     onEvent?.(eventName, payload);
-//   };
-
-//   while (true) {
-//     const { value, done } = await reader.read();
-//     if (done) break;
-
-//     buf += decoder.decode(value, { stream: true });
-
-//     // process complete lines
-//     while (true) {
-//       const idx = buf.indexOf("\n");
-//       if (idx === -1) break;
-
-//       const line = buf.slice(0, idx).replace(/\r$/, "");
-//       buf = buf.slice(idx + 1);
-
-//       if (line.startsWith("event:")) {
-//         eventName = line.slice("event:".length).trim() || "message";
-//         continue;
-//       }
-
-//       if (line.startsWith("data:")) {
-//         dataLines.push(line.slice("data:".length).trimStart());
-//         continue;
-//       }
-
-//       // blank line = end of event
-//       if (line === "") {
-//         flush();
-//         eventName = "message";
-//         continue;
-//       }
-//     }
-//   }
-// }
 const ENDPOINTS = {
   PRODUCTS_LIST: "/products",
   PRODUCT_CREATE: "/products",
@@ -108,8 +25,6 @@ const ENDPOINTS = {
   SALES_LIST: "/sales",
   SALE_GET: (id) => `/sales/${id}`,
   SALE_FULFILL: (id) => `/sales/${id}/fulfill`,
-
-  // notifications
   NOTIFS_LIST: "/notifications",
   NOTIFS_UNREAD: "/notifications/unread-count",
   NOTIFS_READ_ONE: (id) => `/notifications/${id}/read`,
@@ -129,10 +44,14 @@ function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
-function money(n) {
-  const x = Number(n ?? 0);
-  if (!Number.isFinite(x)) return "0";
-  return Math.round(x).toLocaleString();
+function toStr(v) {
+  if (v === undefined || v === null) return "";
+  return String(v).trim();
+}
+
+function numOrNull(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 function safeDate(v) {
@@ -146,14 +65,9 @@ function safeDate(v) {
   }
 }
 
-function numOrNull(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function toStr(v) {
-  if (v === undefined || v === null) return "";
-  return String(v).trim();
+function qtyText(v) {
+  const n = Number(v ?? 0);
+  return Number.isFinite(n) ? Math.round(n).toLocaleString() : "0";
 }
 
 function locationLabel(me) {
@@ -174,46 +88,34 @@ function locationLabel(me) {
   return "Store —";
 }
 
-/* ---------- UI atoms ---------- */
-
 function Skeleton({ className = "" }) {
   return (
     <div
-      className={cx("animate-pulse rounded-xl bg-slate-200/70", className)}
+      className={cx(
+        "animate-pulse rounded-2xl bg-slate-200/70 dark:bg-slate-800/70",
+        className,
+      )}
     />
   );
 }
 
 function PageSkeleton() {
   return (
-    <div className="min-h-screen bg-slate-50 overflow-x-hidden">
-      <div className="mx-auto max-w-7xl px-4 sm:px-5 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <Skeleton className="h-6 w-44" />
-            <Skeleton className="mt-3 h-4 w-52" />
-            <div className="mt-6 grid gap-3">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          </div>
-
-          <div>
-            <Skeleton className="h-12 w-full rounded-2xl" />
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-              <Skeleton className="h-24 w-full rounded-2xl" />
-              <Skeleton className="h-24 w-full rounded-2xl" />
-              <Skeleton className="h-24 w-full rounded-2xl" />
-              <Skeleton className="h-24 w-full rounded-2xl" />
-            </div>
-            <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
-              <Skeleton className="h-80 w-full rounded-2xl" />
-              <Skeleton className="h-80 w-full rounded-2xl" />
-            </div>
-          </div>
+    <div className="min-h-screen overflow-x-hidden bg-[var(--app-bg)]">
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-5">
+        <Skeleton className="h-14 w-full rounded-3xl" />
+        <div className="mt-4">
+          <Skeleton className="h-20 w-full rounded-3xl" />
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Skeleton className="h-28 w-full rounded-3xl" />
+          <Skeleton className="h-28 w-full rounded-3xl" />
+          <Skeleton className="h-28 w-full rounded-3xl" />
+          <Skeleton className="h-28 w-full rounded-3xl" />
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <Skeleton className="h-80 w-full rounded-3xl" />
+          <Skeleton className="h-80 w-full rounded-3xl" />
         </div>
       </div>
     </div>
@@ -223,15 +125,15 @@ function PageSkeleton() {
 function Banner({ kind = "info", children }) {
   const styles =
     kind === "success"
-      ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+      ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
       : kind === "warn"
-        ? "bg-amber-50 text-amber-900 border-amber-200"
+        ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
         : kind === "danger"
-          ? "bg-rose-50 text-rose-900 border-rose-200"
-          : "bg-slate-50 text-slate-800 border-slate-200";
+          ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
+          : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]";
 
   return (
-    <div className={cx("rounded-2xl border px-4 py-3 text-sm", styles)}>
+    <div className={cx("rounded-3xl border px-4 py-3 text-sm", styles)}>
       {children}
     </div>
   );
@@ -239,226 +141,104 @@ function Banner({ kind = "info", children }) {
 
 function Card({ label, value, sub }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="text-xs font-semibold text-slate-600">{label}</div>
-      <div className="mt-1 text-2xl font-bold text-slate-900">{value}</div>
-      {sub ? <div className="mt-1 text-xs text-slate-600">{sub}</div> : null}
+    <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-sm">
+      <div className="text-xs font-semibold uppercase tracking-[0.08em] app-muted">
+        {label}
+      </div>
+      <div className="mt-2 text-3xl font-black text-[var(--app-fg)]">
+        {value}
+      </div>
+      {sub ? <div className="mt-1 text-sm app-muted">{sub}</div> : null}
     </div>
-  );
-}
-
-function Input({ className = "", ...props }) {
-  return (
-    <input
-      {...props}
-      className={cx(
-        "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none",
-        "focus:ring-2 focus:ring-slate-300",
-        className,
-      )}
-    />
-  );
-}
-
-function Select({ className = "", ...props }) {
-  return (
-    <select
-      {...props}
-      className={cx(
-        "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none",
-        "focus:ring-2 focus:ring-slate-300",
-        className,
-      )}
-    />
   );
 }
 
 function SectionCard({ title, hint, right, children }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-4">
+    <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-slate-900">{title}</div>
-          {hint ? (
-            <div className="mt-1 text-xs text-slate-600">{hint}</div>
-          ) : null}
+          <div className="text-base font-black text-[var(--app-fg)]">
+            {title}
+          </div>
+          {hint ? <div className="mt-1 text-sm app-muted">{hint}</div> : null}
         </div>
         {right ? <div className="shrink-0">{right}</div> : null}
       </div>
-      <div className="p-4">{children}</div>
+      <div className="p-4 sm:p-5">{children}</div>
     </div>
   );
 }
 
-function NavItem({ active, label, onClick, badge, badgeTone = "default" }) {
-  const isDanger = badgeTone === "danger";
-
+function TopSectionSwitcher({
+  section,
+  setSection,
+  draftSalesCount,
+  pendingAdjRequests,
+}) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cx(
-        "w-full text-left rounded-xl px-3 py-2.5 text-sm font-semibold transition flex items-center justify-between gap-2",
-        active ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50",
-      )}
-    >
-      <span className="truncate">{label}</span>
+    <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <div className="text-sm font-black uppercase tracking-[0.08em] text-[var(--app-fg)]">
+            Store keeper workspace
+          </div>
+          <div className="mt-1 text-sm app-muted">
+            Inventory work should use the full page width.
+          </div>
+        </div>
 
-      {badge ? (
-        <span
-          className={cx(
-            "shrink-0 rounded-full px-2 py-0.5 text-xs font-extrabold",
-            isDanger
-              ? "bg-rose-600 text-white"
-              : active
-                ? "bg-white/20 text-white"
-                : "bg-slate-100 text-slate-700",
-          )}
-        >
-          {badge}
-        </span>
-      ) : null}
-    </button>
-  );
-}
+        <div className="flex flex-wrap gap-2">
+          {SECTIONS.map((s) => {
+            const active = section === s.key;
+            const badge =
+              s.key === "sales"
+                ? draftSalesCount
+                : s.key === "adjustments"
+                  ? pendingAdjRequests
+                  : 0;
 
-function PillTabs({ value, onChange, tabs = [] }) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {tabs.map((t) => {
-        const active = value === t.value;
-        return (
-          <button
-            key={t.value}
-            type="button"
-            onClick={() => onChange(t.value)}
-            className={cx(
-              "rounded-full px-3 py-1.5 text-sm font-semibold border transition",
-              active
-                ? "bg-slate-900 text-white border-slate-900"
-                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50",
-            )}
-          >
-            {t.label}
-          </button>
-        );
-      })}
+            return (
+              <button
+                key={s.key}
+                type="button"
+                onClick={() => setSection(s.key)}
+                className={cx(
+                  "app-focus inline-flex items-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-bold transition",
+                  active
+                    ? "border-[var(--app-fg)] bg-[var(--app-fg)] text-[var(--app-bg)]"
+                    : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)] hover:bg-[var(--hover)]",
+                )}
+              >
+                <span>{s.label}</span>
+                {badge > 0 ? (
+                  <span
+                    className={cx(
+                      "rounded-full px-2 py-0.5 text-[11px] font-extrabold",
+                      active
+                        ? "bg-white/15 text-white"
+                        : "bg-[var(--danger-fg)] text-white",
+                    )}
+                  >
+                    {badge}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
-
-function PillTabsWithBadges({ value, onChange, tabs = [] }) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {tabs.map((t) => {
-        const active = value === t.value;
-        const badge = Number(t.badge || 0);
-        const danger = t.badgeTone === "danger";
-
-        return (
-          <button
-            key={t.value}
-            type="button"
-            onClick={() => onChange(t.value)}
-            className={cx(
-              "rounded-full px-3 py-1.5 text-sm font-extrabold border transition inline-flex items-center gap-2",
-              active
-                ? "bg-slate-900 text-white border-slate-900"
-                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50",
-            )}
-          >
-            <span>{t.label}</span>
-
-            <span
-              className={cx(
-                "rounded-full px-2 py-0.5 text-xs font-extrabold",
-                danger
-                  ? "bg-rose-600 text-white"
-                  : active
-                    ? "bg-white/20 text-white"
-                    : "bg-slate-100 text-slate-700",
-              )}
-            >
-              {badge}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function StatusBadge({ status }) {
-  const raw = String(status || "").toUpperCase();
-
-  // storekeeper language
-  const label =
-    raw === "DRAFT" ? "TO RELEASE" : raw === "FULFILLED" ? "RELEASED" : raw;
-
-  const cls =
-    raw === "DRAFT"
-      ? "bg-sky-50 text-sky-800 border-sky-200"
-      : raw === "FULFILLED"
-        ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-        : raw === "PENDING"
-          ? "bg-amber-50 text-amber-800 border-amber-200"
-          : raw === "COMPLETED"
-            ? "bg-slate-50 text-slate-700 border-slate-200"
-            : raw === "CANCELLED"
-              ? "bg-rose-50 text-rose-800 border-rose-200"
-              : "bg-slate-50 text-slate-700 border-slate-200";
-
-  return (
-    <span
-      className={cx(
-        "inline-flex items-center rounded-xl border px-2.5 py-1 text-xs font-extrabold",
-        cls,
-      )}
-    >
-      {label || "—"}
-    </span>
-  );
-}
-
-/**
- * 3-state release button:
- * - Release
- * - Releasing...
- * - Released
- */
-function ReleaseButton({ state, disabled, onClick }) {
-  const s = state || "idle"; // idle | loading | success
-  const label =
-    s === "loading" ? "Releasing…" : s === "success" ? "Released" : "Release";
-
-  const cls =
-    s === "success"
-      ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-      : s === "loading"
-        ? "bg-amber-600 text-white"
-        : "bg-slate-900 hover:bg-slate-800 text-white";
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled || s === "loading" || s === "success"}
-      className={cx(
-        "rounded-xl px-4 py-2.5 text-sm font-bold transition disabled:opacity-60 disabled:cursor-not-allowed",
-        cls,
-      )}
-    >
-      {label}
-    </button>
-  );
-}
-
-/* ---------- Notifications (SSE + modal + urgent toast) ---------- */
 
 function useBeep() {
   return useCallback(() => {
     try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+
+      const ctx = new Ctx();
       const o = ctx.createOscillator();
       const g = ctx.createGain();
 
@@ -470,38 +250,39 @@ function useBeep() {
       g.connect(ctx.destination);
 
       o.start();
+
       setTimeout(() => {
-        o.stop();
+        try {
+          o.stop();
+        } catch {}
         ctx.close().catch(() => {});
       }, 180);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, []);
 }
 
 function UrgentToast({ open, title, body, onClose }) {
   if (!open) return null;
 
-  // Portal so it can NEVER be behind the page
   return createPortal(
-    <div className="fixed top-4 right-4 z-[2147483647] w-[92vw] max-w-sm pointer-events-none">
-      <div className="pointer-events-auto rounded-2xl border border-rose-200 bg-rose-50 shadow-2xl p-4">
+    <div className="pointer-events-none fixed right-4 top-4 z-[2147483647] w-[92vw] max-w-sm">
+      <div className="pointer-events-auto rounded-3xl border border-[var(--danger-border)] bg-[var(--danger-bg)] p-4 shadow-2xl">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-extrabold text-rose-900 truncate">
+            <div className="truncate text-sm font-extrabold text-[var(--danger-fg)]">
               {title || "Urgent alert"}
             </div>
             {body ? (
-              <div className="mt-1 text-sm text-rose-900/90 break-words">
+              <div className="mt-1 break-words text-sm text-[var(--danger-fg)]">
                 {body}
               </div>
             ) : null}
           </div>
+
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 rounded-xl border border-rose-200 bg-white px-3 py-1.5 text-xs font-extrabold text-rose-800 hover:bg-rose-100"
+            className="rounded-2xl border border-[var(--danger-border)] bg-[var(--card)] px-3 py-1.5 text-xs font-extrabold text-[var(--danger-fg)]"
           >
             Close
           </button>
@@ -523,25 +304,26 @@ function AlertsModal({
 }) {
   if (!open) return null;
 
-  // Portal so it can NEVER be behind the page
   return createPortal(
     <div className="fixed inset-0 z-[2147483647] flex items-start justify-center p-4 sm:p-6">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
 
-      <div className="relative w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden mt-10">
-        <div className="p-4 border-b border-slate-200 flex items-start justify-between gap-3">
+      <div className="relative mt-10 w-full max-w-2xl overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] p-4">
           <div className="min-w-0">
-            <div className="text-sm font-extrabold text-slate-900">Alerts</div>
-            <div className="mt-1 text-xs text-slate-600">
+            <div className="text-sm font-extrabold text-[var(--app-fg)]">
+              Alerts
+            </div>
+            <div className="mt-1 text-xs app-muted">
               <b>{Number(unreadCount || 0)}</b> unread
             </div>
           </div>
 
-          <div className="shrink-0 flex gap-2">
+          <div className="flex gap-2">
             <button
               type="button"
               onClick={onReadAll}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold hover:bg-slate-50 disabled:opacity-60"
+              className="rounded-2xl border border-[var(--border)] px-3 py-2 text-sm font-bold text-[var(--app-fg)] hover:bg-[var(--hover)] disabled:opacity-60"
               disabled={loading}
             >
               Read all
@@ -549,14 +331,14 @@ function AlertsModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-xl bg-slate-900 text-white px-3 py-2 text-sm font-bold hover:bg-slate-800"
+              className="rounded-2xl bg-[var(--app-fg)] px-3 py-2 text-sm font-bold text-[var(--app-bg)]"
             >
               Close
             </button>
           </div>
         </div>
 
-        <div className="p-4 max-h-[70vh] overflow-y-auto">
+        <div className="max-h-[70vh] overflow-y-auto p-4">
           {loading ? (
             <div className="grid gap-3">
               <Skeleton className="h-16 w-full" />
@@ -564,7 +346,7 @@ function AlertsModal({
               <Skeleton className="h-16 w-full" />
             </div>
           ) : (rows || []).length === 0 ? (
-            <div className="text-sm text-slate-600">No alerts yet.</div>
+            <div className="text-sm app-muted">No alerts yet.</div>
           ) : (
             <div className="grid gap-2">
               {(rows || []).map((n) => {
@@ -579,35 +361,37 @@ function AlertsModal({
                     className={cx(
                       "rounded-2xl border p-3",
                       isUnread
-                        ? "border-amber-200 bg-amber-50"
-                        : "border-slate-200 bg-white",
+                        ? "border-[var(--warn-border)] bg-[var(--warn-bg)]"
+                        : "border-[var(--border)] bg-[var(--card)]",
                     )}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <div className="text-sm font-extrabold text-slate-900 truncate">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="truncate text-sm font-extrabold text-[var(--app-fg)]">
                             {title}
                           </div>
+
                           {priority === "high" ? (
-                            <span className="rounded-full bg-rose-600 text-white px-2 py-0.5 text-xs font-extrabold">
-                              URGENT
+                            <span className="rounded-full bg-[var(--danger-fg)] px-2 py-0.5 text-xs font-extrabold text-white">
+                              Urgent
                             </span>
                           ) : null}
+
                           {isUnread ? (
-                            <span className="rounded-full bg-slate-900 text-white px-2 py-0.5 text-xs font-extrabold">
-                              NEW
+                            <span className="rounded-full bg-[var(--app-fg)] px-2 py-0.5 text-xs font-extrabold text-[var(--app-bg)]">
+                              New
                             </span>
                           ) : null}
                         </div>
 
                         {body ? (
-                          <div className="mt-1 text-sm text-slate-700 break-words">
+                          <div className="mt-1 break-words text-sm text-[var(--app-fg)]">
                             {body}
                           </div>
                         ) : null}
 
-                        <div className="mt-2 text-xs text-slate-500">
+                        <div className="mt-2 text-xs app-muted">
                           {safeDate(n?.createdAt || n?.created_at)}
                         </div>
                       </div>
@@ -617,12 +401,12 @@ function AlertsModal({
                           <button
                             type="button"
                             onClick={() => onReadOne(n?.id)}
-                            className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-extrabold hover:bg-slate-50"
+                            className="rounded-2xl border border-[var(--border)] px-3 py-2 text-xs font-extrabold text-[var(--app-fg)] hover:bg-[var(--hover)]"
                           >
                             Mark read
                           </button>
                         ) : (
-                          <span className="text-xs text-slate-500">Read</span>
+                          <span className="text-xs app-muted">Read</span>
                         )}
                       </div>
                     </div>
@@ -633,8 +417,8 @@ function AlertsModal({
           )}
         </div>
 
-        <div className="p-4 border-t border-slate-200 text-xs text-slate-600">
-          Urgent alerts also show a red popup and play a sound.
+        <div className="border-t border-[var(--border)] p-4 text-xs app-muted">
+          Urgent alerts also show a popup and play a sound.
         </div>
       </div>
     </div>,
@@ -642,39 +426,180 @@ function AlertsModal({
   );
 }
 
-/* ---------- Helpers ---------- */
+function SaleModal({ open, sale, loading, onClose }) {
+  if (!open) return null;
 
-function getQtyOnHandForProduct(inventory, productId) {
-  const pid = Number(productId);
-  if (!pid) return null;
-  const row = (Array.isArray(inventory) ? inventory : []).find(
-    (r) => Number(r.id) === pid,
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+
+      <div className="relative w-full max-w-2xl overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-xl">
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] p-4">
+          <div className="min-w-0">
+            <div className="text-sm font-bold text-[var(--app-fg)]">
+              Sale #{sale?.id ?? "—"} {loading ? "…" : ""}
+            </div>
+            <div className="mt-1 truncate text-xs app-muted">
+              Status: {String(sale?.status || "—").toUpperCase()}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="rounded-2xl border border-[var(--border)] px-4 py-2.5 text-sm font-bold text-[var(--app-fg)] hover:bg-[var(--hover)]"
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="p-4">
+          {loading ? (
+            <div className="grid gap-3">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+            </div>
+          ) : (
+            <>
+              <div className="text-sm font-bold text-[var(--app-fg)]">
+                Items
+              </div>
+
+              <div className="mt-3 grid gap-2">
+                {(Array.isArray(sale?.items) ? sale.items : []).map(
+                  (it, idx) => (
+                    <div
+                      key={it?.id || idx}
+                      className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-bold text-[var(--app-fg)]">
+                          {it?.productName ||
+                            it?.name ||
+                            `#${it?.productId ?? "—"}`}
+                        </div>
+                        <div className="text-xs app-muted">
+                          {it?.sku ? `SKU: ${it.sku}` : "SKU: —"}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="text-lg font-extrabold text-[var(--app-fg)]">
+                          {qtyText(it?.qty ?? 0)}
+                        </div>
+                        <div className="text-xs app-muted">qty</div>
+                      </div>
+                    </div>
+                  ),
+                )}
+
+                {(Array.isArray(sale?.items) ? sale.items : []).length === 0 ? (
+                  <div className="text-sm app-muted">No items.</div>
+                ) : null}
+              </div>
+
+              <div className="mt-4 text-xs app-muted">
+                Store keeper releases stock. Seller finishes payment later.
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
-  if (!row) return null;
-  const qty = Number(row.qtyOnHand ?? row.qty_on_hand ?? 0);
-  return Number.isFinite(qty) ? qty : 0;
 }
 
-/* ---------- Page ---------- */
+function useNotificationBeep() {
+  const beep = useBeep();
+  const lastPlayAtRef = useRef(0);
+
+  return useCallback(() => {
+    const now = Date.now();
+    if (now - lastPlayAtRef.current < 2500) return;
+    lastPlayAtRef.current = now;
+    beep();
+  }, [beep]);
+}
 
 export default function StoreKeeperPage() {
   const router = useRouter();
-  const beep = useBeep();
+  const notifyBeep = useNotificationBeep();
 
   const [bootLoading, setBootLoading] = useState(true);
   const [me, setMe] = useState(null);
 
   const [msg, setMsg] = useState("");
   const [msgKind, setMsgKind] = useState("info");
-
   const [section, setSection] = useState("dashboard");
 
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [notifsLoading, setNotifsLoading] = useState(false);
+  const [notifs, setNotifs] = useState([]);
+  const [unread, setUnread] = useState(0);
+  const [urgentOpen, setUrgentOpen] = useState(false);
+  const [urgentTitle, setUrgentTitle] = useState("");
+  const [urgentBody, setUrgentBody] = useState("");
+
+  const [products, setProducts] = useState([]);
+  const [productsLoading, setProductsLoading] = useState(false);
+
+  const [inventory, setInventory] = useState([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [invQ, setInvQ] = useState("");
+
+  const [pName, setPName] = useState("");
+  const [pSku, setPSku] = useState("");
+  const [pUnit, setPUnit] = useState("pcs");
+  const [pNotes, setPNotes] = useState("");
+  const [pInitialQty, setPInitialQty] = useState("");
+  const [createProductBtn, setCreateProductBtn] = useState("idle");
+
+  const [pCategory, setPCategory] = useState("");
+  const [pSubcategory, setPSubcategory] = useState("");
+  const [pBrand, setPBrand] = useState("");
+  const [pModel, setPModel] = useState("");
+  const [pSize, setPSize] = useState("");
+  const [pColor, setPColor] = useState("");
+  const [pMaterial, setPMaterial] = useState("");
+  const [pVariantSummary, setPVariantSummary] = useState("");
+  const [pBarcode, setPBarcode] = useState("");
+  const [pSupplierSku, setPSupplierSku] = useState("");
+  const [pStockUnit, setPStockUnit] = useState("pcs");
+  const [pSalesUnit, setPSalesUnit] = useState("");
+  const [pPurchaseUnit, setPPurchaseUnit] = useState("");
+  const [pReorderLevel, setPReorderLevel] = useState("");
+  const [pTrackInventory, setPTrackInventory] = useState(true);
+
+  const [arrProductId, setArrProductId] = useState("");
+  const [arrQty, setArrQty] = useState("");
+  const [arrNotes, setArrNotes] = useState("");
+  const [arrFiles, setArrFiles] = useState([]);
+  const [arrivalBtn, setArrivalBtn] = useState("idle");
+
+  const [adjProductId, setAdjProductId] = useState("");
+  const [adjDirection, setAdjDirection] = useState("ADD");
+  const [adjQtyAbs, setAdjQtyAbs] = useState("");
+  const [adjReason, setAdjReason] = useState("");
+  const [adjBtn, setAdjBtn] = useState("idle");
+
+  const [myAdjRequests, setMyAdjRequests] = useState([]);
+  const [myAdjLoading, setMyAdjLoading] = useState(false);
+
+  const [sales, setSales] = useState([]);
+  const [salesLoading, setSalesLoading] = useState(false);
+  const [salesQ, setSalesQ] = useState("");
+  const [salesTab, setSalesTab] = useState("TO_RELEASE");
+  const [releaseBtnState, setReleaseBtnState] = useState({});
+
+  const [viewSale, setViewSale] = useState(null);
+  const [viewSaleLoading, setViewSaleLoading] = useState(false);
+
   function toast(kind, text) {
-    setMsgKind(kind);
+    setMsgKind(kind || "info");
     setMsg(text || "");
   }
 
-  // role guard + skeleton
   useEffect(() => {
     let alive = true;
 
@@ -688,7 +613,10 @@ export default function StoreKeeperPage() {
         setMe(user);
 
         const role = String(user?.role || "").toLowerCase();
-        if (!role) return router.replace("/login");
+        if (!role) {
+          router.replace("/login");
+          return;
+        }
 
         if (role !== "store_keeper") {
           const map = {
@@ -720,23 +648,9 @@ export default function StoreKeeperPage() {
   const isAuthorized =
     !!me && String(me?.role || "").toLowerCase() === "store_keeper";
 
-  /* ---------- Notifications state ---------- */
-  const [alertsOpen, setAlertsOpen] = useState(false);
-  const [notifsLoading, setNotifsLoading] = useState(false);
-  const [notifs, setNotifs] = useState([]);
-  const [unread, setUnread] = useState(0);
-
-  const [urgentOpen, setUrgentOpen] = useState(false);
-  const [urgentTitle, setUrgentTitle] = useState("");
-  const [urgentBody, setUrgentBody] = useState("");
-
-  const sseRef = useRef(null);
-
   const loadUnread = useCallback(async () => {
     try {
-      const data = await apiFetch(`/notifications/unread-count`, {
-        method: "GET",
-      });
+      const data = await apiFetch(ENDPOINTS.NOTIFS_UNREAD, { method: "GET" });
       const n = Number(data?.unread ?? 0);
       setUnread(Number.isFinite(n) ? n : 0);
     } catch {}
@@ -745,7 +659,9 @@ export default function StoreKeeperPage() {
   const loadNotifs = useCallback(async () => {
     setNotifsLoading(true);
     try {
-      const data = await apiFetch(`/notifications?limit=50`, { method: "GET" });
+      const data = await apiFetch(`${ENDPOINTS.NOTIFS_LIST}?limit=50`, {
+        method: "GET",
+      });
       const list = Array.isArray(data?.rows) ? data.rows : [];
       setNotifs(list);
     } catch {
@@ -755,26 +671,27 @@ export default function StoreKeeperPage() {
     }
   }, []);
 
-  async function markReadOne(id) {
-    const nid = Number(id);
-    if (!Number.isFinite(nid) || nid <= 0) return;
+  const markReadOne = useCallback(
+    async (id) => {
+      const nid = Number(id);
+      if (!Number.isFinite(nid) || nid <= 0) return;
 
-    try {
-      await apiFetch(ENDPOINTS.NOTIFS_READ_ONE(nid), { method: "PATCH" });
-      setNotifs((prev) =>
-        (Array.isArray(prev) ? prev : []).map((x) =>
-          String(x?.id) === String(nid)
-            ? { ...x, isRead: true, is_read: true }
-            : x,
-        ),
-      );
-      await loadUnread();
-    } catch {
-      // ignore
-    }
-  }
+      try {
+        await apiFetch(ENDPOINTS.NOTIFS_READ_ONE(nid), { method: "PATCH" });
+        setNotifs((prev) =>
+          (Array.isArray(prev) ? prev : []).map((x) =>
+            String(x?.id) === String(nid)
+              ? { ...x, isRead: true, is_read: true }
+              : x,
+          ),
+        );
+        await loadUnread();
+      } catch {}
+    },
+    [loadUnread],
+  );
 
-  async function markAllRead() {
+  const markAllRead = useCallback(async () => {
     try {
       await apiFetch(ENDPOINTS.NOTIFS_READ_ALL, { method: "PATCH" });
       setNotifs((prev) =>
@@ -785,19 +702,14 @@ export default function StoreKeeperPage() {
         })),
       );
       setUnread(0);
-    } catch {
-      // ignore
-    }
-  }
+    } catch {}
+  }, []);
 
-  // SSE connect (real-time)
   useEffect(() => {
     if (!isAuthorized) return;
 
-    // initial fetch
     loadUnread();
 
-    // connect stream (uses API_BASE + cookies)
     const conn = connectSSE(ENDPOINTS.NOTIFS_STREAM, {
       onHello: (data) => {
         const n = Number(data?.unread ?? 0);
@@ -806,7 +718,6 @@ export default function StoreKeeperPage() {
       onNotification: (n) => {
         if (!n) return;
 
-        // prepend list (dedupe)
         setNotifs((prev) => {
           const arr = Array.isArray(prev) ? prev : [];
           const id = n?.id == null ? null : String(n.id);
@@ -814,80 +725,23 @@ export default function StoreKeeperPage() {
           return [n, ...arr].slice(0, 80);
         });
 
-        // increment unread locally (fast UX) + also refresh occasionally
         loadUnread();
 
-        // urgent behavior
         const priority = String(n?.priority || "normal").toLowerCase();
         if (priority === "high") {
           setUrgentTitle(toStr(n?.title) || "Urgent alert");
           setUrgentBody(toStr(n?.body) || "");
           setUrgentOpen(true);
-          beep();
+          notifyBeep();
         }
       },
-      onError: () => {
-        // keep silent; connectSSE will retry
-      },
+      onError: () => {},
     });
 
     return () => {
       conn.close();
     };
-  }, [isAuthorized, loadUnread, beep]);
-
-  function openAlerts() {
-    setAlertsOpen(true);
-    loadNotifs();
-    loadUnread();
-  }
-
-  /* ---------- data ---------- */
-
-  const [products, setProducts] = useState([]);
-  const [productsLoading, setProductsLoading] = useState(false);
-
-  const [inventory, setInventory] = useState([]);
-  const [inventoryLoading, setInventoryLoading] = useState(false);
-  const [invQ, setInvQ] = useState("");
-
-  // create product
-  const [pName, setPName] = useState("");
-  const [pSku, setPSku] = useState("");
-  const [pUnit, setPUnit] = useState("pcs");
-  const [pNotes, setPNotes] = useState("");
-  const [pInitialQty, setPInitialQty] = useState("");
-  const [createProductBtn, setCreateProductBtn] = useState("idle");
-
-  // arrivals
-  const [arrProductId, setArrProductId] = useState("");
-  const [arrQty, setArrQty] = useState("");
-  const [arrNotes, setArrNotes] = useState("");
-  const [arrFiles, setArrFiles] = useState([]);
-  const [arrivalBtn, setArrivalBtn] = useState("idle");
-
-  // adjustments
-  const [adjProductId, setAdjProductId] = useState("");
-  const [adjDirection, setAdjDirection] = useState("ADD");
-  const [adjQtyAbs, setAdjQtyAbs] = useState("");
-  const [adjReason, setAdjReason] = useState("");
-  const [adjBtn, setAdjBtn] = useState("idle");
-
-  const [myAdjRequests, setMyAdjRequests] = useState([]);
-  const [myAdjLoading, setMyAdjLoading] = useState(false);
-
-  // sales release
-  const [sales, setSales] = useState([]);
-  const [salesLoading, setSalesLoading] = useState(false);
-  const [salesQ, setSalesQ] = useState("");
-
-  // tab filter instead of dropdown
-  const [salesTab, setSalesTab] = useState("TO_RELEASE"); // TO_RELEASE | RELEASED | ALL
-
-  const [releaseBtnState, setReleaseBtnState] = useState({}); // per sale: idle/loading/success
-
-  const [viewSale, setViewSale] = useState(null);
-  const [viewSaleLoading, setViewSaleLoading] = useState(false);
+  }, [isAuthorized, loadUnread, notifyBeep]);
 
   const loadProducts = useCallback(async () => {
     setProductsLoading(true);
@@ -958,7 +812,7 @@ export default function StoreKeeperPage() {
     }
   }, []);
 
-  async function openSaleDetails(saleId) {
+  const openSaleDetails = useCallback(async (saleId) => {
     const id = Number(saleId);
     if (!id) return;
 
@@ -975,19 +829,17 @@ export default function StoreKeeperPage() {
     } finally {
       setViewSaleLoading(false);
     }
-  }
+  }, []);
 
-  // initial load + per section
   useEffect(() => {
     if (!isAuthorized) return;
 
-    // Always load these so sidebar badges are correct immediately
     loadProducts();
     loadInventory();
-    loadSales(); // ✅ IMPORTANT: enables default badge for "Release stock"
-
-    // Section-specific
-    if (section === "adjustments") loadMyAdjustRequests();
+    loadSales();
+    if (section === "adjustments" || section === "dashboard") {
+      loadMyAdjustRequests();
+    }
   }, [
     isAuthorized,
     section,
@@ -997,35 +849,35 @@ export default function StoreKeeperPage() {
     loadMyAdjustRequests,
   ]);
 
-  // KPIs
   const totalProducts = products.length;
 
-  const pendingAdjRequests = useMemo(() => {
-    return (Array.isArray(myAdjRequests) ? myAdjRequests : []).filter(
-      (r) => String(r.status || "").toUpperCase() === "PENDING",
-    ).length;
-  }, [myAdjRequests]);
+  const pendingAdjRequests = useMemo(
+    () =>
+      (Array.isArray(myAdjRequests) ? myAdjRequests : []).filter(
+        (r) => String(r?.status || "").toUpperCase() === "PENDING",
+      ).length,
+    [myAdjRequests],
+  );
 
-  const draftSalesCount = useMemo(() => {
-    return (Array.isArray(sales) ? sales : []).filter(
-      (s) => String(s.status || "").toUpperCase() === "DRAFT",
-    ).length;
-  }, [sales]);
+  const draftSalesCount = useMemo(
+    () =>
+      (Array.isArray(sales) ? sales : []).filter(
+        (s) => String(s?.status || "").toUpperCase() === "DRAFT",
+      ).length,
+    [sales],
+  );
 
-  // Dashboard stock snapshot (meaningful, per product)
   const stockSnapshot = useMemo(() => {
     const list = Array.isArray(inventory) ? inventory : [];
-    // sort: highest qty first
-    const sorted = list
+    return list
       .map((x) => ({
         id: x?.id,
-        name: x?.name,
+        name: x?.displayName || x?.name,
         sku: x?.sku,
         qty: Number(x?.qtyOnHand ?? x?.qty_on_hand ?? 0) || 0,
       }))
-      .sort((a, b) => b.qty - a.qty);
-
-    return sorted.slice(0, 10);
+      .sort((a, b) => b.qty - a.qty)
+      .slice(0, 10);
   }, [inventory]);
 
   const filteredInventory = useMemo(() => {
@@ -1034,11 +886,25 @@ export default function StoreKeeperPage() {
       .toLowerCase();
     const list = Array.isArray(inventory) ? inventory : [];
     if (!qq) return list;
+
     return list.filter((x) => {
-      const id = String(x.id || "");
-      const name = String(x.name || "").toLowerCase();
-      const sku = String(x.sku || "").toLowerCase();
-      return id.includes(qq) || name.includes(qq) || sku.includes(qq);
+      const id = String(x?.id || "");
+      const name = String(x?.name || x?.displayName || "").toLowerCase();
+      const sku = String(x?.sku || "").toLowerCase();
+      const category = String(x?.category || "").toLowerCase();
+      const brand = String(x?.brand || "").toLowerCase();
+      const barcode = String(x?.barcode || "").toLowerCase();
+      const model = String(x?.model || "").toLowerCase();
+
+      return (
+        id.includes(qq) ||
+        name.includes(qq) ||
+        sku.includes(qq) ||
+        category.includes(qq) ||
+        brand.includes(qq) ||
+        barcode.includes(qq) ||
+        model.includes(qq)
+      );
     });
   }, [inventory, invQ]);
 
@@ -1050,14 +916,16 @@ export default function StoreKeeperPage() {
 
     let base = list;
 
-    if (salesTab === "TO_RELEASE")
+    if (salesTab === "TO_RELEASE") {
       base = base.filter(
         (s) => String(s?.status || "").toUpperCase() === "DRAFT",
       );
-    if (salesTab === "RELEASED")
+    }
+    if (salesTab === "RELEASED") {
       base = base.filter(
         (s) => String(s?.status || "").toUpperCase() === "FULFILLED",
       );
+    }
 
     if (!qq) return base;
 
@@ -1069,6 +937,7 @@ export default function StoreKeeperPage() {
       ).toLowerCase();
       const customerName = String(s?.customerName ?? "").toLowerCase();
       const customerPhone = String(s?.customerPhone ?? "").toLowerCase();
+
       return (
         id.includes(qq) ||
         status.includes(qq) ||
@@ -1079,216 +948,321 @@ export default function StoreKeeperPage() {
     });
   }, [sales, salesQ, salesTab]);
 
-  const releasedCount = useMemo(() => {
-    const list = Array.isArray(sales) ? sales : [];
-    return list.filter(
-      (s) => String(s?.status || "").toUpperCase() === "FULFILLED",
-    ).length;
-  }, [sales]);
+  const releasedCount = useMemo(
+    () =>
+      (Array.isArray(sales) ? sales : []).filter(
+        (s) => String(s?.status || "").toUpperCase() === "FULFILLED",
+      ).length,
+    [sales],
+  );
 
-  const lastTenCount = useMemo(() => {
-    // always show "10" if there are many, else show actual count
-    const n = Array.isArray(sales) ? sales.length : 0;
-    return Math.min(10, n);
-  }, [sales]);
+  const lastTenCount = useMemo(
+    () => Math.min(10, Array.isArray(sales) ? sales.length : 0),
+    [sales],
+  );
 
-  const filteredSalesLastTen = useMemo(() => {
-    const list = Array.isArray(filteredSales) ? filteredSales : [];
-    // IMPORTANT: assume backend already returns latest first
-    return list.slice(0, 10);
-  }, [filteredSales]);
-  /* ---------- Actions ---------- */
+  const filteredSalesLastTen = useMemo(
+    () => (Array.isArray(filteredSales) ? filteredSales : []).slice(0, 10),
+    [filteredSales],
+  );
 
-  async function createProduct(e) {
-    e.preventDefault();
-    if (createProductBtn === "loading") return;
+  const resetProductForm = useCallback(() => {
+    setPName("");
+    setPSku("");
+    setPUnit("pcs");
+    setPNotes("");
+    setPInitialQty("");
+    setPCategory("");
+    setPSubcategory("");
+    setPBrand("");
+    setPModel("");
+    setPSize("");
+    setPColor("");
+    setPMaterial("");
+    setPVariantSummary("");
+    setPBarcode("");
+    setPSupplierSku("");
+    setPStockUnit("pcs");
+    setPSalesUnit("");
+    setPPurchaseUnit("");
+    setPReorderLevel("");
+    setPTrackInventory(true);
+  }, []);
 
-    const name = String(pName || "").trim();
-    if (!name) return toast("warn", "Write product name.");
+  const createProduct = useCallback(
+    async (e) => {
+      e.preventDefault();
+      if (createProductBtn === "loading") return;
 
-    const initialQty = numOrNull(pInitialQty);
-    if (pInitialQty !== "" && (initialQty == null || initialQty < 0)) {
-      return toast("warn", "Initial qty must be 0 or more.");
-    }
+      const name = String(pName || "").trim();
+      if (!name) return toast("warn", "Write product name.");
 
-    setCreateProductBtn("loading");
-    try {
-      const payload = {
-        name,
-        sku: String(pSku || "").trim() || undefined,
-        unit: String(pUnit || "").trim() || "pcs",
-        notes: String(pNotes || "").trim() || undefined,
-        sellingPrice: 0,
-        costPrice: 0,
-      };
+      const initialQty = numOrNull(pInitialQty);
+      if (pInitialQty !== "" && (initialQty == null || initialQty < 0)) {
+        return toast("warn", "Initial qty must be 0 or more.");
+      }
 
-      const data = await apiFetch(ENDPOINTS.PRODUCT_CREATE, {
-        method: "POST",
-        body: payload,
-      });
-      const createdId = data?.product?.id;
+      const reorderLevelValue = numOrNull(pReorderLevel);
+      if (
+        pReorderLevel !== "" &&
+        (reorderLevelValue == null || reorderLevelValue < 0)
+      ) {
+        return toast("warn", "Reorder level must be 0 or more.");
+      }
 
-      // optional: create initial arrival
-      if (createdId && initialQty != null && initialQty > 0) {
+      setCreateProductBtn("loading");
+      try {
+        const payload = {
+          name,
+          category:
+            String(pCategory || "")
+              .trim()
+              .toUpperCase() || undefined,
+          subcategory: String(pSubcategory || "").trim() || undefined,
+          sku: String(pSku || "").trim() || undefined,
+          barcode: String(pBarcode || "").trim() || undefined,
+          supplierSku: String(pSupplierSku || "").trim() || undefined,
+          brand: String(pBrand || "").trim() || undefined,
+          model: String(pModel || "").trim() || undefined,
+          size: String(pSize || "").trim() || undefined,
+          color: String(pColor || "").trim() || undefined,
+          material: String(pMaterial || "").trim() || undefined,
+          variantSummary: String(pVariantSummary || "").trim() || undefined,
+          unit: String(pUnit || pStockUnit || "PIECE")
+            .trim()
+            .toUpperCase(),
+          stockUnit: String(pStockUnit || pUnit || "PIECE")
+            .trim()
+            .toUpperCase(),
+          salesUnit: String(pSalesUnit || pStockUnit || pUnit || "PIECE")
+            .trim()
+            .toUpperCase(),
+          purchaseUnit: String(pPurchaseUnit || pStockUnit || pUnit || "PIECE")
+            .trim()
+            .toUpperCase(),
+          notes: String(pNotes || "").trim() || undefined,
+          sellingPrice: 0,
+          costPrice: 0,
+          maxDiscountPercent: 0,
+          openingQty: initialQty ?? 0,
+          reorderLevel: reorderLevelValue ?? 0,
+          trackInventory: pTrackInventory !== false,
+        };
+
+        const data = await apiFetch(ENDPOINTS.PRODUCT_CREATE, {
+          method: "POST",
+          body: payload,
+        });
+
+        const createdId = data?.product?.id;
+
+        toast("success", "Product created.");
+        resetProductForm();
+
+        await loadProducts();
+        await loadInventory();
+
+        if (createdId) setArrProductId(String(createdId));
+
+        setCreateProductBtn("success");
+        setTimeout(() => setCreateProductBtn("idle"), 900);
+      } catch (e2) {
+        setCreateProductBtn("idle");
+        toast(
+          "danger",
+          e2?.data?.error || e2?.message || "Create product failed",
+        );
+        console.error("create product error", e2?.data || e2);
+      }
+    },
+    [
+      createProductBtn,
+      pName,
+      pInitialQty,
+      pReorderLevel,
+      pCategory,
+      pSubcategory,
+      pSku,
+      pBarcode,
+      pSupplierSku,
+      pBrand,
+      pModel,
+      pSize,
+      pColor,
+      pMaterial,
+      pVariantSummary,
+      pUnit,
+      pStockUnit,
+      pSalesUnit,
+      pPurchaseUnit,
+      pNotes,
+      pTrackInventory,
+      loadProducts,
+      loadInventory,
+      resetProductForm,
+    ],
+  );
+
+  const createArrival = useCallback(
+    async (e) => {
+      e.preventDefault();
+      if (arrivalBtn === "loading") return;
+
+      const pid = Number(arrProductId);
+      const qty = numOrNull(arrQty);
+
+      if (!pid) return toast("warn", "Pick a product.");
+      if (qty == null || qty <= 0) return toast("warn", "Write a correct qty.");
+
+      setArrivalBtn("loading");
+      try {
+        let documentUrls = [];
+        if (arrFiles.length > 0) {
+          const up = await apiUpload(arrFiles);
+          documentUrls = up.urls || [];
+        }
+
         await apiFetch(ENDPOINTS.INVENTORY_ARRIVALS_CREATE, {
           method: "POST",
           body: {
-            productId: Number(createdId),
-            qtyReceived: Math.round(initialQty),
-            notes: "Initial stock",
-            documentUrls: [],
+            productId: pid,
+            qtyReceived: Math.round(qty),
+            notes: arrNotes?.trim()
+              ? String(arrNotes).trim().slice(0, 200)
+              : undefined,
+            documentUrls,
           },
         });
+
+        toast("success", "Arrival saved.");
+        setArrQty("");
+        setArrNotes("");
+        setArrFiles([]);
+
+        await loadInventory();
+
+        setArrivalBtn("success");
+        setTimeout(() => setArrivalBtn("idle"), 900);
+      } catch (e2) {
+        setArrivalBtn("idle");
+        toast(
+          "danger",
+          e2?.data?.error || e2?.message || "Save arrival failed",
+        );
+      }
+    },
+    [arrivalBtn, arrProductId, arrQty, arrFiles, arrNotes, loadInventory],
+  );
+
+  const createAdjustRequest = useCallback(
+    async (e) => {
+      e.preventDefault();
+      if (adjBtn === "loading") return;
+
+      const pid = Number(adjProductId);
+      const qtyAbs = numOrNull(adjQtyAbs);
+
+      if (!pid) return toast("warn", "Pick a product.");
+      if (qtyAbs == null || qtyAbs <= 0) {
+        return toast("warn", "Write a correct qty.");
+      }
+      if (!String(adjReason || "").trim()) {
+        return toast("warn", "Write a reason.");
       }
 
-      toast("success", "Product created.");
-      setPName("");
-      setPSku("");
-      setPUnit("pcs");
-      setPNotes("");
-      setPInitialQty("");
+      const signedQtyChange =
+        adjDirection === "REMOVE" ? -Math.round(qtyAbs) : Math.round(qtyAbs);
 
-      await loadProducts();
-      await loadInventory();
+      setAdjBtn("loading");
+      try {
+        await apiFetch(ENDPOINTS.INV_ADJ_REQ_CREATE, {
+          method: "POST",
+          body: {
+            productId: pid,
+            qtyChange: signedQtyChange,
+            reason: String(adjReason).trim().slice(0, 200),
+          },
+        });
 
-      if (createdId) setArrProductId(String(createdId));
+        toast("success", "Correction request sent. Wait for approval.");
+        setAdjProductId("");
+        setAdjDirection("ADD");
+        setAdjQtyAbs("");
+        setAdjReason("");
 
-      setCreateProductBtn("success");
-      setTimeout(() => setCreateProductBtn("idle"), 900);
-    } catch (e2) {
-      setCreateProductBtn("idle");
-      toast(
-        "danger",
-        e2?.data?.error || e2?.message || "Create product failed",
-      );
-    }
-  }
+        await loadMyAdjustRequests();
 
-  async function createArrival(e) {
-    e.preventDefault();
-    if (arrivalBtn === "loading") return;
-
-    const pid = Number(arrProductId);
-    const qty = numOrNull(arrQty);
-
-    if (!pid) return toast("warn", "Pick a product.");
-    if (qty == null || qty <= 0) return toast("warn", "Write a correct qty.");
-
-    setArrivalBtn("loading");
-    try {
-      let documentUrls = [];
-      if (arrFiles.length > 0) {
-        const up = await apiUpload(arrFiles);
-        documentUrls = up.urls || [];
+        setAdjBtn("success");
+        setTimeout(() => setAdjBtn("idle"), 900);
+      } catch (e2) {
+        setAdjBtn("idle");
+        toast(
+          "danger",
+          e2?.data?.error || e2?.message || "Create request failed",
+        );
       }
+    },
+    [
+      adjBtn,
+      adjProductId,
+      adjQtyAbs,
+      adjReason,
+      adjDirection,
+      loadMyAdjustRequests,
+    ],
+  );
 
-      await apiFetch(ENDPOINTS.INVENTORY_ARRIVALS_CREATE, {
-        method: "POST",
-        body: {
-          productId: pid,
-          qtyReceived: Math.round(qty),
-          notes: arrNotes?.trim()
-            ? String(arrNotes).trim().slice(0, 200)
-            : undefined,
-          documentUrls,
-        },
-      });
+  const releaseStock = useCallback(
+    async (saleId) => {
+      const id = Number(saleId);
+      if (!id) return toast("warn", "Bad sale id.");
+      if (releaseBtnState[id] === "loading") return;
 
-      toast("success", "Arrival saved.");
-      setArrQty("");
-      setArrNotes("");
-      setArrFiles([]);
+      setReleaseBtnState((p) => ({ ...p, [id]: "loading" }));
+      try {
+        await apiFetch(ENDPOINTS.SALE_FULFILL(id), {
+          method: "POST",
+          body: {},
+        });
 
-      await loadInventory();
+        toast("success", `Sale #${id} released.`);
+        notifyBeep();
 
-      setArrivalBtn("success");
-      setTimeout(() => setArrivalBtn("idle"), 900);
-    } catch (e2) {
-      setArrivalBtn("idle");
-      toast("danger", e2?.data?.error || e2?.message || "Save arrival failed");
-    }
-  }
+        await loadSales();
+        await loadInventory();
 
-  async function createAdjustRequest(e) {
-    e.preventDefault();
-    if (adjBtn === "loading") return;
+        if (viewSale?.id === id) await openSaleDetails(id);
 
-    const pid = Number(adjProductId);
-    const qtyAbs = numOrNull(adjQtyAbs);
-
-    if (!pid) return toast("warn", "Pick a product.");
-    if (qtyAbs == null || qtyAbs <= 0)
-      return toast("warn", "Write a correct qty.");
-    if (!String(adjReason || "").trim())
-      return toast("warn", "Write a reason.");
-
-    const signedQtyChange =
-      adjDirection === "REMOVE" ? -Math.round(qtyAbs) : Math.round(qtyAbs);
-
-    setAdjBtn("loading");
-    try {
-      await apiFetch(ENDPOINTS.INV_ADJ_REQ_CREATE, {
-        method: "POST",
-        body: {
-          productId: pid,
-          qtyChange: signedQtyChange,
-          reason: String(adjReason).trim().slice(0, 200),
-        },
-      });
-
-      toast("success", "Correction request sent. Wait for approval.");
-      setAdjProductId("");
-      setAdjDirection("ADD");
-      setAdjQtyAbs("");
-      setAdjReason("");
-
-      await loadMyAdjustRequests();
-
-      setAdjBtn("success");
-      setTimeout(() => setAdjBtn("idle"), 900);
-    } catch (e2) {
-      setAdjBtn("idle");
-      toast(
-        "danger",
-        e2?.data?.error || e2?.message || "Create request failed",
-      );
-    }
-  }
-
-  async function releaseStock(saleId) {
-    const id = Number(saleId);
-    if (!id) return toast("warn", "Bad sale id.");
-    if (releaseBtnState[id] === "loading") return;
-
-    setReleaseBtnState((p) => ({ ...p, [id]: "loading" }));
-    try {
-      await apiFetch(ENDPOINTS.SALE_FULFILL(id), { method: "POST", body: {} });
-
-      toast("success", `Sale #${id} released.`);
-      await loadSales();
-      await loadInventory();
-
-      if (viewSale?.id === id) await openSaleDetails(id);
-
-      setReleaseBtnState((p) => ({ ...p, [id]: "success" }));
-      setTimeout(
-        () => setReleaseBtnState((p) => ({ ...p, [id]: "idle" })),
-        900,
-      );
-    } catch (e) {
-      setReleaseBtnState((p) => ({ ...p, [id]: "idle" }));
-      toast("danger", e?.data?.error || e?.message || "Release failed");
-    }
-  }
+        setReleaseBtnState((p) => ({ ...p, [id]: "success" }));
+        setTimeout(
+          () => setReleaseBtnState((p) => ({ ...p, [id]: "idle" })),
+          900,
+        );
+      } catch (e) {
+        setReleaseBtnState((p) => ({ ...p, [id]: "idle" }));
+        toast("danger", e?.data?.error || e?.message || "Release failed");
+      }
+    },
+    [
+      releaseBtnState,
+      loadSales,
+      loadInventory,
+      viewSale,
+      openSaleDetails,
+      notifyBeep,
+    ],
+  );
 
   if (bootLoading) return <PageSkeleton />;
-  if (!isAuthorized)
-    return <div className="p-6 text-sm text-slate-600">Redirecting…</div>;
+
+  if (!isAuthorized) {
+    return <div className="p-6 text-sm app-muted">Redirecting…</div>;
+  }
 
   const subtitle = `User: ${me?.email || "—"} • ${locationLabel(me)}`;
 
   return (
-    <div className="min-h-screen bg-slate-50 overflow-x-hidden">
+    <div className="min-h-screen overflow-x-hidden bg-[var(--app-bg)]">
       <UrgentToast
         open={urgentOpen}
         title={urgentTitle}
@@ -1306,73 +1280,35 @@ export default function StoreKeeperPage() {
         onReadAll={markAllRead}
       />
 
-      <RoleBar title="Store keeper" subtitle={subtitle} user={me} />
+      <RoleBar
+        title="Store keeper"
+        subtitle={subtitle}
+        user={me}
+        links={[
+          { href: "/comms", label: "Comms" },
+          { href: "/customers", label: "Customers" },
+        ]}
+      />
 
-      <div className="mx-auto max-w-7xl px-4 sm:px-5 py-6">
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-5">
         {msg ? (
           <div className="mb-4">
             <Banner kind={msgKind}>{msg}</Banner>
           </div>
         ) : null}
 
-        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
-          {/* Sidebar */}
-          <aside className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4 h-fit">
-            <div className="text-sm font-bold text-slate-900">Store keeper</div>
-            <div className="mt-1 text-xs text-slate-600">
-              {locationLabel(me)}
-            </div>
+        <div className="grid gap-4">
+          <TopSectionSwitcher
+            section={section}
+            setSection={setSection}
+            draftSalesCount={draftSalesCount}
+            pendingAdjRequests={pendingAdjRequests}
+          />
 
-            <div className="mt-4 lg:hidden">
-              <div className="text-xs font-semibold text-slate-600 mb-2">
-                Section
-              </div>
-              <Select
-                value={section}
-                onChange={(e) => setSection(e.target.value)}
-              >
-                {SECTIONS.map((s) => (
-                  <option key={s.key} value={s.key}>
-                    {s.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-
-            <div className="mt-4 hidden lg:grid gap-2">
-              {SECTIONS.map((s) => {
-                const isSales = s.key === "sales";
-                const badge =
-                  isSales && draftSalesCount > 0
-                    ? String(draftSalesCount)
-                    : null;
-
-                return (
-                  <NavItem
-                    key={s.key}
-                    active={section === s.key}
-                    label={s.label}
-                    onClick={() => setSection(s.key)}
-                    badge={badge}
-                    badgeTone={
-                      isSales && draftSalesCount > 0 ? "danger" : "default"
-                    }
-                  />
-                );
-              })}
-            </div>
-
-            <div className="mt-6 pt-4 border-t border-slate-200 text-xs text-slate-600">
-              Rule: You manage stock only. Prices belong to manager/admin.
-            </div>
-          </aside>
-
-          {/* Main */}
           <main className="grid gap-4">
-            {/* DASHBOARD */}
             {section === "dashboard" ? (
               <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                   <Card
                     label="Products"
                     value={productsLoading ? "…" : String(totalProducts)}
@@ -1395,16 +1331,16 @@ export default function StoreKeeperPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                   <SectionCard
                     title="Today focus"
-                    hint="These actions protect sales and reduce mistakes."
+                    hint="These actions protect stock accuracy and keep seller flow moving."
                     right={
                       <AsyncButton
                         variant="secondary"
                         size="sm"
                         state={
-                          productsLoading || inventoryLoading
+                          productsLoading || inventoryLoading || salesLoading
                             ? "loading"
                             : "idle"
                         }
@@ -1416,20 +1352,21 @@ export default function StoreKeeperPage() {
                           loadInventory();
                           loadSales();
                           loadUnread();
+                          loadMyAdjustRequests();
                         }}
                       />
                     }
                   >
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <button
                         type="button"
                         onClick={() => setSection("sales")}
-                        className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                        className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-5 text-left transition hover:bg-[var(--hover)]"
                       >
-                        <div className="text-sm font-bold text-slate-900">
+                        <div className="text-base font-black text-[var(--app-fg)]">
                           Release stock
                         </div>
-                        <div className="mt-1 text-xs text-slate-600">
+                        <div className="mt-2 text-sm app-muted">
                           Release stock for draft sales.
                         </div>
                       </button>
@@ -1437,39 +1374,39 @@ export default function StoreKeeperPage() {
                       <button
                         type="button"
                         onClick={() => setSection("arrivals")}
-                        className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                        className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-5 text-left transition hover:bg-[var(--hover)]"
                       >
-                        <div className="text-sm font-bold text-slate-900">
+                        <div className="text-base font-black text-[var(--app-fg)]">
                           Record arrivals
                         </div>
-                        <div className="mt-1 text-xs text-slate-600">
-                          Add new stock with documents.
+                        <div className="mt-2 text-sm app-muted">
+                          Add new stock with supporting documents.
                         </div>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => setSection("adjustments")}
-                        className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                        className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-5 text-left transition hover:bg-[var(--hover)]"
                       >
-                        <div className="text-sm font-bold text-slate-900">
+                        <div className="text-base font-black text-[var(--app-fg)]">
                           Request correction
                         </div>
-                        <div className="mt-1 text-xs text-slate-600">
-                          Fix wrong stock via approval.
+                        <div className="mt-2 text-sm app-muted">
+                          Report recount or damage through approval flow.
                         </div>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => setSection("inventory")}
-                        className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
+                        className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-5 text-left transition hover:bg-[var(--hover)]"
                       >
-                        <div className="text-sm font-bold text-slate-900">
+                        <div className="text-base font-black text-[var(--app-fg)]">
                           Check inventory
                         </div>
-                        <div className="mt-1 text-xs text-slate-600">
-                          Search qty by product.
+                        <div className="mt-2 text-sm app-muted">
+                          Search quantity and product details quickly.
                         </div>
                       </button>
                     </div>
@@ -1477,7 +1414,7 @@ export default function StoreKeeperPage() {
 
                   <SectionCard
                     title="Stock snapshot"
-                    hint="Top items by qty on hand (quick check)."
+                    hint="Top items by quantity on hand for a quick operational pulse."
                   >
                     {inventoryLoading ? (
                       <div className="grid gap-3">
@@ -1486,32 +1423,28 @@ export default function StoreKeeperPage() {
                         <Skeleton className="h-14 w-full" />
                       </div>
                     ) : stockSnapshot.length === 0 ? (
-                      <div className="text-sm text-slate-600">
-                        No inventory yet.
-                      </div>
+                      <div className="text-sm app-muted">No inventory yet.</div>
                     ) : (
                       <div className="grid gap-2">
                         {stockSnapshot.map((x) => (
                           <div
                             key={String(x.id)}
-                            className="rounded-2xl border border-slate-200 bg-white p-3 flex items-center justify-between gap-3"
+                            className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3"
                           >
                             <div className="min-w-0">
-                              <div className="text-sm font-bold text-slate-900 truncate">
+                              <div className="truncate text-sm font-bold text-[var(--app-fg)]">
                                 {toStr(x.name) || "—"}
                               </div>
-                              <div className="text-xs text-slate-500">
+                              <div className="text-xs app-muted">
                                 #{x.id}
                                 {x.sku ? ` • ${x.sku}` : ""}
                               </div>
                             </div>
                             <div className="shrink-0 text-right">
-                              <div className="text-lg font-extrabold text-slate-900">
-                                {money(x.qty)}
+                              <div className="text-lg font-extrabold text-[var(--app-fg)]">
+                                {qtyText(x.qty)}
                               </div>
-                              <div className="text-xs text-slate-500">
-                                on hand
-                              </div>
+                              <div className="text-xs app-muted">on hand</div>
                             </div>
                           </div>
                         ))}
@@ -1522,590 +1455,115 @@ export default function StoreKeeperPage() {
               </>
             ) : null}
 
-            {/* INVENTORY */}
             {section === "inventory" ? (
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                <SectionCard
-                  title="Create product"
-                  hint="No prices here. Manager sets prices later."
-                >
-                  <form onSubmit={createProduct} className="grid gap-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <Input
-                        placeholder="Product name"
-                        value={pName}
-                        onChange={(e) => setPName(e.target.value)}
-                      />
-                      <Input
-                        placeholder="SKU (optional)"
-                        value={pSku}
-                        onChange={(e) => setPSku(e.target.value)}
-                      />
-                      <Input
-                        placeholder="Unit (pcs, kg)"
-                        value={pUnit}
-                        onChange={(e) => setPUnit(e.target.value)}
-                      />
-                      <Input
-                        placeholder="Initial qty (optional)"
-                        value={pInitialQty}
-                        onChange={(e) => setPInitialQty(e.target.value)}
-                      />
-                      <div className="sm:col-span-2">
-                        <Input
-                          placeholder="Notes (optional)"
-                          value={pNotes}
-                          onChange={(e) => setPNotes(e.target.value)}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="sm:max-w-sm">
-                      <AsyncButton
-                        type="submit"
-                        variant="primary"
-                        state={createProductBtn}
-                        text="Create product"
-                        loadingText="Creating…"
-                        successText="Created"
-                      />
-                    </div>
-                  </form>
-                </SectionCard>
-
-                <SectionCard
-                  title="Inventory"
-                  hint="Search by name or SKU."
-                  right={
-                    <AsyncButton
-                      variant="secondary"
-                      size="sm"
-                      state={inventoryLoading ? "loading" : "idle"}
-                      text="Refresh"
-                      loadingText="Refreshing…"
-                      successText="Done"
-                      onClick={loadInventory}
-                    />
-                  }
-                >
-                  <Input
-                    placeholder="Search inventory…"
-                    value={invQ}
-                    onChange={(e) => setInvQ(e.target.value)}
-                  />
-
-                  <div className="mt-3 grid gap-2">
-                    {inventoryLoading ? (
-                      <>
-                        <Skeleton className="h-16 w-full" />
-                        <Skeleton className="h-16 w-full" />
-                        <Skeleton className="h-16 w-full" />
-                      </>
-                    ) : filteredInventory.length === 0 ? (
-                      <div className="text-sm text-slate-600">
-                        No inventory items.
-                      </div>
-                    ) : (
-                      filteredInventory.map((p) => {
-                        const qty =
-                          Number(p?.qtyOnHand ?? p?.qty_on_hand ?? 0) || 0;
-                        return (
-                          <div
-                            key={String(p?.id)}
-                            className="rounded-2xl border border-slate-200 bg-white p-3 flex items-center justify-between gap-3"
-                          >
-                            <div className="min-w-0">
-                              <div className="text-sm font-bold text-slate-900 truncate">
-                                {toStr(p?.name) || "—"}
-                              </div>
-                              <div className="text-xs text-slate-500">
-                                #{p?.id}
-                                {p?.sku ? ` • ${p.sku}` : ""}
-                              </div>
-                            </div>
-                            <div className="shrink-0 text-right">
-                              <div className="text-lg font-extrabold text-slate-900">
-                                {money(qty)}
-                              </div>
-                              <div className="text-xs text-slate-500">
-                                on hand
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </SectionCard>
-              </div>
+              <StoreKeeperInventorySection
+                productsLoading={productsLoading}
+                inventoryLoading={inventoryLoading}
+                loadProducts={loadProducts}
+                loadInventory={loadInventory}
+                pName={pName}
+                setPName={setPName}
+                pSku={pSku}
+                setPSku={setPSku}
+                pUnit={pUnit}
+                setPUnit={setPUnit}
+                pNotes={pNotes}
+                setPNotes={setPNotes}
+                pInitialQty={pInitialQty}
+                setPInitialQty={setPInitialQty}
+                createProduct={createProduct}
+                createProductBtn={createProductBtn}
+                invQ={invQ}
+                setInvQ={setInvQ}
+                filteredInventory={filteredInventory}
+                pCategory={pCategory}
+                setPCategory={setPCategory}
+                pSubcategory={pSubcategory}
+                setPSubcategory={setPSubcategory}
+                pBrand={pBrand}
+                setPBrand={setPBrand}
+                pModel={pModel}
+                setPModel={setPModel}
+                pSize={pSize}
+                setPSize={setPSize}
+                pColor={pColor}
+                setPColor={setPColor}
+                pMaterial={pMaterial}
+                setPMaterial={setPMaterial}
+                pVariantSummary={pVariantSummary}
+                setPVariantSummary={setPVariantSummary}
+                pBarcode={pBarcode}
+                setPBarcode={setPBarcode}
+                pSupplierSku={pSupplierSku}
+                setPSupplierSku={setPSupplierSku}
+                pStockUnit={pStockUnit}
+                setPStockUnit={setPStockUnit}
+                pSalesUnit={pSalesUnit}
+                setPSalesUnit={setPSalesUnit}
+                pPurchaseUnit={pPurchaseUnit}
+                setPPurchaseUnit={setPPurchaseUnit}
+                pReorderLevel={pReorderLevel}
+                setPReorderLevel={setPReorderLevel}
+                pTrackInventory={pTrackInventory}
+                setPTrackInventory={setPTrackInventory}
+              />
             ) : null}
 
-            {/* ARRIVALS */}
             {section === "arrivals" ? (
-              <SectionCard
-                title="Record stock arrival"
-                hint="Adds qty and saves documents (invoice, receipt, etc.)."
-              >
-                <form onSubmit={createArrival} className="grid gap-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="sm:col-span-2">
-                      <div className="text-xs font-semibold text-slate-600 mb-1">
-                        Product
-                      </div>
-                      <Select
-                        value={arrProductId}
-                        onChange={(e) => setArrProductId(e.target.value)}
-                      >
-                        <option value="">Select product…</option>
-                        {products.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            #{p.id} • {p.name} {p.sku ? `(${p.sku})` : ""}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-
-                    <div>
-                      <div className="text-xs font-semibold text-slate-600 mb-1">
-                        Qty received
-                      </div>
-                      <Input
-                        placeholder="Example: 20"
-                        value={arrQty}
-                        onChange={(e) => setArrQty(e.target.value)}
-                      />
-                    </div>
-
-                    <div>
-                      <div className="text-xs font-semibold text-slate-600 mb-1">
-                        Notes
-                      </div>
-                      <Input
-                        placeholder="Optional"
-                        value={arrNotes}
-                        onChange={(e) => setArrNotes(e.target.value)}
-                      />
-                    </div>
-
-                    <div className="sm:col-span-2">
-                      <div className="rounded-2xl border border-slate-200 p-4 bg-white">
-                        <div className="text-sm font-bold text-slate-900">
-                          Documents
-                        </div>
-                        <div className="mt-1 text-xs text-slate-600">
-                          PDF or images.
-                        </div>
-
-                        <input
-                          id="arrival-files"
-                          type="file"
-                          multiple
-                          accept=".pdf,image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            const files = Array.from(e.target.files || []);
-                            setArrFiles(files);
-                          }}
-                        />
-
-                        <label
-                          htmlFor="arrival-files"
-                          className="mt-3 inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold hover:bg-slate-50 cursor-pointer"
-                        >
-                          Choose files
-                        </label>
-
-                        {arrFiles.length > 0 ? (
-                          <div className="mt-3 grid gap-2">
-                            {arrFiles.map((f, i) => (
-                              <div
-                                key={i}
-                                className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
-                              >
-                                <div className="text-sm text-slate-700 truncate">
-                                  {f.name}
-                                </div>
-                                <button
-                                  type="button"
-                                  className="text-xs font-bold text-rose-700 hover:underline"
-                                  onClick={() =>
-                                    setArrFiles((prev) =>
-                                      prev.filter((_, idx) => idx !== i),
-                                    )
-                                  }
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="mt-2 text-xs text-slate-500">
-                            No files selected.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 flex-wrap">
-                    <AsyncButton
-                      type="submit"
-                      variant="primary"
-                      state={arrivalBtn}
-                      text="Save arrival"
-                      loadingText="Saving…"
-                      successText="Saved"
-                    />
-
-                    <button
-                      type="button"
-                      className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
-                      onClick={() => {
-                        setArrQty("");
-                        setArrNotes("");
-                        setArrFiles([]);
-                      }}
-                    >
-                      Clear form
-                    </button>
-                  </div>
-                </form>
-              </SectionCard>
+              <StoreKeeperArrivalsSection
+                products={products}
+                productsLoading={productsLoading}
+                arrProductId={arrProductId}
+                setArrProductId={setArrProductId}
+                arrQty={arrQty}
+                setArrQty={setArrQty}
+                arrNotes={arrNotes}
+                setArrNotes={setArrNotes}
+                arrFiles={arrFiles}
+                setArrFiles={setArrFiles}
+                createArrival={createArrival}
+                arrivalBtn={arrivalBtn}
+                loadInventory={loadInventory}
+                inventoryLoading={inventoryLoading}
+              />
             ) : null}
 
-            {/* ADJUSTMENTS */}
             {section === "adjustments" ? (
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                <SectionCard
-                  title="Request correction"
-                  hint="This does NOT change stock now. It needs approval."
-                >
-                  <form onSubmit={createAdjustRequest} className="grid gap-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="sm:col-span-2">
-                        <div className="text-xs font-semibold text-slate-600 mb-1">
-                          Product
-                        </div>
-                        <Select
-                          value={adjProductId}
-                          onChange={(e) => setAdjProductId(e.target.value)}
-                        >
-                          <option value="">Select product…</option>
-                          {products.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              #{p.id} • {p.name} {p.sku ? `(${p.sku})` : ""}
-                            </option>
-                          ))}
-                        </Select>
-                      </div>
-
-                      <div>
-                        <div className="text-xs font-semibold text-slate-600 mb-1">
-                          Direction
-                        </div>
-                        <Select
-                          value={adjDirection}
-                          onChange={(e) => setAdjDirection(e.target.value)}
-                        >
-                          <option value="ADD">Increase (+)</option>
-                          <option value="REMOVE">Decrease (-)</option>
-                        </Select>
-                      </div>
-
-                      <div>
-                        <div className="text-xs font-semibold text-slate-600 mb-1">
-                          Qty
-                        </div>
-                        <Input
-                          placeholder="Example: 3"
-                          value={adjQtyAbs}
-                          onChange={(e) => setAdjQtyAbs(e.target.value)}
-                        />
-                      </div>
-
-                      <div className="sm:col-span-2">
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                          {(() => {
-                            const current = getQtyOnHandForProduct(
-                              inventory,
-                              adjProductId,
-                            );
-                            const qtyAbs = Number(adjQtyAbs);
-                            const signed =
-                              adjDirection === "REMOVE" ? -qtyAbs : qtyAbs;
-
-                            if (current === null)
-                              return <div>Current qty: —</div>;
-                            if (!Number.isFinite(qtyAbs) || qtyAbs <= 0)
-                              return (
-                                <div>
-                                  Current qty: <b>{current}</b>
-                                </div>
-                              );
-
-                            const predicted = current + signed;
-                            return (
-                              <div>
-                                Current qty: <b>{current}</b> → After approval:{" "}
-                                <b>
-                                  {predicted < 0
-                                    ? "❌ would be negative"
-                                    : predicted}
-                                </b>
-                                <div className="mt-1 text-xs text-slate-600">
-                                  Change:{" "}
-                                  <b>
-                                    {signed > 0 ? `+${signed}` : String(signed)}
-                                  </b>
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      </div>
-
-                      <div className="sm:col-span-2">
-                        <div className="text-xs font-semibold text-slate-600 mb-1">
-                          Reason
-                        </div>
-                        <Input
-                          placeholder="Damaged, recount, found stock…"
-                          value={adjReason}
-                          onChange={(e) => setAdjReason(e.target.value)}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="sm:max-w-sm">
-                      <AsyncButton
-                        type="submit"
-                        variant="primary"
-                        state={adjBtn}
-                        text="Send request"
-                        loadingText="Sending…"
-                        successText="Sent"
-                      />
-                    </div>
-                  </form>
-                </SectionCard>
-
-                <SectionCard
-                  title="My requests"
-                  hint="Pending = waiting decision."
-                  right={
-                    <AsyncButton
-                      variant="secondary"
-                      size="sm"
-                      state={myAdjLoading ? "loading" : "idle"}
-                      text="Refresh"
-                      loadingText="Refreshing…"
-                      successText="Done"
-                      onClick={loadMyAdjustRequests}
-                    />
-                  }
-                >
-                  {myAdjLoading ? (
-                    <div className="grid gap-3">
-                      <Skeleton className="h-16 w-full" />
-                      <Skeleton className="h-16 w-full" />
-                      <Skeleton className="h-16 w-full" />
-                    </div>
-                  ) : (Array.isArray(myAdjRequests) ? myAdjRequests : [])
-                      .length === 0 ? (
-                    <div className="text-sm text-slate-600">
-                      No requests yet.
-                    </div>
-                  ) : (
-                    <div className="grid gap-2">
-                      {(Array.isArray(myAdjRequests) ? myAdjRequests : []).map(
-                        (r) => {
-                          const qty =
-                            Number(r?.qtyChange ?? r?.qty_change ?? 0) || 0;
-                          const st = String(r?.status || "").toUpperCase();
-                          const badge =
-                            st === "PENDING"
-                              ? "bg-amber-50 text-amber-800 border-amber-200"
-                              : st === "APPROVED"
-                                ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                                : "bg-rose-50 text-rose-800 border-rose-200";
-
-                          return (
-                            <div
-                              key={String(r?.id)}
-                              className="rounded-2xl border border-slate-200 bg-white p-3 flex items-start justify-between gap-3"
-                            >
-                              <div className="min-w-0">
-                                <div className="text-sm font-bold text-slate-900 truncate">
-                                  {toStr(r?.productName) || "Unknown product"}
-                                </div>
-                                <div className="mt-1 text-xs text-slate-500">
-                                  Request #{r?.id} •{" "}
-                                  {safeDate(r?.createdAt ?? r?.created_at)}
-                                </div>
-                                <div className="mt-2 text-sm text-slate-700">
-                                  Qty change:{" "}
-                                  <b>{qty > 0 ? `+${qty}` : String(qty)}</b>
-                                </div>
-                              </div>
-
-                              <div className="shrink-0 text-right">
-                                <span
-                                  className={cx(
-                                    "inline-flex items-center rounded-xl border px-2.5 py-1 text-xs font-bold",
-                                    badge,
-                                  )}
-                                >
-                                  {st || "—"}
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        },
-                      )}
-                    </div>
-                  )}
-                </SectionCard>
-              </div>
+              <StoreKeeperAdjustmentsSection
+                products={products}
+                inventory={inventory}
+                myAdjRequests={myAdjRequests}
+                myAdjLoading={myAdjLoading}
+                loadMyAdjustRequests={loadMyAdjustRequests}
+                adjProductId={adjProductId}
+                setAdjProductId={setAdjProductId}
+                adjDirection={adjDirection}
+                setAdjDirection={setAdjDirection}
+                adjQtyAbs={adjQtyAbs}
+                setAdjQtyAbs={setAdjQtyAbs}
+                adjReason={adjReason}
+                setAdjReason={setAdjReason}
+                createAdjustRequest={createAdjustRequest}
+                adjBtn={adjBtn}
+              />
             ) : null}
 
-            {/* SALES */}
             {section === "sales" ? (
-              <SectionCard
-                title="Release stock"
-                hint="Release only draft sales. This removes stock."
-                right={
-                  <AsyncButton
-                    variant="secondary"
-                    size="sm"
-                    state={salesLoading ? "loading" : "idle"}
-                    text="Refresh"
-                    loadingText="Refreshing…"
-                    successText="Done"
-                    onClick={loadSales}
-                  />
-                }
-              >
-                <div className="grid gap-3">
-                  {/* Tabs + Search */}
-                  <div className="grid gap-2">
-                    <PillTabsWithBadges
-                      value={salesTab}
-                      onChange={setSalesTab}
-                      tabs={[
-                        {
-                          value: "TO_RELEASE",
-                          label: "To release",
-                          badge: draftSalesCount,
-                          badgeTone: draftSalesCount > 0 ? "danger" : "default",
-                        },
-                        {
-                          value: "RELEASED",
-                          label: "Released",
-                          badge: releasedCount,
-                        },
-                        { value: "ALL", label: "All", badge: lastTenCount },
-                      ]}
-                    />
-
-                    <Input
-                      placeholder="Search by customer, phone, sale id…"
-                      value={salesQ}
-                      onChange={(e) => setSalesQ(e.target.value)}
-                    />
-
-                    <div className="text-xs text-slate-500">
-                      Showing latest <b>10</b> results (most recent first).
-                    </div>
-                  </div>
-
-                  {/* Content */}
-                  {salesLoading ? (
-                    <div className="grid gap-3">
-                      <Skeleton className="h-24 w-full" />
-                      <Skeleton className="h-24 w-full" />
-                      <Skeleton className="h-24 w-full" />
-                    </div>
-                  ) : filteredSalesLastTen.length === 0 ? (
-                    <div className="text-sm text-slate-600">
-                      No sales found.
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                      {filteredSalesLastTen.map((s) => {
-                        const status = String(s?.status || "").toUpperCase();
-                        const canRelease = status === "DRAFT";
-
-                        const sellerLabel =
-                          toStr(s?.sellerName) ||
-                          toStr(s?.sellerEmail) ||
-                          `Staff #${toStr(s?.sellerId || s?.seller_id) || "—"}`;
-
-                        const customerName =
-                          toStr(s?.customerName) || "Walk-in";
-                        const customerPhone = toStr(s?.customerPhone);
-                        const customerLabel = [customerName, customerPhone]
-                          .filter(Boolean)
-                          .join(" • ");
-
-                        const created = safeDate(s?.createdAt || s?.created_at);
-
-                        return (
-                          <div
-                            key={String(s?.id)}
-                            className="rounded-2xl border border-slate-200 bg-white p-4"
-                          >
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <div className="text-sm font-extrabold text-slate-900">
-                                  Sale #{s?.id ?? "—"}
-                                </div>
-                                <StatusBadge status={status} />
-                              </div>
-
-                              <div className="mt-2 text-sm text-slate-700">
-                                Customer:{" "}
-                                <b className="break-words">{customerLabel}</b>
-                              </div>
-
-                              <div className="mt-1 text-sm text-slate-700">
-                                Seller:{" "}
-                                <b className="break-words">{sellerLabel}</b>
-                              </div>
-
-                              <div className="mt-2 text-xs text-slate-500">
-                                Created: {created}
-                              </div>
-                            </div>
-
-                            <div className="mt-3 flex flex-wrap gap-2 items-center">
-                              <ReleaseButton
-                                state={releaseBtnState[s?.id] || "idle"}
-                                disabled={!canRelease}
-                                onClick={() => releaseStock(s?.id)}
-                              />
-
-                              <button
-                                type="button"
-                                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
-                                onClick={() => openSaleDetails(s?.id)}
-                              >
-                                View items
-                              </button>
-
-                              {!canRelease ? (
-                                <span className="text-xs text-slate-500">
-                                  Release allowed only for <b>TO RELEASE</b>.
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </SectionCard>
+              <StoreKeeperSalesSection
+                salesLoading={salesLoading}
+                loadSales={loadSales}
+                salesQ={salesQ}
+                setSalesQ={setSalesQ}
+                salesTab={salesTab}
+                setSalesTab={setSalesTab}
+                draftSalesCount={draftSalesCount}
+                releasedCount={releasedCount}
+                lastTenCount={lastTenCount}
+                filteredSalesLastTen={filteredSalesLastTen}
+                releaseBtnState={releaseBtnState}
+                releaseStock={releaseStock}
+                openSaleDetails={openSaleDetails}
+              />
             ) : null}
           </main>
         </div>
@@ -2117,87 +1575,6 @@ export default function StoreKeeperPage() {
         loading={viewSaleLoading}
         onClose={() => setViewSale(null)}
       />
-    </div>
-  );
-}
-
-function SaleModal({ open, sale, loading, onClose }) {
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-
-      <div className="relative w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden">
-        <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-sm font-bold text-slate-900">
-              Sale #{sale?.id ?? "—"} {loading ? "…" : ""}
-            </div>
-            <div className="text-xs text-slate-600 mt-1 truncate">
-              Status: {String(sale?.status || "—").toUpperCase()}
-            </div>
-          </div>
-
-          <button
-            type="button"
-            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
-            onClick={onClose}
-          >
-            Close
-          </button>
-        </div>
-
-        <div className="p-4">
-          {loading ? (
-            <div className="grid gap-3">
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-16 w-full" />
-            </div>
-          ) : (
-            <>
-              <div className="text-sm font-bold text-slate-900">Items</div>
-
-              <div className="mt-3 grid gap-2">
-                {(Array.isArray(sale?.items) ? sale.items : []).map(
-                  (it, idx) => (
-                    <div
-                      key={it?.id || idx}
-                      className="rounded-2xl border border-slate-200 bg-white p-3 flex items-center justify-between gap-3"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-sm font-bold text-slate-900 truncate">
-                          {it?.productName ||
-                            it?.name ||
-                            `#${it?.productId ?? "—"}`}
-                        </div>
-                        <div className="text-xs text-slate-500">
-                          {it?.sku ? `SKU: ${it.sku}` : "SKU: —"}
-                        </div>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <div className="text-lg font-extrabold text-slate-900">
-                          {Number(it?.qty ?? 0)}
-                        </div>
-                        <div className="text-xs text-slate-500">qty</div>
-                      </div>
-                    </div>
-                  ),
-                )}
-
-                {(Array.isArray(sale?.items) ? sale.items : []).length === 0 ? (
-                  <div className="text-sm text-slate-600">No items.</div>
-                ) : null}
-              </div>
-
-              <div className="mt-4 text-xs text-slate-600">
-                Store keeper releases stock. Seller finishes payment later.
-              </div>
-            </>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

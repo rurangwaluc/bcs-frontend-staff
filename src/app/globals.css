@@ -1,9 +1,327 @@
 @import "tailwindcss";
 
+:root {
+  color-scheme: light;
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+  /* Core */
+  --app-bg: #f5f7fb;
+  --app-fg: #0f172a;
 
+  /* Surfaces */
+  --card: #ffffff;
+  --card-2: #f8fafc;
+  --card-3: #f1f5f9;
 
+  /* Borders */
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --border-stronger: #94a3b8;
 
+  /* Text */
+  --muted: #64748b;
+  --muted-2: #94a3b8;
+
+  /* Brand */
+  --accent: #0f172a;
+  --accent-fg: #ffffff;
+
+  /* Interaction */
+  --hover: #eef3f8;
+  --hover-strong: #e2e8f0;
+  --ring: rgba(15, 23, 42, 0.14);
+  --ring-strong: #334155;
+
+  /* Semantic */
+  --success-bg: #ecfdf3;
+  --success-fg: #166534;
+  --success-border: #a7f3d0;
+
+  --danger-bg: #fef2f2;
+  --danger-fg: #b91c1c;
+  --danger-border: #fecaca;
+
+  --warn-bg: #fff7e8;
+  --warn-fg: #9a6700;
+  --warn-border: #f6d38b;
+
+  --info-bg: #eff6ff;
+  --info-fg: #1d4ed8;
+  --info-border: #bfdbfe;
+
+  /* Overlay */
+  --overlay: rgba(15, 23, 42, 0.42);
+
+  /* Radius */
+  --radius-sm: 14px;
+  --radius-md: 18px;
+  --radius-lg: 24px;
+  --radius-xl: 30px;
+
+  /* Shadow */
+  --shadow-soft:
+    0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.05);
+
+  --shadow-card:
+    0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 28px rgba(15, 23, 42, 0.06);
+
+  --shadow-float:
+    0 10px 30px rgba(15, 23, 42, 0.08), 0 20px 48px rgba(15, 23, 42, 0.08);
+
+  /* Motion */
+  --ease-app: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dark {
+  color-scheme: dark;
+
+  /* Core */
+  --app-bg: #08101d;
+  --app-fg: #e5edf7;
+
+  /* Surfaces */
+  --card: #0f172a;
+  --card-2: #131d31;
+  --card-3: #172338;
+
+  /* Borders */
+  --border: #22314a;
+  --border-strong: #334155;
+  --border-stronger: #475569;
+
+  /* Text */
+  --muted: #9fb1c7;
+  --muted-2: #71839b;
+
+  /* Brand */
+  --accent: #f8fafc;
+  --accent-fg: #08101d;
+
+  /* Interaction */
+  --hover: #16243a;
+  --hover-strong: #1c2d47;
+  --ring: rgba(226, 232, 240, 0.14);
+  --ring-strong: #cbd5e1;
+
+  /* Semantic */
+  --success-bg: rgba(34, 197, 94, 0.16);
+  --success-fg: #86efac;
+  --success-border: rgba(34, 197, 94, 0.3);
+
+  --danger-bg: rgba(239, 68, 68, 0.16);
+  --danger-fg: #fca5a5;
+  --danger-border: rgba(239, 68, 68, 0.3);
+
+  --warn-bg: rgba(245, 158, 11, 0.16);
+  --warn-fg: #fcd34d;
+  --warn-border: rgba(245, 158, 11, 0.3);
+
+  --info-bg: rgba(14, 165, 233, 0.16);
+  --info-fg: #7dd3fc;
+  --info-border: rgba(14, 165, 233, 0.3);
+
+  /* Overlay */
+  --overlay: rgba(2, 6, 23, 0.62);
+
+  /* Shadow */
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.24), 0 10px 28px rgba(0, 0, 0, 0.24);
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.24), 0 12px 30px rgba(0, 0, 0, 0.28);
+
+  --shadow-float:
+    0 16px 36px rgba(0, 0, 0, 0.36), 0 24px 54px rgba(0, 0, 0, 0.34);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+html {
+  background: var(--app-bg);
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(148, 163, 184, 0.06),
+      transparent 28%
+    ),
+    radial-gradient(
+      circle at bottom right,
+      rgba(148, 163, 184, 0.05),
+      transparent 30%
+    ),
+    var(--app-bg);
+  color: var(--app-fg);
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  background: rgba(148, 163, 184, 0.28);
+}
+
+.app-card {
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-card);
+}
+
+.app-card-soft {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+}
+
+.app-card-ghost {
+  background: color-mix(in oklab, var(--card) 78%, transparent);
+  border: 1px solid var(--border);
+}
+
+.app-muted {
+  color: var(--muted);
+}
+
+.app-muted-2 {
+  color: var(--muted-2);
+}
+
+.app-border {
+  border-color: var(--border);
+}
+
+.app-hover:hover {
+  background: var(--hover);
+}
+
+.app-hover-strong:hover {
+  background: var(--hover-strong);
+}
+
+.app-accent {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.app-focus:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--ring);
+}
+
+.app-transition {
+  transition:
+    background-color 180ms var(--ease-app),
+    border-color 180ms var(--ease-app),
+    color 180ms var(--ease-app),
+    box-shadow 180ms var(--ease-app),
+    transform 180ms var(--ease-app);
+}
+
+.app-surface {
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-card);
+}
+
+.app-surface-soft {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+}
+
+.app-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+}
+
+.app-success {
+  background: var(--success-bg);
+  color: var(--success-fg);
+  border: 1px solid var(--success-border);
+}
+
+.app-danger {
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+  border: 1px solid var(--danger-border);
+}
+
+.app-warn {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border: 1px solid var(--warn-border);
+}
+
+.app-info {
+  background: var(--info-bg);
+  color: var(--info-fg);
+  border: 1px solid var(--info-border);
+}
+
+.app-overlay {
+  background: var(--overlay);
+}
+
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.thin-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-2);
+  background-clip: padding-box;
+}

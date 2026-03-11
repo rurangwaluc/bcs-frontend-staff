@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import Link from "next/link";
 import NotificationsBell from "./NotificationsBell";
+import ThemeToggle from "./ThemeToggle";
 import { apiFetch } from "../lib/api";
 import { useRouter } from "next/navigation";
 
@@ -33,23 +34,11 @@ function locationLabel(user) {
   if (name && code) return `${name} (${code})`;
   if (name) return name;
   if (code) return code;
-
-  // Real-world UI: do not show raw ids.
   return "";
 }
 
-/**
- * RoleBar (presentational + optional auth actions)
- *
- * Props:
- * - title: string
- * - subtitle: string
- * - user: { email?: string, role?: string, locationId?: number|string, location?: {name?:string, code?:string, id?:any} } | null
- * - links: Array<{ href: string, label: string }>
- * - showAuthNav: boolean (default: !!user)
- */
 export default function RoleBar({
-  title = "BCS",
+  title = "Business Control System",
   subtitle,
   user = null,
   links,
@@ -72,6 +61,7 @@ export default function RoleBar({
 
   const userLine = useMemo(() => {
     if (!user) return "";
+
     const email = toStr(user.email);
     const role = toStr(user.role);
     const loc = locationLabel(user);
@@ -87,10 +77,11 @@ export default function RoleBar({
   async function logout() {
     if (loggingOut) return;
     setLoggingOut(true);
+
     try {
       await apiFetch("/auth/logout", { method: "POST" });
     } catch {
-      // ignore: still redirect
+      // ignore
     } finally {
       router.replace("/login");
       router.refresh();
@@ -99,27 +90,26 @@ export default function RoleBar({
   }
 
   return (
-    <div className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur overflow-x-hidden">
-      <div className="mx-auto max-w-7xl px-4 sm:px-5 py-3 sm:py-4">
+    <div className="sticky top-0 z-40 overflow-x-hidden border-b border-[var(--border-strong)] bg-[color:color-mix(in_oklab,var(--card)_96%,white_4%)] shadow-[0_1px_0_rgba(15,23,42,0.04)] backdrop-blur dark:bg-[color:color-mix(in_oklab,var(--card)_88%,transparent)]">
+      <div className="mx-auto max-w-7xl px-4 py-3 sm:px-5 sm:py-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          {/* Left */}
           <div className="min-w-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="h-9 w-9 rounded-2xl bg-slate-900 text-white flex items-center justify-center text-xs font-bold shrink-0">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[var(--border-strong)] bg-[var(--app-fg)] text-xs font-extrabold text-[var(--app-bg)] shadow-sm">
                 BCS
               </div>
 
               <div className="min-w-0">
-                <div className="text-base sm:text-lg font-semibold text-slate-900 truncate">
+                <div className="truncate text-base font-bold text-[var(--app-fg)] sm:text-lg">
                   {title}
                 </div>
 
                 {subtitle ? (
-                  <div className="text-xs text-slate-600 mt-0.5 break-words">
+                  <div className="mt-0.5 break-words text-xs app-muted">
                     {subtitle}
                   </div>
                 ) : userLine ? (
-                  <div className="text-xs text-slate-600 mt-0.5 break-words">
+                  <div className="mt-0.5 break-words text-xs app-muted">
                     {userLine}
                   </div>
                 ) : null}
@@ -127,10 +117,9 @@ export default function RoleBar({
             </div>
           </div>
 
-          {/* Right */}
           {navVisible ? (
             <div className="flex flex-wrap items-center gap-2 justify-start lg:justify-end">
-              {/* 🔔 Notifications live everywhere */}
+              <ThemeToggle size="sm" />
               <NotificationsBell enabled={!!user} />
 
               {navLinks.map((l) => (
@@ -138,10 +127,8 @@ export default function RoleBar({
                   key={l.href}
                   href={l.href}
                   className={cx(
-                    "text-sm font-semibold",
-                    "px-3 py-2 rounded-xl border border-slate-200 bg-white",
-                    "hover:bg-slate-50 hover:border-slate-300 transition",
-                    "whitespace-nowrap",
+                    "app-focus whitespace-nowrap rounded-2xl border border-[var(--border-strong)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--app-fg)] shadow-sm transition",
+                    "hover:bg-[var(--hover)]",
                   )}
                 >
                   {l.label}
@@ -153,12 +140,9 @@ export default function RoleBar({
                 onClick={logout}
                 disabled={loggingOut}
                 className={cx(
-                  "text-sm font-semibold",
-                  "px-4 py-2 rounded-xl",
-                  "bg-slate-900 text-white",
-                  "hover:bg-slate-800 transition",
+                  "app-focus whitespace-nowrap rounded-2xl px-4 py-2 text-sm font-semibold shadow-sm transition",
+                  "bg-[var(--app-fg)] text-[var(--app-bg)] hover:opacity-90",
                   "disabled:opacity-60",
-                  "whitespace-nowrap",
                 )}
               >
                 {loggingOut ? "Logging out…" : "Logout"}
