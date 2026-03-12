@@ -29,86 +29,146 @@ function isAbortErr(e) {
  * Fetch-based SSE (works with credentials/cookies).
  * connectSSE("/notifications/stream", { onHello, onNotification, onError })
  */
-export function connectSSE(url, handlers = {}) {
-  const controller = new AbortController();
-  let closed = false;
+export function connectSSE(path, { onHello, onNotification, onError } = {}) {
+  const url = toUrl(path);
+  const ctrl = new AbortController();
 
-  async function start() {
-    try {
-      const res = await fetch(url, {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "text/event-stream",
-        },
-        signal: controller.signal,
-      });
+  let stopped = false;
+  let retryTimer = null;
 
-      if (!res.ok) {
-        handlers.onError?.(new Error(`SSE failed: ${res.status}`));
-        return;
+  // ✅ keep a reference so close() can cancel safely
+  let activeReader = null;
+
+  async function runOnce() {
+    const res = await fetch(url, {
+      method: "GET",
+      credentials: "include",
+      headers: { Accept: "text/event-stream" },
+      signal: ctrl.signal,
+    });
+
+    if (!res.ok || !res.body) {
+      throw new Error(`SSE failed: ${res.status}`);
+    }
+
+    const reader = res.body.getReader();
+    activeReader = reader;
+
+    const decoder = new TextDecoder("utf-8");
+    let buf = "";
+    let eventName = "message";
+    let dataLines = [];
+
+    const flush = () => {
+      if (!dataLines.length) return;
+
+      const dataRaw = dataLines.join("\n");
+      dataLines = [];
+
+      let payload = null;
+      try {
+        payload = JSON.parse(dataRaw);
+      } catch {
+        payload = dataRaw;
       }
 
-      handlers.onHello?.();
+      if (eventName === "hello") onHello?.(payload);
+      if (eventName === "notification") onNotification?.(payload);
+    };
 
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
+    while (!stopped) {
+      let chunk;
+      try {
+        chunk = await reader.read();
+      } catch (e) {
+        // ✅ abort during read is normal
+        if (stopped || ctrl.signal.aborted || isAbortErr(e)) return;
+        throw e;
+      }
 
-      if (!reader) return;
+      const { value, done } = chunk;
+      if (done) break;
 
-      let buffer = "";
+      buf += decoder.decode(value, { stream: true });
 
-      while (!closed) {
-        let result;
+      while (true) {
+        const idx = buf.indexOf("\n");
+        if (idx === -1) break;
 
-        try {
-          result = await reader.read();
-        } catch (err) {
-          if (err?.name === "AbortError") return;
-          throw err;
+        const line = buf.slice(0, idx).replace(/\r$/, "");
+        buf = buf.slice(idx + 1);
+
+        if (line.startsWith("event:")) {
+          eventName = line.slice("event:".length).trim() || "message";
+          continue;
         }
 
-        const { done, value } = result;
-        if (done) break;
+        if (line.startsWith("data:")) {
+          dataLines.push(line.slice("data:".length).trimStart());
+          continue;
+        }
 
-        buffer += decoder.decode(value, { stream: true });
-
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() || "";
-
-        for (const chunk of parts) {
-          const lines = chunk.split("\n");
-          for (const line of lines) {
-            if (!line.startsWith("data:")) continue;
-
-            const raw = line.slice(5).trim();
-            if (!raw) continue;
-
-            try {
-              const payload = JSON.parse(raw);
-              handlers.onNotification?.(payload);
-            } catch {
-              handlers.onNotification?.(raw);
-            }
-          }
+        if (line === "") {
+          flush();
+          eventName = "message";
         }
       }
-    } catch (err) {
-      if (err?.name === "AbortError") return;
-      handlers.onError?.(err);
     }
   }
 
-  start();
+  async function runLoop() {
+    while (!stopped) {
+      try {
+        await runOnce();
+      } catch (e) {
+        // ✅ abort is normal when closing / hot reload / route change
+        if (stopped || ctrl.signal.aborted || isAbortErr(e)) break;
+        onError?.(e);
+      } finally {
+        // release reader after each cycle
+        activeReader = null;
+      }
+
+      if (stopped) break;
+
+      // retry after 2s
+      await new Promise((r) => {
+        retryTimer = setTimeout(r, 2000);
+      });
+    }
+  }
+
+  // ✅ never let the loop promise become unhandled
+  runLoop().catch(() => {});
 
   return {
+    // IMPORTANT: keep this NON-ASYNC so it cannot create "Uncaught (in promise)"
     close() {
-      if (closed) return;
-      closed = true;
+      stopped = true;
 
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+
+      // ✅ cancel reader safely (cancel() returns a Promise that can reject)
       try {
-        controller.abort();
-      } catch {}
+        const p = activeReader?.cancel?.();
+        if (p && typeof p.then === "function") {
+          p.catch(() => {});
+        }
+      } catch {
+        // ignore
+      }
+
+      activeReader = null;
+
+      // ✅ abort fetch/read loop (this triggers AbortError internally, which we swallow above)
+      try {
+        ctrl.abort();
+      } catch {
+        // ignore
+      }
     },
   };
 }

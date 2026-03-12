@@ -1,0 +1,59 @@
+"use client";
+
+import AsyncButton from "../../../components/AsyncButton";
+import { Input } from "./manager-ui";
+
+export default function ManagerCancelSaleModal({
+  open,
+  cancelSaleId,
+  cancelReason,
+  setCancelReason,
+  cancelingState,
+  onClose,
+  onConfirm,
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-xl">
+        <div className="border-b border-[var(--border)] p-4">
+          <div className="text-sm font-black text-[var(--app-fg)]">
+            Cancel sale #{cancelSaleId}
+          </div>
+          <div className="mt-1 text-xs app-muted">
+            Rule: do not cancel completed sales.
+          </div>
+        </div>
+
+        <div className="p-4">
+          <Input
+            placeholder="Reason (optional)"
+            value={cancelReason}
+            onChange={(e) => setCancelReason?.(e.target.value)}
+          />
+
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={cancelingState === "loading"}
+              className="rounded-2xl border border-[var(--border)] px-4 py-2.5 text-sm font-bold text-[var(--app-fg)] transition hover:bg-[var(--hover)] disabled:opacity-60"
+            >
+              Close
+            </button>
+
+            <AsyncButton
+              variant="danger"
+              state={cancelingState}
+              text="Confirm cancel"
+              loadingText="Cancelling…"
+              successText="Cancelled"
+              onClick={onConfirm}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
