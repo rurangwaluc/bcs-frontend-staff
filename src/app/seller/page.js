@@ -24,7 +24,9 @@ import RoleBar from "../../components/RoleBar";
 import SellerCreateSection from "../../components/staff/seller/SellerCreateSection";
 import SellerCreditSetupModal from "../../components/staff/seller/SellerCreditSetupModal";
 import SellerDashboardSection from "../../components/staff/seller/SellerDashboardSection";
+import SellerDeliveryNoteModal from "../../components/staff/seller/SellerDeliveryNoteModal";
 import SellerItemsModal from "../../components/staff/seller/SellerItemsModal";
+import SellerProformaModal from "../../components/staff/seller/SellerProformaModal";
 import SellerSalesSection from "../../components/staff/seller/SellerSalesSection";
 import ToastStack from "../../components/ToastStack";
 import { apiFetch } from "../../lib/api";
@@ -64,15 +66,11 @@ function playAlertBeep({
         try {
           oscillator.stop();
           ctx.close?.();
-        } catch {
-          // ignore
-        }
+        } catch {}
       },
       Math.max(100, Number(duration) || 180),
     );
-  } catch {
-    // ignore audio issues
-  }
+  } catch {}
 }
 
 function cx(...classes) {
@@ -103,7 +101,8 @@ function TopSectionSwitcher({
             <span className="font-semibold text-[var(--app-fg)]">
               Seller rule:
             </span>{" "}
-            Create sales, follow releases, finalize payment or credit.
+            Create sales, generate customer documents, follow releases, then
+            finalize payment or credit.
           </div>
         </div>
 
@@ -244,6 +243,50 @@ export default function SellerPage() {
 
   const [section, setSection] = useState("dashboard");
 
+  const [products, setProducts] = useState([]);
+  const [productsLoading, setProductsLoading] = useState(false);
+  const [prodQ, setProdQ] = useState("");
+
+  const [sales, setSales] = useState([]);
+  const [salesLoading, setSalesLoading] = useState(false);
+  const [salesQ, setSalesQ] = useState("");
+
+  const [customerQ, setCustomerQ] = useState("");
+  const [customerResults, setCustomerResults] = useState([]);
+  const [customerLoading, setCustomerLoading] = useState(false);
+
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [customerTin, setCustomerTin] = useState("");
+  const [customerAddress, setCustomerAddress] = useState("");
+
+  const [note, setNote] = useState("");
+
+  const [saleCart, setSaleCart] = useState([]);
+  const [createSaleBtn, setCreateSaleBtn] = useState("idle");
+  const [createCustomerBtn, setCreateCustomerBtn] = useState("idle");
+
+  const [markBtnState, setMarkBtnState] = useState({});
+  const [salePayMethod, setSalePayMethod] = useState({});
+
+  const [itemsOpen, setItemsOpen] = useState(false);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [itemsSale, setItemsSale] = useState(null);
+
+  const [creditOpen, setCreditOpen] = useState(false);
+  const [creditSale, setCreditSale] = useState(null);
+  const [creditSaving, setCreditSaving] = useState(false);
+
+  const [proformaOpen, setProformaOpen] = useState(false);
+  const [deliveryNoteOpen, setDeliveryNoteOpen] = useState(false);
+  const [documentSale, setDocumentSale] = useState(null);
+  const [documentLoading, setDocumentLoading] = useState(false);
+
+  const lastStatusByIdRef = useRef(new Map());
+  const firstSalesLoadRef = useRef(true);
+  const salesPollInFlightRef = useRef(false);
+
   function banner(kind, text) {
     setMsgKind(kind || "info");
     setMsg(text || "");
@@ -299,45 +342,6 @@ export default function SellerPage() {
   const roleLower = String(me?.role || "").toLowerCase();
   const isAuthorized =
     !!me && (roleLower === "seller" || roleLower === "admin");
-
-  const [products, setProducts] = useState([]);
-  const [productsLoading, setProductsLoading] = useState(false);
-  const [prodQ, setProdQ] = useState("");
-
-  const [sales, setSales] = useState([]);
-  const [salesLoading, setSalesLoading] = useState(false);
-  const [salesQ, setSalesQ] = useState("");
-
-  const [customerQ, setCustomerQ] = useState("");
-  const [customerResults, setCustomerResults] = useState([]);
-  const [customerLoading, setCustomerLoading] = useState(false);
-
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [customerTin, setCustomerTin] = useState("");
-  const [customerAddress, setCustomerAddress] = useState("");
-
-  const [note, setNote] = useState("");
-
-  const [saleCart, setSaleCart] = useState([]);
-  const [createSaleBtn, setCreateSaleBtn] = useState("idle");
-  const [createCustomerBtn, setCreateCustomerBtn] = useState("idle");
-
-  const [markBtnState, setMarkBtnState] = useState({});
-  const [salePayMethod, setSalePayMethod] = useState({});
-
-  const [itemsOpen, setItemsOpen] = useState(false);
-  const [itemsLoading, setItemsLoading] = useState(false);
-  const [itemsSale, setItemsSale] = useState(null);
-
-  const [creditOpen, setCreditOpen] = useState(false);
-  const [creditSale, setCreditSale] = useState(null);
-  const [creditSaving, setCreditSaving] = useState(false);
-
-  const lastStatusByIdRef = useRef(new Map());
-  const firstSalesLoadRef = useRef(true);
-  const salesPollInFlightRef = useRef(false);
 
   const loadProducts = useCallback(async () => {
     setProductsLoading(true);
@@ -473,7 +477,6 @@ export default function SellerPage() {
         setSales(clean);
         applySalesNotifications(clean);
       } catch {
-        // silent polling failure
       } finally {
         salesPollInFlightRef.current = false;
       }
@@ -514,7 +517,6 @@ export default function SellerPage() {
       const id = String(s?.id ?? "");
       const st = String(s?.status ?? "");
       const statusReadable = st.toUpperCase() === "PENDING" ? "CREDIT" : st;
-
       const name = String(
         s?.customerName ?? s?.customer_name ?? "",
       ).toLowerCase();
@@ -860,6 +862,33 @@ export default function SellerPage() {
     }
   }
 
+  async function openSaleDocument(saleId, type) {
+    const sid = Number(saleId);
+    if (!sid) return;
+
+    setDocumentLoading(true);
+
+    try {
+      const data = await apiFetch(ENDPOINTS.SALE_GET(sid), { method: "GET" });
+      const sale = data?.sale || data || null;
+
+      setDocumentSale(sale);
+
+      if (type === "proforma") {
+        setProformaOpen(true);
+      } else if (type === "delivery") {
+        setDeliveryNoteOpen(true);
+      }
+    } catch (e) {
+      pushToast(
+        "danger",
+        e?.data?.error || e?.message || "Cannot load sale document",
+      );
+    } finally {
+      setDocumentLoading(false);
+    }
+  }
+
   async function markSalePaid(saleId, paymentMethod) {
     const sid = Number(saleId);
     if (!sid) return;
@@ -958,6 +987,30 @@ export default function SellerPage() {
         onConfirm={confirmCredit}
       />
 
+      <SellerProformaModal
+        open={proformaOpen}
+        sale={documentSale}
+        loading={documentLoading}
+        me={me}
+        onClose={() => {
+          if (documentLoading) return;
+          setProformaOpen(false);
+          setDocumentSale(null);
+        }}
+      />
+
+      <SellerDeliveryNoteModal
+        open={deliveryNoteOpen}
+        sale={documentSale}
+        loading={documentLoading}
+        me={me}
+        onClose={() => {
+          if (documentLoading) return;
+          setDeliveryNoteOpen(false);
+          setDocumentSale(null);
+        }}
+      />
+
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-5">
         {msg ? (
           <div className="mb-4">
@@ -1052,6 +1105,8 @@ export default function SellerPage() {
                 markSalePaid={markSalePaid}
                 openCreditModal={openCreditModal}
                 openSaleItems={openSaleItems}
+                openProforma={(id) => openSaleDocument(id, "proforma")}
+                openDeliveryNote={(id) => openSaleDocument(id, "delivery")}
                 paymentMethods={SELLER_PAYMENT_METHODS}
               />
             ) : null}

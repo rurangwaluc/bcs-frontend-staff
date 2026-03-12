@@ -72,6 +72,8 @@ export default function SellerSalesSection({
   markSalePaid,
   openCreditModal,
   openSaleItems,
+  openProforma,
+  openDeliveryNote,
   paymentMethods,
 }) {
   return (
@@ -128,6 +130,8 @@ export default function SellerSalesSection({
               const total = Number(s?.totalAmount ?? s?.total ?? 0) || 0;
               const amountPaid = Number(s?.amountPaid ?? 0) || 0;
               const canFinalize = st === "FULFILLED" || st === "PENDING";
+              const canDeliveryNote =
+                st === "FULFILLED" || st === "PENDING" || st === "COMPLETED";
               const pm = salePayMethod[id] || "CASH";
               const btnState = markBtnState[id] || "idle";
               const createdAt = s?.createdAt || s?.created_at;
@@ -212,13 +216,30 @@ export default function SellerSalesSection({
                         )}
                       </div>
 
-                      <div className="flex shrink-0 items-center gap-2">
+                      <div className="flex shrink-0 flex-wrap items-center gap-2">
                         <button
                           type="button"
                           className="app-focus rounded-2xl border border-[var(--border-strong)] bg-[var(--card-2)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] shadow-sm transition hover:bg-[var(--hover)]"
                           onClick={() => openSaleItems(id)}
                         >
                           View items
+                        </button>
+
+                        <button
+                          type="button"
+                          className="app-focus rounded-2xl border border-[var(--border-strong)] bg-[var(--card-2)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] shadow-sm transition hover:bg-[var(--hover)]"
+                          onClick={() => openProforma(id)}
+                        >
+                          Proforma
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={!canDeliveryNote}
+                          className="app-focus rounded-2xl border border-[var(--border-strong)] bg-[var(--card-2)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] shadow-sm transition hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={() => openDeliveryNote(id)}
+                        >
+                          Delivery note
                         </button>
                       </div>
                     </div>
