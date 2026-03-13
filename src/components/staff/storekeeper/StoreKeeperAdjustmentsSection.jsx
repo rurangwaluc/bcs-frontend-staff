@@ -179,10 +179,13 @@ function ProductQuickCard({
   const sku = toStr(product?.sku);
   const category =
     toStr(product?.category) || toStr(product?.subcategory) || "Hardware";
+
   const qty = toNum(currentQty, 0);
-  const absQty = toNum(adjQtyAbs, 0);
-  const signed = adjDirection === "REMOVE" ? -absQty : absQty;
+
+  const effectiveAbsQty = selected ? toNum(adjQtyAbs, 0) : 0;
+  const signed = adjDirection === "REMOVE" ? -effectiveAbsQty : effectiveAbsQty;
   const projected = qty + signed;
+
   const unit = toStr(product?.stockUnit || product?.unit || "pcs");
 
   return (
@@ -214,18 +217,22 @@ function ProductQuickCard({
 
       <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-3">
         <StatCard label="Current" value={qtyText(qty)} sub={unit} />
+
         <StatCard
           label="Requested"
           value={
-            absQty > 0
+            effectiveAbsQty > 0
               ? signed > 0
-                ? `+${qtyText(absQty)}`
-                : `-${qtyText(absQty)}`
+                ? `+${qtyText(effectiveAbsQty)}`
+                : `-${qtyText(effectiveAbsQty)}`
               : "0"
           }
           sub={unit}
-          tone={absQty > 0 ? (signed > 0 ? "success" : "warn") : "default"}
+          tone={
+            effectiveAbsQty > 0 ? (signed > 0 ? "success" : "warn") : "default"
+          }
         />
+
         <StatCard
           label="After approval"
           value={projected < 0 ? "Below zero" : qtyText(projected)}
@@ -233,7 +240,7 @@ function ProductQuickCard({
           tone={
             projected < 0
               ? "danger"
-              : absQty > 0
+              : effectiveAbsQty > 0
                 ? signed > 0
                   ? "success"
                   : "warn"
@@ -659,8 +666,14 @@ export default function StoreKeeperAdjustmentsSection({
                     selected={String(adjProductId) === String(p?.id)}
                     onSelect={setAdjProductId}
                     currentQty={getQtyOnHandForProduct(inventory, p?.id)}
-                    adjDirection={adjDirection}
-                    adjQtyAbs={adjQtyAbs}
+                    adjDirection={
+                      String(adjProductId) === String(p?.id)
+                        ? adjDirection
+                        : "ADD"
+                    }
+                    adjQtyAbs={
+                      String(adjProductId) === String(p?.id) ? adjQtyAbs : ""
+                    }
                   />
                 ))}
               </div>

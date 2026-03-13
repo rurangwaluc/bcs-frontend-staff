@@ -16,32 +16,16 @@ function toNum(v, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function money(n) {
-  const x = Number(n ?? 0);
-  return Number.isFinite(x) ? Math.round(x).toLocaleString() : "0";
-}
-
 function qtyText(v) {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? Math.round(n).toLocaleString() : "0";
-}
-
-function safeDate(v) {
-  if (!v) return "—";
-  try {
-    const d = new Date(v);
-    if (Number.isNaN(d.getTime())) return String(v);
-    return d.toLocaleString();
-  } catch {
-    return String(v);
-  }
 }
 
 function inputBase(className = "") {
   return cx(
     "app-focus w-full rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3.5 py-3 text-sm text-[var(--app-fg)] outline-none transition",
     "placeholder:text-[var(--muted)]",
-    "hover:border-[var(--border-strong)]",
+    "hover:border-[var(--border-strong)] focus:border-[var(--border-strong)]",
     className,
   );
 }
@@ -99,7 +83,9 @@ function StatCard({ label, value, sub, tone = "default" }) {
         ? "border-[var(--warn-border)] bg-[var(--warn-bg)]"
         : tone === "danger"
           ? "border-[var(--danger-border)] bg-[var(--danger-bg)]"
-          : "border-[var(--border)] bg-[var(--card-2)]";
+          : tone === "info"
+            ? "border-[var(--info-border)] bg-[var(--info-bg)]"
+            : "border-[var(--border)] bg-[var(--card-2)]";
 
   return (
     <div className={cx("rounded-2xl border p-3", toneCls)}>
@@ -122,7 +108,9 @@ function InfoPill({ children, tone = "default" }) {
         ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
         : tone === "danger"
           ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
-          : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]";
+          : tone === "info"
+            ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]"
+            : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]";
 
   return (
     <span
@@ -156,6 +144,8 @@ function ProductQuickCard({ product, selected, onSelect }) {
   const category =
     toStr(product?.category) || toStr(product?.subcategory) || "Hardware";
 
+  const stockTone = qty <= 0 ? "danger" : qty <= 5 ? "warn" : "success";
+
   return (
     <button
       type="button"
@@ -163,32 +153,32 @@ function ProductQuickCard({ product, selected, onSelect }) {
       className={cx(
         "app-focus w-full rounded-3xl border p-4 text-left transition",
         selected
-          ? "border-[var(--app-fg)] bg-[var(--card)] shadow-sm"
+          ? "border-[var(--app-fg)] bg-[var(--card)] shadow-sm ring-1 ring-[var(--app-fg)]"
           : "border-[var(--border)] bg-[var(--card-2)] hover:bg-[var(--hover)]",
       )}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate text-sm font-black text-[var(--app-fg)] sm:text-base">
+          <div className="line-clamp-2 text-sm font-black leading-6 text-[var(--app-fg)] sm:text-base">
             {displayName}
           </div>
 
           <div className="mt-2 flex flex-wrap gap-2">
             <InfoPill>#{product?.id ?? "—"}</InfoPill>
             {sku ? <InfoPill>SKU: {sku}</InfoPill> : null}
-            <InfoPill>{category}</InfoPill>
+            <InfoPill tone="info">{category}</InfoPill>
           </div>
         </div>
 
         {selected ? <InfoPill tone="success">Selected</InfoPill> : null}
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <StatCard label="Current stock" value={qtyText(qty)} sub={unit} />
+      <div className="mt-4 grid grid-cols-1 gap-3">
         <StatCard
-          label="Selling price"
-          value={`${money(product?.sellingPrice ?? 0)} RWF`}
-          sub="Visible for context"
+          label="Current stock"
+          value={qtyText(qty)}
+          sub={unit}
+          tone={stockTone}
         />
       </div>
     </button>
@@ -267,7 +257,7 @@ function ArrivalChecklist({
           label="After save"
           value={qtyText(predictedQty)}
           sub={unit}
-          tone={qty > 0 ? "success" : "default"}
+          tone={qty > 0 ? "success" : "info"}
         />
       </div>
 
@@ -334,7 +324,7 @@ export default function StoreKeeperArrivalsSection({
         title="Record stock arrival"
         hint="Receive stock cleanly for one branch at a time, attach supplier proof, and keep hardware inventory traceable."
         right={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <AsyncButton
               variant="secondary"
               size="sm"
@@ -388,6 +378,7 @@ export default function StoreKeeperArrivalsSection({
                         .filter(Boolean)
                         .join(" ");
                     const sku = toStr(p?.sku);
+
                     return (
                       <option key={p?.id} value={p?.id}>
                         #{p?.id} • {displayName || p?.name || "Unnamed"}
@@ -446,7 +437,7 @@ export default function StoreKeeperArrivalsSection({
                   Documents
                 </div>
                 <div className="mt-1 text-sm app-muted">
-                  Upload invoice, delivery note, receipt or arrival photos.
+                  Upload invoice, delivery note, receipt, or arrival photos.
                 </div>
               </div>
 
@@ -546,7 +537,7 @@ export default function StoreKeeperArrivalsSection({
 
       <SectionShell
         title="Quick product picker"
-        hint="Choose the exact branch product before receiving stock. Useful for multi-branch hardware catalogs with many variants."
+        hint="Choose the exact branch product before receiving stock. Built for fast operational picking."
       >
         <div className="grid gap-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -582,7 +573,8 @@ export default function StoreKeeperArrivalsSection({
           </div>
 
           {productsLoading || inventoryLoading ? (
-            <div className="grid gap-3">
+            <div className="grid gap-3 lg:grid-cols-2">
+              <Skeleton className="h-28 w-full rounded-3xl" />
               <Skeleton className="h-28 w-full rounded-3xl" />
               <Skeleton className="h-28 w-full rounded-3xl" />
               <Skeleton className="h-28 w-full rounded-3xl" />
@@ -593,7 +585,7 @@ export default function StoreKeeperArrivalsSection({
               arrivals.
             </div>
           ) : (
-            <div className="grid gap-3">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               {topProducts.map((p) => (
                 <ProductQuickCard
                   key={String(p?.id)}

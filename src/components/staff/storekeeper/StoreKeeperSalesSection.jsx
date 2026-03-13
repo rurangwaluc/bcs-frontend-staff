@@ -27,11 +27,6 @@ function qtyText(v) {
   return Number.isFinite(n) ? Math.round(n).toLocaleString() : "0";
 }
 
-function money(v) {
-  const n = Number(v ?? 0);
-  return Number.isFinite(n) ? Math.round(n).toLocaleString() : "0";
-}
-
 function inputBase(className = "") {
   return cx(
     "app-focus w-full rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3.5 py-3 text-sm text-[var(--app-fg)] outline-none transition",
@@ -252,9 +247,41 @@ function ReleaseButton({ state, disabled, onClick }) {
   );
 }
 
-function SaleCard({ sale, releaseState, onRelease, onOpenSale }) {
+function ActionButton({ children, onClick, tone = "default" }) {
+  const toneCls =
+    tone === "success"
+      ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)] hover:opacity-90"
+      : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)] hover:bg-[var(--hover)]";
+
+  return (
+    <button
+      type="button"
+      className={cx(
+        "app-focus rounded-2xl border px-4 py-2.5 text-sm font-semibold transition",
+        toneCls,
+      )}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SaleCard({
+  sale,
+  releaseState,
+  onRelease,
+  onOpenSale,
+  onOpenDeliveryNote,
+}) {
   const status = String(sale?.status || "").toUpperCase();
   const canRelease = status === "DRAFT";
+  const canShowDeliveryNote =
+    status === "DRAFT" ||
+    status === "FULFILLED" ||
+    status === "PENDING" ||
+    status === "AWAITING_PAYMENT_RECORD" ||
+    status === "COMPLETED";
 
   const customerName = toStr(sale?.customerName) || "Walk-in";
   const customerPhone = toStr(sale?.customerPhone);
@@ -271,7 +298,11 @@ function SaleCard({ sale, releaseState, onRelease, onOpenSale }) {
   const itemsPreview = Array.isArray(sale?.itemsPreview)
     ? sale.itemsPreview
     : [];
-  const total = Number(sale?.totalAmount ?? sale?.total ?? 0) || 0;
+  const totalItems = Array.isArray(sale?.items)
+    ? sale.items.reduce((sum, it) => sum + (Number(it?.qty ?? 0) || 0), 0)
+    : Array.isArray(itemsPreview)
+      ? itemsPreview.reduce((sum, it) => sum + (Number(it?.qty ?? 0) || 0), 0)
+      : 0;
 
   return (
     <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
@@ -289,7 +320,7 @@ function SaleCard({ sale, releaseState, onRelease, onOpenSale }) {
               <StatCard label="Customer" value={customerLabel || "—"} />
               <StatCard label="Seller" value={sellerLabel || "—"} />
               <StatCard label="Created" value={safeDate(createdAt)} />
-              <StatCard label="Total" value={`${money(total)} RWF`} />
+              <StatCard label="Items qty" value={qtyText(totalItems)} />
             </div>
 
             {itemsPreview.length > 0 ? (
@@ -318,14 +349,19 @@ function SaleCard({ sale, releaseState, onRelease, onOpenSale }) {
             ) : null}
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              className="app-focus rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
-              onClick={() => onOpenSale?.(sale?.id)}
-            >
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <ActionButton onClick={() => onOpenSale?.(sale?.id)}>
               View items
-            </button>
+            </ActionButton>
+
+            {canShowDeliveryNote ? (
+              <ActionButton
+                tone="success"
+                onClick={() => onOpenDeliveryNote?.(sale?.id)}
+              >
+                Delivery note
+              </ActionButton>
+            ) : null}
           </div>
         </div>
 
@@ -383,6 +419,7 @@ export default function StoreKeeperSalesSection({
   releaseBtnState,
   releaseStock,
   openSaleDetails,
+  openDeliveryNote,
 }) {
   return (
     <SectionShell
@@ -457,6 +494,7 @@ export default function StoreKeeperSalesSection({
                 releaseState={releaseBtnState?.[sale?.id] || "idle"}
                 onRelease={releaseStock}
                 onOpenSale={openSaleDetails}
+                onOpenDeliveryNote={openDeliveryNote}
               />
             ))}
           </div>

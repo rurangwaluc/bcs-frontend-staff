@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import AsyncButton from "../../components/AsyncButton";
 import RoleBar from "../../components/RoleBar";
+import SellerDeliveryNoteModal from "../../components/staff/seller/SellerDeliveryNoteModal";
 import StoreKeeperAdjustmentsSection from "../../components/staff/storekeeper/StoreKeeperAdjustmentsSection";
 import StoreKeeperArrivalsSection from "../../components/staff/storekeeper/StoreKeeperArrivalsSection";
 import StoreKeeperInventorySection from "../../components/staff/storekeeper/StoreKeeperInventorySection";
@@ -550,12 +551,12 @@ export default function StoreKeeperPage() {
 
   const [pName, setPName] = useState("");
   const [pSku, setPSku] = useState("");
-  const [pUnit, setPUnit] = useState("pcs");
+  const [pUnit, setPUnit] = useState("PIECE");
   const [pNotes, setPNotes] = useState("");
   const [pInitialQty, setPInitialQty] = useState("");
   const [createProductBtn, setCreateProductBtn] = useState("idle");
 
-  const [pCategory, setPCategory] = useState("");
+  const [pCategory, setPCategory] = useState("GENERAL_HARDWARE");
   const [pSubcategory, setPSubcategory] = useState("");
   const [pBrand, setPBrand] = useState("");
   const [pModel, setPModel] = useState("");
@@ -565,7 +566,7 @@ export default function StoreKeeperPage() {
   const [pVariantSummary, setPVariantSummary] = useState("");
   const [pBarcode, setPBarcode] = useState("");
   const [pSupplierSku, setPSupplierSku] = useState("");
-  const [pStockUnit, setPStockUnit] = useState("pcs");
+  const [pStockUnit, setPStockUnit] = useState("PIECE");
   const [pSalesUnit, setPSalesUnit] = useState("");
   const [pPurchaseUnit, setPPurchaseUnit] = useState("");
   const [pReorderLevel, setPReorderLevel] = useState("");
@@ -594,6 +595,10 @@ export default function StoreKeeperPage() {
 
   const [viewSale, setViewSale] = useState(null);
   const [viewSaleLoading, setViewSaleLoading] = useState(false);
+
+  const [deliveryNoteOpen, setDeliveryNoteOpen] = useState(false);
+  const [documentSale, setDocumentSale] = useState(null);
+  const [documentLoading, setDocumentLoading] = useState(false);
 
   function toast(kind, text) {
     setMsgKind(kind || "info");
@@ -831,12 +836,34 @@ export default function StoreKeeperPage() {
     }
   }, []);
 
+  const openDeliveryNote = useCallback(async (saleId) => {
+    const id = Number(saleId);
+    if (!id) return;
+
+    setDocumentLoading(true);
+    try {
+      const data = await apiFetch(ENDPOINTS.SALE_GET(id), { method: "GET" });
+      setDocumentSale(data?.sale || null);
+      setDeliveryNoteOpen(true);
+    } catch (e) {
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Cannot load delivery note",
+      );
+      setDocumentSale(null);
+      setDeliveryNoteOpen(false);
+    } finally {
+      setDocumentLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isAuthorized) return;
 
     loadProducts();
     loadInventory();
     loadSales();
+
     if (section === "adjustments" || section === "dashboard") {
       loadMyAdjustRequests();
     }
@@ -921,6 +948,7 @@ export default function StoreKeeperPage() {
         (s) => String(s?.status || "").toUpperCase() === "DRAFT",
       );
     }
+
     if (salesTab === "RELEASED") {
       base = base.filter(
         (s) => String(s?.status || "").toUpperCase() === "FULFILLED",
@@ -969,10 +997,10 @@ export default function StoreKeeperPage() {
   const resetProductForm = useCallback(() => {
     setPName("");
     setPSku("");
-    setPUnit("pcs");
+    setPUnit("PIECE");
     setPNotes("");
     setPInitialQty("");
-    setPCategory("");
+    setPCategory("GENERAL_HARDWARE");
     setPSubcategory("");
     setPBrand("");
     setPModel("");
@@ -982,7 +1010,7 @@ export default function StoreKeeperPage() {
     setPVariantSummary("");
     setPBarcode("");
     setPSupplierSku("");
-    setPStockUnit("pcs");
+    setPStockUnit("PIECE");
     setPSalesUnit("");
     setPPurchaseUnit("");
     setPReorderLevel("");
@@ -995,7 +1023,18 @@ export default function StoreKeeperPage() {
       if (createProductBtn === "loading") return;
 
       const name = String(pName || "").trim();
+      const sku = String(pSku || "").trim();
+      const category = String(pCategory || "")
+        .trim()
+        .toUpperCase();
+      const stockUnit = String(pStockUnit || pUnit || "PIECE")
+        .trim()
+        .toUpperCase();
+
       if (!name) return toast("warn", "Write product name.");
+      if (!sku) return toast("warn", "Write SKU.");
+      if (!category) return toast("warn", "Choose category.");
+      if (!stockUnit) return toast("warn", "Choose stock unit.");
 
       const initialQty = numOrNull(pInitialQty);
       if (pInitialQty !== "" && (initialQty == null || initialQty < 0)) {
@@ -1011,41 +1050,32 @@ export default function StoreKeeperPage() {
       }
 
       setCreateProductBtn("loading");
+
       try {
         const payload = {
           name,
-          category:
-            String(pCategory || "")
-              .trim()
-              .toUpperCase() || undefined,
-          subcategory: String(pSubcategory || "").trim() || undefined,
-          sku: String(pSku || "").trim() || undefined,
-          barcode: String(pBarcode || "").trim() || undefined,
-          supplierSku: String(pSupplierSku || "").trim() || undefined,
-          brand: String(pBrand || "").trim() || undefined,
-          model: String(pModel || "").trim() || undefined,
-          size: String(pSize || "").trim() || undefined,
-          color: String(pColor || "").trim() || undefined,
-          material: String(pMaterial || "").trim() || undefined,
-          variantSummary: String(pVariantSummary || "").trim() || undefined,
-          unit: String(pUnit || pStockUnit || "PIECE")
-            .trim()
-            .toUpperCase(),
-          stockUnit: String(pStockUnit || pUnit || "PIECE")
-            .trim()
-            .toUpperCase(),
-          salesUnit: String(pSalesUnit || pStockUnit || pUnit || "PIECE")
-            .trim()
-            .toUpperCase(),
-          purchaseUnit: String(pPurchaseUnit || pStockUnit || pUnit || "PIECE")
-            .trim()
-            .toUpperCase(),
-          notes: String(pNotes || "").trim() || undefined,
+          category,
+          sku,
+          unit: stockUnit,
+          stockUnit,
+          openingQty: initialQty ?? 0,
+          reorderLevel: reorderLevelValue ?? 0,
+
+          subcategory: toStr(pSubcategory) || undefined,
+          barcode: toStr(pBarcode) || undefined,
+          supplierSku: toStr(pSupplierSku) || undefined,
+          brand: toStr(pBrand) || undefined,
+          model: toStr(pModel) || undefined,
+          size: toStr(pSize) || undefined,
+          color: toStr(pColor) || undefined,
+          material: toStr(pMaterial) || undefined,
+          variantSummary: toStr(pVariantSummary) || undefined,
+          salesUnit: toStr(pSalesUnit).toUpperCase() || undefined,
+          purchaseUnit: toStr(pPurchaseUnit).toUpperCase() || undefined,
+          notes: toStr(pNotes) || undefined,
           sellingPrice: 0,
           costPrice: 0,
           maxDiscountPercent: 0,
-          openingQty: initialQty ?? 0,
-          reorderLevel: reorderLevelValue ?? 0,
           trackInventory: pTrackInventory !== false,
         };
 
@@ -1078,11 +1108,11 @@ export default function StoreKeeperPage() {
     [
       createProductBtn,
       pName,
+      pSku,
+      pCategory,
       pInitialQty,
       pReorderLevel,
-      pCategory,
       pSubcategory,
-      pSku,
       pBarcode,
       pSupplierSku,
       pBrand,
@@ -1125,12 +1155,20 @@ export default function StoreKeeperPage() {
         await apiFetch(ENDPOINTS.INVENTORY_ARRIVALS_CREATE, {
           method: "POST",
           body: {
-            productId: pid,
-            qtyReceived: Math.round(qty),
             notes: arrNotes?.trim()
-              ? String(arrNotes).trim().slice(0, 200)
+              ? String(arrNotes).trim().slice(0, 4000)
               : undefined,
-            documentUrls,
+            items: [
+              {
+                productId: pid,
+                qtyReceived: Math.round(qty),
+                bonusQty: 0,
+                unitCost: 0,
+                note: arrNotes?.trim()
+                  ? String(arrNotes).trim().slice(0, 300)
+                  : undefined,
+              },
+            ],
           },
         });
 
@@ -1140,6 +1178,7 @@ export default function StoreKeeperPage() {
         setArrFiles([]);
 
         await loadInventory();
+        await loadProducts();
 
         setArrivalBtn("success");
         setTimeout(() => setArrivalBtn("idle"), 900);
@@ -1149,9 +1188,18 @@ export default function StoreKeeperPage() {
           "danger",
           e2?.data?.error || e2?.message || "Save arrival failed",
         );
+        console.error("arrival error", e2?.data || e2);
       }
     },
-    [arrivalBtn, arrProductId, arrQty, arrFiles, arrNotes, loadInventory],
+    [
+      arrivalBtn,
+      arrProductId,
+      arrQty,
+      arrFiles,
+      arrNotes,
+      loadInventory,
+      loadProducts,
+    ],
   );
 
   const createAdjustRequest = useCallback(
@@ -1280,6 +1328,18 @@ export default function StoreKeeperPage() {
         onReadAll={markAllRead}
       />
 
+      <SellerDeliveryNoteModal
+        open={deliveryNoteOpen}
+        sale={documentSale}
+        loading={documentLoading}
+        me={me}
+        onClose={() => {
+          if (documentLoading) return;
+          setDeliveryNoteOpen(false);
+          setDocumentSale(null);
+        }}
+      />
+
       <RoleBar
         title="Store keeper"
         subtitle={subtitle}
@@ -1352,6 +1412,7 @@ export default function StoreKeeperPage() {
                           loadInventory();
                           loadSales();
                           loadUnread();
+                          loadNotifs();
                           loadMyAdjustRequests();
                         }}
                       />
@@ -1415,6 +1476,18 @@ export default function StoreKeeperPage() {
                   <SectionCard
                     title="Stock snapshot"
                     hint="Top items by quantity on hand for a quick operational pulse."
+                    right={
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAlertsOpen(true);
+                          loadNotifs();
+                        }}
+                        className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-3 py-2 text-sm font-bold text-[var(--app-fg)] hover:bg-[var(--hover)]"
+                      >
+                        Alerts {unread > 0 ? `(${unread})` : ""}
+                      </button>
+                    }
                   >
                     {inventoryLoading ? (
                       <div className="grid gap-3">
@@ -1512,7 +1585,11 @@ export default function StoreKeeperPage() {
             {section === "arrivals" ? (
               <StoreKeeperArrivalsSection
                 products={products}
+                inventory={inventory}
                 productsLoading={productsLoading}
+                inventoryLoading={inventoryLoading}
+                loadProducts={loadProducts}
+                loadInventory={loadInventory}
                 arrProductId={arrProductId}
                 setArrProductId={setArrProductId}
                 arrQty={arrQty}
@@ -1523,8 +1600,6 @@ export default function StoreKeeperPage() {
                 setArrFiles={setArrFiles}
                 createArrival={createArrival}
                 arrivalBtn={arrivalBtn}
-                loadInventory={loadInventory}
-                inventoryLoading={inventoryLoading}
               />
             ) : null}
 
@@ -1563,6 +1638,7 @@ export default function StoreKeeperPage() {
                 releaseBtnState={releaseBtnState}
                 releaseStock={releaseStock}
                 openSaleDetails={openSaleDetails}
+                openDeliveryNote={openDeliveryNote}
               />
             ) : null}
           </main>
