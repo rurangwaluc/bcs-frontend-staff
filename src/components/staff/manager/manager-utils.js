@@ -1,9 +1,5 @@
 "use client";
 
-export function cx(...classes) {
-  return classes.filter(Boolean).join(" ");
-}
-
 export function toStr(v) {
   if (v === undefined || v === null) return "";
   return String(v).trim();
@@ -40,6 +36,7 @@ export function normalizeMethodKey(method) {
   const m = String(method || "")
     .trim()
     .toUpperCase();
+
   if (!m) return "OTHER";
   if (m === "CASH") return "CASH";
   if (m === "MOMO" || m === "MOBILEMONEY" || m === "MOBILE") return "MOMO";
@@ -59,10 +56,11 @@ export function sumBreakdown(rows) {
 
   const list = Array.isArray(rows) ? rows : [];
   for (const r of list) {
-    const k = normalizeMethodKey(r?.method);
-    out[k].count += Number(r?.count || 0);
-    out[k].total += Number(r?.total || 0);
+    const key = normalizeMethodKey(r?.method);
+    out[key].count += Number(r?.count || 0);
+    out[key].total += Number(r?.total || 0);
   }
+
   return out;
 }
 
@@ -106,6 +104,7 @@ export function buildEvidenceUrl({
   limit,
 }) {
   const params = new URLSearchParams();
+
   if (entity) params.set("entity", entity);
   if (entityId) params.set("entityId", entityId);
   if (from) params.set("from", from);
@@ -114,51 +113,27 @@ export function buildEvidenceUrl({
   if (userId) params.set("userId", userId);
   if (q) params.set("q", q);
   if (limit) params.set("limit", String(limit));
+
   return `/evidence?${params.toString()}`;
 }
 
-export function statusTone(status) {
-  const s = String(status || "").toUpperCase();
-  if (s === "COMPLETED" || s === "PAID" || s === "APPROVED") return "success";
-  if (s.includes("AWAIT") || s === "PENDING" || s === "OPEN") return "warn";
-  if (s === "CANCELLED" || s === "DECLINED" || s === "VOID") return "danger";
-  return "neutral";
-}
-
-export function normalizeItemsForSummary(items) {
-  if (!Array.isArray(items)) return [];
-  return items
-    .map((it) => {
-      const name =
-        String(
-          it?.productName ??
-            it?.name ??
-            it?.product?.name ??
-            it?.title ??
-            "Item",
-        ).trim() || "Item";
-
-      const qty = Number(it?.qty ?? it?.quantity ?? it?.count ?? 0) || 0;
-
-      const unitPrice =
-        Number(
-          it?.unitPrice ??
-            it?.unit_price ??
-            it?.price ??
-            it?.sellingPrice ??
-            it?.selling_price ??
-            0,
-        ) || 0;
-
-      return { name, qty, unitPrice };
-    })
-    .filter((x) => x.qty > 0);
-}
-
 export function firstItemLabel(items) {
-  const list = normalizeItemsForSummary(items);
+  const list = Array.isArray(items) ? items : [];
   if (!list.length) return { name: "—", qty: 0 };
-  return { name: list[0].name, qty: list[0].qty };
+
+  const first = list[0];
+  const name =
+    String(
+      first?.productName ??
+        first?.name ??
+        first?.product?.name ??
+        first?.title ??
+        "Item",
+    ).trim() || "Item";
+
+  const qty = Number(first?.qty ?? first?.quantity ?? first?.count ?? 0) || 0;
+
+  return { name, qty };
 }
 
 export function productNameById(products, productId) {
@@ -169,47 +144,22 @@ export function productNameById(products, productId) {
   return p?.name || p?.productName || p?.title || null;
 }
 
-export function safePlayBeep({
-  volume = 0.06,
-  durationMs = 160,
-  freq = 920,
-} = {}) {
-  try {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtx) return;
-
-    const ctx = new AudioCtx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    gain.gain.value = volume;
-    osc.frequency.value = freq;
-    osc.type = "sine";
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    osc.start();
-    setTimeout(
-      () => {
-        try {
-          osc.stop();
-          ctx.close?.();
-        } catch {
-          // ignore
-        }
-      },
-      Math.max(80, Number(durationMs) || 160),
-    );
-  } catch {
-    // ignore
-  }
+export function getCustomerTin(s) {
+  return (
+    toStr(s?.customerTin ?? s?.customer_tin) ||
+    toStr(s?.customer?.tin) ||
+    toStr(s?.customer?.customerTin ?? s?.customer?.customer_tin) ||
+    toStr(s?.customer?.taxId ?? s?.customer?.tax_id) ||
+    toStr(s?.customer?.tinNumber ?? s?.customer?.tin_number)
+  );
 }
 
-export function isDocumentFocused() {
-  if (typeof document === "undefined") return true;
+export function getCustomerAddress(s) {
   return (
-    document.visibilityState === "visible" && (document.hasFocus?.() ?? true)
+    toStr(s?.customerAddress ?? s?.customer_address) ||
+    toStr(s?.customer?.address) ||
+    toStr(s?.customer?.customerAddress ?? s?.customer?.customer_address) ||
+    toStr(s?.customer?.location ?? s?.customer?.location_text)
   );
 }
 
@@ -279,6 +229,7 @@ export function makeCandidateLabel(entity, row) {
     ).trim();
     const sku = row?.sku ? ` — SKU ${row.sku}` : "";
     const qty = row?.qtyOnHand ?? row?.qty_on_hand ?? row?.qty ?? row?.quantity;
+
     return qty != null
       ? `Inventory — ${name}${sku} — Qty ${qty}`
       : `Inventory — ${name}${sku}`;
@@ -293,21 +244,42 @@ export function makeCandidateLabel(entity, row) {
   return `Record — ${when}`;
 }
 
-export function getCustomerTin(s) {
-  return (
-    toStr(s?.customerTin ?? s?.customer_tin) ||
-    toStr(s?.customer?.tin) ||
-    toStr(s?.customer?.customerTin ?? s?.customer?.customer_tin) ||
-    toStr(s?.customer?.taxId ?? s?.customer?.tax_id) ||
-    toStr(s?.customer?.tinNumber ?? s?.customer?.tin_number)
-  );
+export function safePlayBeep({
+  volume = 0.06,
+  durationMs = 160,
+  freq = 920,
+} = {}) {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    gain.gain.value = volume;
+    osc.frequency.value = freq;
+    osc.type = "sine";
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+
+    setTimeout(
+      () => {
+        try {
+          osc.stop();
+          ctx.close?.();
+        } catch {}
+      },
+      Math.max(80, Number(durationMs) || 160),
+    );
+  } catch {}
 }
 
-export function getCustomerAddress(s) {
+export function isDocumentFocused() {
+  if (typeof document === "undefined") return true;
   return (
-    toStr(s?.customerAddress ?? s?.customer_address) ||
-    toStr(s?.customer?.address) ||
-    toStr(s?.customer?.customerAddress ?? s?.customer?.customer_address) ||
-    toStr(s?.customer?.location ?? s?.customer?.location_text)
+    document.visibilityState === "visible" && (document.hasFocus?.() ?? true)
   );
 }

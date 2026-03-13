@@ -991,6 +991,14 @@ export default function ManagerPage() {
 
   const subtitle = `User: ${me?.email || "—"} • ${locationLabel(me)}`;
 
+  function badgeToneForSectionKey(key) {
+    if (key === "pricing") return unpricedCount > 0 ? "warn" : "success";
+    if (key === "arrivals") return arrivalsBadge ? "info" : "neutral";
+    if (key === "inv_requests")
+      return invReqPendingCount > 0 ? "danger" : "success";
+    return "neutral";
+  }
+
   return (
     <div className="min-h-screen overflow-x-hidden bg-[var(--app-bg)]">
       <RoleBar
@@ -1030,6 +1038,7 @@ export default function ManagerPage() {
             showAdvanced={showAdvanced}
             setShowAdvanced={setShowAdvanced}
             badgeForSectionKey={badgeForSectionKey}
+            badgeToneForSectionKey={badgeToneForSectionKey}
           />
 
           <main className="grid gap-4">

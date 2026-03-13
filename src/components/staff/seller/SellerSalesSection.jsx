@@ -14,16 +14,22 @@ import AsyncButton from "../../../components/AsyncButton";
 
 function StatChip({ label, value, strong = false }) {
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-white px-3 py-3 shadow-sm dark:border-[var(--border-strong)] dark:bg-[var(--card-2)] dark:shadow-none">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+    <div
+      className={[
+        "rounded-2xl border px-3 py-3",
+        "border-[var(--border)] bg-[var(--card)]",
+        "shadow-[0_4px_12px_rgba(15,23,42,0.04)] dark:shadow-none",
+      ].join(" ")}
+    >
+      <div className="text-[11px] font-black uppercase tracking-[0.1em] text-[var(--muted)]">
         {label}
       </div>
+
       <div
-        className={`mt-1 break-words text-sm ${
-          strong
-            ? "font-black text-[var(--app-fg)]"
-            : "font-semibold text-[var(--app-fg)]"
-        }`}
+        className={[
+          "mt-1 break-words text-sm text-[var(--app-fg)]",
+          strong ? "font-black" : "font-semibold",
+        ].join(" ")}
       >
         {value}
       </div>
@@ -33,7 +39,13 @@ function StatChip({ label, value, strong = false }) {
 
 function SalesCardSkeleton() {
   return (
-    <div className="overflow-hidden rounded-3xl border border-[var(--border-strong)] bg-[var(--card)] p-4 shadow-sm">
+    <div
+      className={[
+        "overflow-hidden rounded-3xl border p-4",
+        "border-[var(--border)] bg-[var(--card)]",
+        "shadow-[0_10px_24px_rgba(15,23,42,0.06)] dark:shadow-sm",
+      ].join(" ")}
+    >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <Skeleton className="h-7 w-40 rounded-2xl" />
@@ -59,6 +71,55 @@ function SalesCardSkeleton() {
   );
 }
 
+function DocumentButton({
+  children,
+  onClick,
+  disabled = false,
+  tone = "neutral",
+}) {
+  const toneCls =
+    tone === "primary"
+      ? "border-[var(--app-fg)] bg-[var(--app-fg)] text-[var(--app-bg)]"
+      : tone === "success"
+        ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
+        : tone === "warn"
+          ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
+          : tone === "info"
+            ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]"
+            : "border-[var(--border)] bg-[var(--card)] text-[var(--app-fg)]";
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={[
+        "app-focus rounded-2xl border px-4 py-2.5 text-sm font-black transition",
+        disabled
+          ? "cursor-not-allowed border-[var(--border)] bg-[var(--card-2)] text-[var(--muted)] opacity-100"
+          : "shadow-[0_4px_12px_rgba(15,23,42,0.05)] hover:translate-y-[-1px] hover:shadow-md",
+        disabled ? "" : toneCls,
+      ].join(" ")}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SurfaceNote({ children }) {
+  return (
+    <div
+      className={[
+        "rounded-2xl border px-4 py-3 text-sm",
+        "border-[var(--border)] bg-[var(--card-2)] text-[var(--muted)]",
+        "shadow-[0_4px_12px_rgba(15,23,42,0.04)] dark:shadow-none",
+      ].join(" ")}
+    >
+      {children}
+    </div>
+  );
+}
+
 export default function SellerSalesSection({
   showAllSales,
   salesLoading,
@@ -74,6 +135,7 @@ export default function SellerSalesSection({
   openSaleItems,
   openProforma,
   openDeliveryNote,
+  openInvoice,
   paymentMethods,
 }) {
   return (
@@ -97,7 +159,13 @@ export default function SellerSalesSection({
       }
     >
       <div className="grid gap-4">
-        <div className="rounded-3xl border border-[var(--border-strong)] bg-[var(--card-2)] p-3 shadow-sm sm:p-4">
+        <div
+          className={[
+            "rounded-3xl border p-3 sm:p-4",
+            "border-[var(--border)] bg-[var(--card-2)]",
+            "shadow-[0_4px_12px_rgba(15,23,42,0.04)] dark:shadow-none",
+          ].join(" ")}
+        >
           <Input
             placeholder="Search by sale ID, customer, phone, payment method or credit"
             value={salesQ}
@@ -112,9 +180,7 @@ export default function SellerSalesSection({
             <SalesCardSkeleton />
           </div>
         ) : salesToShow.length === 0 ? (
-          <div className="rounded-3xl border border-[var(--border-strong)] bg-[var(--card-2)] p-6 text-sm app-muted shadow-sm">
-            No sales found.
-          </div>
+          <SurfaceNote>No sales found.</SurfaceNote>
         ) : (
           <div className="grid gap-4">
             {salesToShow.map((s) => {
@@ -129,9 +195,22 @@ export default function SellerSalesSection({
 
               const total = Number(s?.totalAmount ?? s?.total ?? 0) || 0;
               const amountPaid = Number(s?.amountPaid ?? 0) || 0;
+
               const canFinalize = st === "FULFILLED" || st === "PENDING";
+
               const canDeliveryNote =
-                st === "FULFILLED" || st === "PENDING" || st === "COMPLETED";
+                st === "FULFILLED" ||
+                st === "PENDING" ||
+                st === "AWAITING_PAYMENT_RECORD" ||
+                st === "COMPLETED";
+
+              const canProforma =
+                st === "DRAFT" ||
+                st === "FULFILLED" ||
+                st === "AWAITING_PAYMENT_RECORD";
+
+              const canInvoice = st === "COMPLETED";
+
               const pm = salePayMethod[id] || "CASH";
               const btnState = markBtnState[id] || "idle";
               const createdAt = s?.createdAt || s?.created_at;
@@ -166,7 +245,11 @@ export default function SellerSalesSection({
               return (
                 <div
                   key={String(id)}
-                  className="overflow-hidden rounded-3xl border border-[var(--border-strong)] bg-[var(--card)] shadow-sm"
+                  className={[
+                    "overflow-hidden rounded-3xl border bg-[var(--card)]",
+                    "border-[var(--border)]",
+                    "shadow-[0_12px_28px_rgba(15,23,42,0.07)] dark:shadow-sm",
+                  ].join(" ")}
                 >
                   <div className="p-4 sm:p-5">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -202,13 +285,13 @@ export default function SellerSalesSection({
                         {(dueDate || remaining != null) && (
                           <div className="mt-3 flex flex-wrap gap-2">
                             {dueDate ? (
-                              <div className="rounded-full border border-[var(--border-strong)] bg-[var(--card-2)] px-3 py-1.5 text-xs font-semibold text-[var(--app-fg)] shadow-sm">
+                              <div className="rounded-full border border-[var(--border)] bg-[var(--card-2)] px-3 py-1.5 text-xs font-bold text-[var(--app-fg)] shadow-sm">
                                 Due: {safeDateOnly(dueDate)}
                               </div>
                             ) : null}
 
                             {remaining != null ? (
-                              <div className="rounded-full border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-1.5 text-xs font-bold text-[var(--warn-fg)] shadow-sm">
+                              <div className="rounded-full border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-1.5 text-xs font-black text-[var(--warn-fg)] shadow-sm">
                                 Remaining: {money(remaining)} RWF
                               </div>
                             ) : null}
@@ -217,50 +300,97 @@ export default function SellerSalesSection({
                       </div>
 
                       <div className="flex shrink-0 flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          className="app-focus rounded-2xl border border-[var(--border-strong)] bg-[var(--card-2)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] shadow-sm transition hover:bg-[var(--hover)]"
-                          onClick={() => openSaleItems(id)}
-                        >
+                        <DocumentButton onClick={() => openSaleItems(id)}>
                           View items
-                        </button>
+                        </DocumentButton>
+                      </div>
+                    </div>
 
-                        <button
-                          type="button"
-                          className="app-focus rounded-2xl border border-[var(--border-strong)] bg-[var(--card-2)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] shadow-sm transition hover:bg-[var(--hover)]"
-                          onClick={() => openProforma(id)}
-                        >
-                          Proforma
-                        </button>
+                    <div
+                      className={[
+                        "mt-4 rounded-3xl border p-4",
+                        "border-[var(--border)] bg-[var(--card-2)]",
+                        "shadow-[0_4px_12px_rgba(15,23,42,0.04)] dark:shadow-none",
+                      ].join(" ")}
+                    >
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="min-w-0">
+                          <div className="text-xs font-black uppercase tracking-[0.1em] text-[var(--muted)]">
+                            Documents
+                          </div>
+                          <div className="mt-1 text-sm text-[var(--muted)]">
+                            Available documents depend on the sale stage.
+                          </div>
+                        </div>
 
-                        <button
-                          type="button"
-                          disabled={!canDeliveryNote}
-                          className="app-focus rounded-2xl border border-[var(--border-strong)] bg-[var(--card-2)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] shadow-sm transition hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-50"
-                          onClick={() => openDeliveryNote(id)}
-                        >
-                          Delivery note
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          {canProforma ? (
+                            <DocumentButton
+                              tone="info"
+                              onClick={() => openProforma(id)}
+                            >
+                              Proforma
+                            </DocumentButton>
+                          ) : (
+                            <DocumentButton disabled>
+                              Proforma unavailable
+                            </DocumentButton>
+                          )}
+
+                          {canDeliveryNote ? (
+                            <DocumentButton
+                              tone="success"
+                              onClick={() => openDeliveryNote(id)}
+                            >
+                              Delivery note
+                            </DocumentButton>
+                          ) : (
+                            <DocumentButton disabled>
+                              Delivery note unavailable
+                            </DocumentButton>
+                          )}
+
+                          {canInvoice ? (
+                            <DocumentButton
+                              tone="primary"
+                              onClick={() => openInvoice(id)}
+                            >
+                              Invoice
+                            </DocumentButton>
+                          ) : (
+                            <DocumentButton disabled>
+                              Invoice after payment
+                            </DocumentButton>
+                          )}
+                        </div>
                       </div>
                     </div>
 
                     {itemsPreview.length ? (
-                      <div className="mt-4 rounded-3xl border border-[var(--border)] bg-white p-4 shadow-sm dark:border-[var(--border-strong)] dark:bg-[var(--card-2)]">
-                        <div className="text-xs font-black uppercase tracking-[0.08em] app-muted">
+                      <div
+                        className={[
+                          "mt-4 rounded-3xl border p-4",
+                          "border-[var(--border)] bg-[var(--card)]",
+                          "shadow-[0_4px_12px_rgba(15,23,42,0.04)] dark:shadow-none",
+                        ].join(" ")}
+                      >
+                        <div className="text-xs font-black uppercase tracking-[0.1em] text-[var(--muted)]">
                           Items preview
                         </div>
+
                         <div className="mt-3 flex flex-wrap gap-2">
                           {itemsPreview.slice(0, 3).map((it, idx) => (
                             <div
                               key={idx}
-                              className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--app-fg)] shadow-sm"
+                              className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-3 py-2 text-sm text-[var(--app-fg)] shadow-sm"
                             >
                               <b>{toStr(it?.productName) || "Item"}</b> ×{" "}
                               {Number(it?.qty ?? 0)}
                             </div>
                           ))}
+
                           {itemsPreview.length > 3 ? (
-                            <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm app-muted shadow-sm">
+                            <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-3 py-2 text-sm text-[var(--muted)] shadow-sm">
                               +{itemsPreview.length - 3} more
                             </div>
                           ) : null}
@@ -272,20 +402,29 @@ export default function SellerSalesSection({
 
                     <div className="mt-4 border-t border-[var(--border)] pt-4">
                       {!canFinalize ? (
-                        <div className="rounded-2xl border border-[var(--border-strong)] bg-[var(--card-2)] px-4 py-3 text-sm app-muted shadow-sm">
+                        <SurfaceNote>
                           {st === "DRAFT"
                             ? "Waiting for store keeper to release stock."
                             : st === "AWAITING_PAYMENT_RECORD"
                               ? "Waiting cashier to record payment."
-                              : "No action required for this sale."}
-                        </div>
+                              : st === "COMPLETED"
+                                ? "Sale completed. Invoice is available."
+                                : "No action required for this sale."}
+                        </SurfaceNote>
                       ) : (
-                        <div className="rounded-3xl border border-[var(--border-strong)] bg-[var(--card-2)] p-4 shadow-sm">
+                        <div
+                          className={[
+                            "rounded-3xl border p-4",
+                            "border-[var(--border)] bg-[var(--card-2)]",
+                            "shadow-[0_4px_12px_rgba(15,23,42,0.04)] dark:shadow-none",
+                          ].join(" ")}
+                        >
                           <div className="grid grid-cols-1 gap-3 xl:grid-cols-[260px_1fr]">
                             <div>
-                              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
+                              <div className="mb-2 text-xs font-black uppercase tracking-[0.1em] text-[var(--muted)]">
                                 Payment method
                               </div>
+
                               <Select
                                 value={pm}
                                 onChange={(e) =>
@@ -321,7 +460,7 @@ export default function SellerSalesSection({
                               {st === "FULFILLED" ? (
                                 <button
                                   type="button"
-                                  className="app-focus rounded-2xl border border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-2.5 text-sm font-semibold text-[var(--warn-fg)] shadow-sm transition hover:opacity-90"
+                                  className="app-focus rounded-2xl border border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-2.5 text-sm font-black text-[var(--warn-fg)] shadow-sm transition hover:opacity-90"
                                   onClick={() => openCreditModal(s)}
                                 >
                                   Mark credit
@@ -340,7 +479,7 @@ export default function SellerSalesSection({
         )}
 
         {!showAllSales ? (
-          <div className="text-xs app-muted">
+          <div className="text-xs text-[var(--muted)]">
             Tip: use search to quickly find older sales.
           </div>
         ) : null}

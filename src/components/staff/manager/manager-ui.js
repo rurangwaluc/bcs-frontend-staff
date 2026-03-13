@@ -9,6 +9,7 @@ export function cx(...classes) {
 export function managerSurface(base = "") {
   return cx(
     "border border-[var(--border)] bg-[var(--card)] text-[var(--app-fg)]",
+    "shadow-[0_10px_28px_rgba(15,23,42,0.06)] dark:shadow-[0_14px_40px_rgba(0,0,0,0.22)]",
     base,
   );
 }
@@ -24,7 +25,7 @@ export function Skeleton({ className = "" }) {
   return (
     <div
       className={cx(
-        "animate-pulse rounded-3xl bg-slate-200/70 dark:bg-slate-800/70",
+        "animate-pulse rounded-3xl bg-slate-200/80 dark:bg-slate-800/70",
         className,
       )}
     />
@@ -64,12 +65,15 @@ export function Banner({ kind = "info", children }) {
         ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
         : kind === "danger"
           ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
-          : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]";
+          : kind === "info"
+            ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]"
+            : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]";
 
   return (
     <div
       className={cx(
-        "rounded-[24px] border px-4 py-3 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.03)]",
+        "rounded-[22px] border px-4 py-3 text-sm",
+        "shadow-[0_2px_8px_rgba(15,23,42,0.04)] dark:shadow-none",
         cls,
       )}
     >
@@ -85,42 +89,40 @@ export function StatCard({
   tone = "neutral",
   className = "",
 }) {
-  const toneCls =
+  const accentCls =
     tone === "success"
-      ? "from-emerald-500/8 to-transparent"
+      ? "bg-emerald-500"
       : tone === "warn"
-        ? "from-amber-500/10 to-transparent"
+        ? "bg-amber-500"
         : tone === "danger"
-          ? "from-rose-500/10 to-transparent"
+          ? "bg-rose-500"
           : tone === "info"
-            ? "from-sky-500/10 to-transparent"
-            : "from-slate-500/5 to-transparent";
+            ? "bg-sky-500"
+            : "bg-slate-400";
 
   return (
     <div
       className={cx(
-        "relative overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--card)] p-5",
-        "shadow-[0_6px_20px_rgba(2,6,23,0.03)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.18)]",
+        "relative overflow-hidden rounded-[26px] border border-[var(--border)] bg-[var(--card)] p-5",
+        "shadow-[0_10px_28px_rgba(15,23,42,0.06)] dark:shadow-[0_14px_36px_rgba(0,0,0,0.22)]",
         className,
       )}
     >
-      <div
-        className={cx(
-          "pointer-events-none absolute inset-0 bg-gradient-to-br opacity-100",
-          toneCls,
-        )}
-      />
-      <div className="relative">
-        <div className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--muted)]">
-          {label}
-        </div>
-        <div className="mt-3 text-4xl font-black tracking-[-0.04em] text-[var(--app-fg)]">
-          {value}
-        </div>
-        {sub ? (
-          <div className="mt-2 text-sm text-[var(--muted)]">{sub}</div>
-        ) : null}
+      <div className="absolute inset-x-0 top-0 h-[3px] bg-transparent">
+        <div className={cx("h-full w-16 rounded-r-full", accentCls)} />
       </div>
+
+      <div className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--muted)]">
+        {label}
+      </div>
+
+      <div className="mt-3 text-4xl font-black tracking-[-0.04em] text-[var(--app-fg)]">
+        {value}
+      </div>
+
+      {sub ? (
+        <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{sub}</div>
+      ) : null}
     </div>
   );
 }
@@ -129,8 +131,8 @@ export function Card({ label, value, sub, className = "" }) {
   return (
     <div
       className={cx(
-        "rounded-[24px] border border-[var(--border)] bg-[var(--card)] p-4",
-        "shadow-[0_4px_18px_rgba(2,6,23,0.03)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.16)]",
+        "rounded-[22px] border border-[var(--border)] bg-[var(--card)] p-4",
+        "shadow-[0_6px_18px_rgba(15,23,42,0.04)] dark:shadow-[0_10px_24px_rgba(0,0,0,0.16)]",
         className,
       )}
     >
@@ -141,7 +143,7 @@ export function Card({ label, value, sub, className = "" }) {
         {value}
       </div>
       {sub ? (
-        <div className="mt-2 text-sm text-[var(--muted)]">{sub}</div>
+        <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{sub}</div>
       ) : null}
     </div>
   );
@@ -156,7 +158,12 @@ export function MetricCard({
   children,
 }) {
   return (
-    <div className="rounded-[28px] border border-[var(--border)] bg-[var(--card)] p-5">
+    <div
+      className={cx(
+        "rounded-[26px] border border-[var(--border)] bg-[var(--card)] p-5",
+        "shadow-[0_8px_24px_rgba(15,23,42,0.05)] dark:shadow-[0_12px_30px_rgba(0,0,0,0.2)]",
+      )}
+    >
       {eyebrow ? (
         <div className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--muted)]">
           {eyebrow}
@@ -193,8 +200,10 @@ export function Input({ className = "", ...props }) {
     <input
       {...props}
       className={cx(
-        "app-focus w-full rounded-[18px] border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--app-fg)] outline-none transition",
-        "placeholder:text-[var(--muted)] hover:border-[var(--border-strong)]",
+        "app-focus w-full rounded-[16px] border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--app-fg)] outline-none transition",
+        "placeholder:text-[var(--muted)]",
+        "hover:border-[var(--border-strong)]",
+        "focus:border-[var(--border-strong)] focus:bg-[var(--card)]",
         className,
       )}
     />
@@ -206,8 +215,9 @@ export function Select({ className = "", ...props }) {
     <select
       {...props}
       className={cx(
-        "app-focus w-full rounded-[18px] border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--app-fg)] outline-none transition",
+        "app-focus w-full rounded-[16px] border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--app-fg)] outline-none transition",
         "hover:border-[var(--border-strong)]",
+        "focus:border-[var(--border-strong)]",
         className,
       )}
     />
@@ -219,8 +229,10 @@ export function TextArea({ className = "", ...props }) {
     <textarea
       {...props}
       className={cx(
-        "app-focus min-h-[112px] w-full rounded-[18px] border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--app-fg)] outline-none transition",
-        "placeholder:text-[var(--muted)] hover:border-[var(--border-strong)]",
+        "app-focus min-h-[112px] w-full rounded-[16px] border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--app-fg)] outline-none transition",
+        "placeholder:text-[var(--muted)]",
+        "hover:border-[var(--border-strong)]",
+        "focus:border-[var(--border-strong)]",
         className,
       )}
     />
@@ -239,8 +251,8 @@ export function SectionCard({
   return (
     <section
       className={cx(
-        "overflow-hidden rounded-[32px] border border-[var(--border)] bg-[var(--card)]",
-        "shadow-[0_10px_30px_rgba(2,6,23,0.04)] dark:shadow-[0_18px_50px_rgba(0,0,0,0.22)]",
+        "overflow-hidden rounded-[30px] border border-[var(--border)] bg-[var(--card)]",
+        "shadow-[0_14px_36px_rgba(15,23,42,0.06)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.24)]",
         className,
       )}
     >
@@ -270,26 +282,24 @@ export function SectionCard({
 }
 
 export function TinyPill({ tone = "neutral", children, className = "" }) {
-  const styles = {
-    success:
-      "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-900/30 dark:border-emerald-700",
-
-    warn: "text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-300 dark:bg-amber-900/30 dark:border-amber-700",
-
-    danger:
-      "text-rose-700 bg-rose-50 border-rose-200 dark:text-rose-300 dark:bg-rose-900/30 dark:border-rose-700",
-
-    info: "text-sky-700 bg-sky-50 border-sky-200 dark:text-sky-300 dark:bg-sky-900/30 dark:border-sky-700",
-
-    neutral:
-      "text-slate-700 bg-slate-100 border-slate-200 dark:text-slate-300 dark:bg-slate-800 dark:border-slate-700",
-  };
+  const cls =
+    tone === "success"
+      ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
+      : tone === "warn"
+        ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
+        : tone === "danger"
+          ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
+          : tone === "info"
+            ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]"
+            : "border-slate-300 bg-slate-100 text-slate-700 dark:border-[var(--border)] dark:bg-[var(--card-2)] dark:text-[var(--app-fg)]";
 
   return (
     <span
       className={cx(
-        "inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold tracking-wide",
-        styles[tone] || styles.neutral,
+        "inline-flex items-center rounded-full border px-3 py-1",
+        "text-[11px] font-black uppercase tracking-[0.12em]",
+        "shadow-[inset_0_1px_0_rgba(255,255,255,0.4)] dark:shadow-none",
+        cls,
         className,
       )}
     >
@@ -298,15 +308,32 @@ export function TinyPill({ tone = "neutral", children, className = "" }) {
   );
 }
 
-export function NavPill({ active, label, badge, onClick }) {
+export function NavPill({
+  active,
+  label,
+  badge,
+  onClick,
+  badgeTone = "neutral",
+}) {
+  const badgeCls =
+    badgeTone === "success"
+      ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
+      : badgeTone === "warn"
+        ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
+        : badgeTone === "danger"
+          ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
+          : badgeTone === "info"
+            ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]"
+            : "border-slate-300 bg-white text-slate-700 dark:border-[var(--border)] dark:bg-[var(--card-2)] dark:text-[var(--app-fg)]";
+
   return (
     <button
       type="button"
       onClick={onClick}
       className={cx(
-        "group flex min-h-[56px] items-center justify-between gap-3 rounded-[18px] border px-4 py-3 text-left transition",
+        "group flex min-h-[56px] items-center justify-between gap-3 rounded-[16px] border px-4 py-3 text-left transition",
         active
-          ? "border-transparent bg-[var(--app-fg)] text-[var(--app-bg)] shadow-[0_10px_24px_rgba(15,23,42,0.18)]"
+          ? "border-transparent bg-[var(--app-fg)] text-[var(--app-bg)] shadow-[0_12px_26px_rgba(15,23,42,0.16)]"
           : "border-[var(--border)] bg-[var(--card)] text-[var(--app-fg)] hover:border-[var(--border-strong)] hover:bg-[var(--hover)]",
       )}
     >
@@ -316,9 +343,7 @@ export function NavPill({ active, label, badge, onClick }) {
         <span
           className={cx(
             "shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-black",
-            active
-              ? "border-white/20 bg-white/12 text-white"
-              : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]",
+            active ? "border-white/20 bg-white/12 text-white" : badgeCls,
           )}
         >
           {badge}
@@ -370,7 +395,7 @@ export function SurfaceRow({ children, className = "" }) {
   return (
     <div
       className={cx(
-        "rounded-[22px] border border-[var(--border)] bg-[var(--card)] p-4",
+        "rounded-[20px] border border-[var(--border)] bg-[var(--card-2)] p-4",
         className,
       )}
     >

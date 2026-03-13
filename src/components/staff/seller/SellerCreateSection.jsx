@@ -5,6 +5,24 @@ import { money, toStr } from "./seller-utils";
 
 import AsyncButton from "../../../components/AsyncButton";
 
+function getAvailableQty(productOrItem) {
+  return (
+    Number(
+      productOrItem?.qtyOnHand ??
+        productOrItem?.qty_on_hand ??
+        productOrItem?.stockAvailable ??
+        productOrItem?.stock_available ??
+        0,
+    ) || 0
+  );
+}
+
+function isInventoryTracked(productOrItem) {
+  return Boolean(
+    productOrItem?.trackInventory ?? productOrItem?.track_inventory,
+  );
+}
+
 export default function SellerCreateSection({
   productsLoading,
   loadProducts,
@@ -86,6 +104,9 @@ export default function SellerCreateSection({
                   Number(
                     p?.maxDiscountPercent ?? p?.max_discount_percent ?? 0,
                   ) || 0;
+                const availableQty = getAvailableQty(p);
+                const tracked = isInventoryTracked(p);
+                const outOfStock = tracked && availableQty <= 0;
 
                 return (
                   <div
@@ -116,10 +137,32 @@ export default function SellerCreateSection({
 
                           <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
                             <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+                              Stock available
+                            </div>
+                            <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
+                              {tracked ? availableQty : "Not tracked"}
+                            </div>
+                          </div>
+
+                          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
                               Max discount
                             </div>
                             <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
                               {maxp}%
+                            </div>
+                          </div>
+
+                          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+                              Status
+                            </div>
+                            <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
+                              {tracked
+                                ? outOfStock
+                                  ? "Out of stock"
+                                  : "Available"
+                                : "Available"}
                             </div>
                           </div>
                         </div>
@@ -127,8 +170,9 @@ export default function SellerCreateSection({
 
                       <button
                         type="button"
-                        className="app-focus shrink-0 rounded-2xl border border-[var(--border-strong)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] shadow-sm transition hover:bg-[var(--hover)]"
+                        className="app-focus shrink-0 rounded-2xl border border-[var(--border-strong)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] shadow-sm transition hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         onClick={() => addProductToSaleCart(p)}
+                        disabled={outOfStock}
                       >
                         Add
                       </button>
@@ -422,6 +466,10 @@ export default function SellerCreateSection({
                 {saleCart.map((it) => {
                   const line = previewLineTotal(it);
                   const maxPct = Number(it.maxDiscountPercent ?? 0) || 0;
+                  const availableQty = getAvailableQty(it);
+                  const tracked = isInventoryTracked(it);
+                  const enteredQty = Number(it.qty ?? 0) || 0;
+                  const exceedsStock = tracked && enteredQty > availableQty;
 
                   return (
                     <div
@@ -439,6 +487,12 @@ export default function SellerCreateSection({
                             Selling:{" "}
                             <b className="text-[var(--app-fg)]">
                               {money(it.sellingPrice)} RWF
+                            </b>
+                          </div>
+                          <div className="mt-2 text-sm app-muted">
+                            Stock available:{" "}
+                            <b className="text-[var(--app-fg)]">
+                              {tracked ? availableQty : "Not tracked"}
                             </b>
                           </div>
                         </div>
@@ -460,6 +514,7 @@ export default function SellerCreateSection({
                           <Input
                             type="number"
                             min="1"
+                            max={tracked ? String(availableQty) : undefined}
                             value={String(it.qty)}
                             onChange={(e) =>
                               updateCart(it.productId, {
@@ -467,6 +522,11 @@ export default function SellerCreateSection({
                               })
                             }
                           />
+                          {tracked ? (
+                            <div className="mt-1 text-[11px] app-muted">
+                              Max allowed: {availableQty}
+                            </div>
+                          ) : null}
                         </div>
 
                         <div>
@@ -525,6 +585,13 @@ export default function SellerCreateSection({
                           />
                         </div>
                       </div>
+
+                      {exceedsStock ? (
+                        <div className="mt-4 rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-3 text-sm text-[var(--danger-fg)]">
+                          Entered quantity is higher than stock. Available:{" "}
+                          <b>{availableQty}</b>, entered: <b>{enteredQty}</b>.
+                        </div>
+                      ) : null}
 
                       <div className="mt-4 flex items-center justify-between rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-4 py-3 shadow-sm">
                         <div className="text-sm font-semibold app-muted">

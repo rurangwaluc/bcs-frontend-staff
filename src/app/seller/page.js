@@ -25,6 +25,7 @@ import SellerCreateSection from "../../components/staff/seller/SellerCreateSecti
 import SellerCreditSetupModal from "../../components/staff/seller/SellerCreditSetupModal";
 import SellerDashboardSection from "../../components/staff/seller/SellerDashboardSection";
 import SellerDeliveryNoteModal from "../../components/staff/seller/SellerDeliveryNoteModal";
+import SellerInvoiceModal from "../../components/staff/seller/SellerInvoiceModal";
 import SellerItemsModal from "../../components/staff/seller/SellerItemsModal";
 import SellerProformaModal from "../../components/staff/seller/SellerProformaModal";
 import SellerSalesSection from "../../components/staff/seller/SellerSalesSection";
@@ -75,6 +76,24 @@ function playAlertBeep({
 
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
+}
+
+function getAvailableQty(productOrItem) {
+  return (
+    Number(
+      productOrItem?.qtyOnHand ??
+        productOrItem?.qty_on_hand ??
+        productOrItem?.stockAvailable ??
+        productOrItem?.stock_available ??
+        0,
+    ) || 0
+  );
+}
+
+function isInventoryTracked(productOrItem) {
+  return Boolean(
+    productOrItem?.trackInventory ?? productOrItem?.track_inventory ?? true,
+  );
 }
 
 function TopSectionSwitcher({
@@ -282,6 +301,7 @@ export default function SellerPage() {
   const [deliveryNoteOpen, setDeliveryNoteOpen] = useState(false);
   const [documentSale, setDocumentSale] = useState(null);
   const [documentLoading, setDocumentLoading] = useState(false);
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
 
   const lastStatusByIdRef = useRef(new Map());
   const firstSalesLoadRef = useRef(true);
@@ -595,6 +615,8 @@ export default function SellerPage() {
     const maxDiscountPercent = Number(
       p?.maxDiscountPercent ?? p?.max_discount_percent ?? 0,
     );
+    const qtyOnHand = getAvailableQty(p);
+    const trackInventory = isInventoryTracked(p);
 
     const sp = Number.isFinite(sellingPrice) ? sellingPrice : 0;
     const md = Number.isFinite(maxDiscountPercent) ? maxDiscountPercent : 0;
@@ -609,31 +631,76 @@ export default function SellerPage() {
       unitPrice: sp,
       discountPercent: 0,
       discountAmount: 0,
+      qtyOnHand,
+      trackInventory,
     };
   }
 
-  function addProductToSaleCart(p) {
-    const productId = Number(p?.id);
+  function addProductToSaleCart(product) {
+    const productId = Number(product?.id);
+    if (!Number.isFinite(productId)) return;
 
-    if (!productId) {
-      pushToast("warn", "Missing product id.");
+    const qtyOnHand = getAvailableQty(product);
+    const trackInventory = isInventoryTracked(product);
+
+    if (trackInventory && qtyOnHand <= 0) {
+      pushToast("warn", `${product?.name || "Product"} is out of stock.`);
       return;
     }
 
-    if (saleCart.some((x) => Number(x.productId) === productId)) {
-      pushToast("warn", "Already added.");
-      return;
-    }
+    setSaleCart((prev) => {
+      const exists = prev.find((x) => Number(x.productId) === productId);
 
-    setSaleCart((prev) => [...prev, productToCartItem(p)]);
-    pushToast("success", "Added to cart.");
+      if (exists) {
+        const nextQty = Number(exists.qty ?? 0) + 1;
+
+        if (trackInventory && nextQty > qtyOnHand) {
+          pushToast(
+            "warn",
+            `${product?.name || "Product"} has only ${qtyOnHand} item(s) in stock.`,
+          );
+          return prev;
+        }
+
+        return prev.map((x) =>
+          Number(x.productId) === productId
+            ? {
+                ...x,
+                qty: nextQty,
+                qtyOnHand,
+                trackInventory,
+              }
+            : x,
+        );
+      }
+
+      return [...prev, productToCartItem(product)];
+    });
   }
 
   function updateCart(productId, patch) {
     setSaleCart((prev) =>
-      prev.map((it) =>
-        Number(it.productId) === Number(productId) ? { ...it, ...patch } : it,
-      ),
+      prev.map((it) => {
+        if (Number(it.productId) !== Number(productId)) return it;
+
+        const next = { ...it, ...patch };
+        const qtyOnHand = getAvailableQty(next);
+        const trackInventory = isInventoryTracked(next);
+
+        let qty = Number(next.qty ?? 1) || 1;
+        if (qty < 1) qty = 1;
+
+        if (trackInventory && qtyOnHand > 0 && qty > qtyOnHand) {
+          qty = qtyOnHand;
+        }
+
+        return {
+          ...next,
+          qty,
+          qtyOnHand,
+          trackInventory,
+        };
+      }),
     );
   }
 
@@ -751,6 +818,16 @@ export default function SellerPage() {
       const qty = toInt(it.qty);
       if (qty <= 0) {
         pushToast("warn", `Bad qty for ${it.productName}.`);
+        return;
+      }
+
+      const tracked = isInventoryTracked(it);
+      const availableQty = getAvailableQty(it);
+      if (tracked && qty > availableQty) {
+        pushToast(
+          "danger",
+          `${it.productName}: available ${availableQty}, entered ${qty}.`,
+        );
         return;
       }
 
@@ -952,6 +1029,28 @@ export default function SellerPage() {
     }
   }
 
+  async function openSaleInvoice(saleId) {
+    const sid = Number(saleId);
+    if (!sid) return;
+
+    setDocumentLoading(true);
+
+    try {
+      const data = await apiFetch(ENDPOINTS.SALE_GET(sid), { method: "GET" });
+      const sale = data?.sale || data || null;
+
+      setDocumentSale(sale);
+      setInvoiceOpen(true);
+    } catch (e) {
+      pushToast(
+        "danger",
+        e?.data?.error || e?.message || "Cannot load invoice",
+      );
+    } finally {
+      setDocumentLoading(false);
+    }
+  }
+
   if (bootLoading) return <PageSkeleton />;
 
   if (!isAuthorized) {
@@ -1007,6 +1106,18 @@ export default function SellerPage() {
         onClose={() => {
           if (documentLoading) return;
           setDeliveryNoteOpen(false);
+          setDocumentSale(null);
+        }}
+      />
+
+      <SellerInvoiceModal
+        open={invoiceOpen}
+        sale={documentSale}
+        loading={documentLoading}
+        me={me}
+        onClose={() => {
+          if (documentLoading) return;
+          setInvoiceOpen(false);
           setDocumentSale(null);
         }}
       />
@@ -1108,6 +1219,7 @@ export default function SellerPage() {
                 openProforma={(id) => openSaleDocument(id, "proforma")}
                 openDeliveryNote={(id) => openSaleDocument(id, "delivery")}
                 paymentMethods={SELLER_PAYMENT_METHODS}
+                openInvoice={openSaleInvoice}
               />
             ) : null}
 

@@ -2,11 +2,31 @@
 
 import { cx, formatWhen, money, statusUi } from "./seller-utils";
 
+function toneClass(tone = "neutral") {
+  if (tone === "success") {
+    return "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)] shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] dark:shadow-none";
+  }
+
+  if (tone === "warn") {
+    return "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)] shadow-[inset_0_1px_0_rgba(255,255,255,0.42)] dark:shadow-none";
+  }
+
+  if (tone === "danger") {
+    return "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)] shadow-[inset_0_1px_0_rgba(255,255,255,0.42)] dark:shadow-none";
+  }
+
+  if (tone === "info") {
+    return "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)] shadow-[inset_0_1px_0_rgba(255,255,255,0.42)] dark:shadow-none";
+  }
+
+  return "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]";
+}
+
 export function Skeleton({ className = "" }) {
   return (
     <div
       className={cx(
-        "animate-pulse rounded-2xl bg-slate-200/70 dark:bg-slate-800/70",
+        "animate-pulse rounded-2xl bg-slate-200/80 dark:bg-slate-800/70",
         className,
       )}
     />
@@ -18,7 +38,7 @@ export function PageSkeleton() {
     <div className="min-h-screen overflow-x-hidden bg-[var(--app-bg)]">
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-5">
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_10px_28px_rgba(15,23,42,0.08)] dark:shadow-sm">
             <Skeleton className="h-6 w-40" />
             <Skeleton className="mt-3 h-4 w-52" />
             <div className="mt-6 grid gap-3">
@@ -50,14 +70,16 @@ export function PageSkeleton() {
 
 export function Card({ label, value, sub }) {
   return (
-    <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-sm transition">
-      <div className="text-xs font-semibold uppercase tracking-wide app-muted">
+    <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[0_10px_28px_rgba(15,23,42,0.08)] transition dark:shadow-sm">
+      <div className="text-xs font-black uppercase tracking-[0.1em] text-[var(--muted)]">
         {label}
       </div>
       <div className="mt-2 text-3xl font-black text-[var(--app-fg)]">
         {value}
       </div>
-      {sub ? <div className="mt-1 text-sm app-muted">{sub}</div> : null}
+      {sub ? (
+        <div className="mt-1 text-sm text-[var(--muted)]">{sub}</div>
+      ) : null}
     </div>
   );
 }
@@ -70,6 +92,7 @@ export function Input({ className = "", ...props }) {
         "app-focus w-full rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3.5 py-3 text-sm text-[var(--app-fg)] outline-none transition",
         "placeholder:text-[var(--muted)]",
         "hover:border-[var(--border-strong)]",
+        "focus:border-[var(--border-strong)]",
         className,
       )}
     />
@@ -84,6 +107,7 @@ export function TextArea({ className = "", ...props }) {
         "app-focus w-full rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3.5 py-3 text-sm text-[var(--app-fg)] outline-none transition",
         "placeholder:text-[var(--muted)]",
         "hover:border-[var(--border-strong)]",
+        "focus:border-[var(--border-strong)]",
         className,
       )}
     />
@@ -97,6 +121,7 @@ export function Select({ className = "", ...props }) {
       className={cx(
         "app-focus w-full rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3.5 py-3 text-sm text-[var(--app-fg)] outline-none transition",
         "hover:border-[var(--border-strong)]",
+        "focus:border-[var(--border-strong)]",
         className,
       )}
     />
@@ -107,16 +132,18 @@ export function SectionCard({ title, hint, right, children, className = "" }) {
   return (
     <div
       className={cx(
-        "overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-sm",
+        "overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-[0_12px_32px_rgba(15,23,42,0.08)] dark:shadow-sm",
         className,
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
         <div className="min-w-0">
-          <div className="text-base font-bold text-[var(--app-fg)]">
+          <div className="text-base font-black text-[var(--app-fg)]">
             {title}
           </div>
-          {hint ? <div className="mt-1 text-sm app-muted">{hint}</div> : null}
+          {hint ? (
+            <div className="mt-1 text-sm text-[var(--muted)]">{hint}</div>
+          ) : null}
         </div>
         {right ? <div className="shrink-0">{right}</div> : null}
       </div>
@@ -138,13 +165,14 @@ export function NavItem({ active, label, onClick, badge }) {
       )}
     >
       <span className="truncate">{label}</span>
+
       {badge ? (
         <span
           className={cx(
             "inline-flex min-w-[24px] items-center justify-center rounded-full px-2 py-0.5 text-[11px] font-extrabold",
             active
               ? "bg-white/15 text-white"
-              : "bg-[var(--card-2)] text-[var(--app-fg)]",
+              : "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)] border",
           )}
         >
           {badge}
@@ -157,22 +185,11 @@ export function NavItem({ active, label, onClick, badge }) {
 export function StatusBadge({ status }) {
   const { label, tone } = statusUi(status);
 
-  const cls =
-    tone === "success"
-      ? "border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200"
-      : tone === "warn"
-        ? "border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
-        : tone === "danger"
-          ? "border-rose-300 bg-rose-100 text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200"
-          : tone === "info"
-            ? "border-sky-300 bg-sky-100 text-sky-800 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-200"
-            : "border-[var(--border-strong)] bg-[var(--card-2)] text-[var(--app-fg)]";
-
   return (
     <span
       className={cx(
-        "inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.08em]",
-        cls,
+        "inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black uppercase tracking-[0.08em] shadow-sm",
+        toneClass(tone),
       )}
     >
       {label}
@@ -194,30 +211,25 @@ export function CreditSummary({ sale }) {
   const issuedText = issuedAt ? formatWhen(issuedAt) : "—";
   const paidText = settledAt ? formatWhen(settledAt) : "Not paid yet";
 
-  const pillCls =
-    status === "PENDING"
-      ? "border-amber-400 bg-amber-200 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
-      : "border-emerald-400 bg-emerald-200 text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200";
+  const pillTone = status === "PENDING" ? "warn" : "success";
 
   return (
-    <div className="mt-4 rounded-3xl border border-amber-300 bg-amber-50 p-4 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/20">
+    <div className="mt-4 rounded-3xl border border-[var(--warn-border)] bg-[var(--warn-bg)] p-4 shadow-[0_10px_28px_rgba(15,23,42,0.06)] dark:shadow-none">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-black text-slate-950 dark:text-[var(--app-fg)]">
+          <div className="text-sm font-black text-[var(--app-fg)]">
             Credit summary
           </div>
-          <div className="mt-1 text-xs text-slate-700 dark:text-[var(--muted)]">
+          <div className="mt-1 text-xs text-[var(--muted)]">
             Sale #{sale?.id ?? "—"} • Customer:{" "}
-            <b className="text-slate-950 dark:text-[var(--app-fg)]">
-              {sale?.customerName || "—"}
-            </b>
+            <b className="text-[var(--app-fg)]">{sale?.customerName || "—"}</b>
           </div>
         </div>
 
         <span
           className={cx(
-            "inline-flex shrink-0 items-center rounded-full border px-3 py-1 text-[11px] font-black uppercase tracking-[0.08em] shadow-sm",
-            pillCls,
+            "inline-flex shrink-0 items-center rounded-full border px-3 py-1 text-[11px] font-black uppercase tracking-[0.1em]",
+            toneClass(pillTone),
           )}
         >
           {status === "PENDING" ? "Credit • Pending" : "Credit • Settled"}
@@ -225,54 +237,46 @@ export function CreditSummary({ sale }) {
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-        <div className="rounded-2xl border border-amber-200 bg-white p-3 shadow-sm dark:border-[var(--border)] dark:bg-[var(--card)]">
-          <div className="text-[11px] font-semibold text-slate-600 dark:text-[var(--muted)]">
+        <div className="rounded-2xl border border-[var(--warn-border)] bg-[var(--card)] p-3 shadow-sm dark:shadow-none">
+          <div className="text-[11px] font-black uppercase tracking-[0.08em] text-[var(--muted)]">
             Paid / Total
           </div>
-          <div className="mt-1 text-base font-black text-slate-950 dark:text-[var(--app-fg)]">
+          <div className="mt-1 text-base font-black text-[var(--app-fg)]">
             {money(paid)} / {money(total)} RWF
           </div>
-          <div className="mt-1 text-xs text-slate-700 dark:text-[var(--muted)]">
+          <div className="mt-1 text-xs text-[var(--muted)]">
             Remaining:{" "}
-            <b className="text-slate-950 dark:text-[var(--app-fg)]">
-              {money(remaining)}
-            </b>{" "}
-            RWF
+            <b className="text-[var(--app-fg)]">{money(remaining)}</b> RWF
           </div>
         </div>
 
-        <div className="rounded-2xl border border-amber-200 bg-white p-3 shadow-sm dark:border-[var(--border)] dark:bg-[var(--card)]">
-          <div className="text-[11px] font-semibold text-slate-600 dark:text-[var(--muted)]">
+        <div className="rounded-2xl border border-[var(--warn-border)] bg-[var(--card)] p-3 shadow-sm dark:shadow-none">
+          <div className="text-[11px] font-black uppercase tracking-[0.08em] text-[var(--muted)]">
             Issued
           </div>
-          <div className="mt-1 text-base font-black text-slate-950 dark:text-[var(--app-fg)]">
+          <div className="mt-1 text-base font-black text-[var(--app-fg)]">
             {issuedText}
           </div>
-          <div className="mt-1 text-xs text-slate-700 dark:text-[var(--muted)]">
+          <div className="mt-1 text-xs text-[var(--muted)]">
             By:{" "}
-            <b className="text-slate-950 dark:text-[var(--app-fg)]">
-              {sale?.sellerName || "—"}
-            </b>
+            <b className="text-[var(--app-fg)]">{sale?.sellerName || "—"}</b>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-amber-200 bg-white p-3 shadow-sm dark:border-[var(--border)] dark:bg-[var(--card)]">
-          <div className="text-[11px] font-semibold text-slate-600 dark:text-[var(--muted)]">
+        <div className="rounded-2xl border border-[var(--warn-border)] bg-[var(--card)] p-3 shadow-sm dark:shadow-none">
+          <div className="text-[11px] font-black uppercase tracking-[0.08em] text-[var(--muted)]">
             Paid date
           </div>
-          <div className="mt-1 text-base font-black text-slate-950 dark:text-[var(--app-fg)]">
+          <div className="mt-1 text-base font-black text-[var(--app-fg)]">
             {paidText}
           </div>
-          <div className="mt-1 text-xs text-slate-700 dark:text-[var(--muted)]">
-            Status:{" "}
-            <b className="text-slate-950 dark:text-[var(--app-fg)]">
-              {status || "—"}
-            </b>
+          <div className="mt-1 text-xs text-[var(--muted)]">
+            Status: <b className="text-[var(--app-fg)]">{status || "—"}</b>
           </div>
         </div>
       </div>
 
-      <div className="mt-3 text-[11px] text-amber-900 dark:text-black-200/80">
+      <div className="mt-3 text-[11px] font-medium text-[var(--warn-fg)]/90">
         Installments are not enabled yet because payments has a unique index per
         sale.
       </div>

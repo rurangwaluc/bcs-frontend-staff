@@ -69,16 +69,31 @@ function statusTone(status) {
   return "neutral";
 }
 
-function MixCard({ label, count, total }) {
+function MixCard({ label, count, total, tone = "neutral" }) {
+  const toneBar =
+    tone === "success"
+      ? "bg-emerald-500"
+      : tone === "warn"
+        ? "bg-amber-500"
+        : tone === "danger"
+          ? "bg-rose-500"
+          : tone === "info"
+            ? "bg-sky-500"
+            : "bg-slate-400";
+
   return (
-    <div className="rounded-[24px] border border-[var(--border)] bg-[var(--card)] p-4">
+    <div className="relative overflow-hidden rounded-[22px] border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_6px_18px_rgba(15,23,42,0.05)] dark:shadow-[0_10px_22px_rgba(0,0,0,0.16)]">
+      <div className="absolute inset-x-0 top-0 h-[3px]">
+        <div className={`h-full w-12 rounded-r-full ${toneBar}`} />
+      </div>
+
       <div className="text-[11px] font-black uppercase tracking-[0.14em] text-[var(--muted)]">
         {label}
       </div>
       <div className="mt-3 text-3xl font-black tracking-[-0.03em] text-[var(--app-fg)]">
         {count}
       </div>
-      <div className="mt-2 text-sm text-[var(--muted)]">
+      <div className="mt-2 text-sm leading-6 text-[var(--muted)]">
         Total: <b className="text-[var(--app-fg)]">{total}</b> RWF
       </div>
     </div>
@@ -86,19 +101,22 @@ function MixCard({ label, count, total }) {
 }
 
 function LowStockCard({ item, productLabel }) {
+  const qty = Number(item?.qtyOnHand ?? item?.qty_on_hand ?? 0);
+
   return (
-    <div className="rounded-[24px] border border-[var(--border)] bg-[var(--card)] p-4">
-      <div className="text-sm font-black text-[var(--app-fg)]">
-        {productLabel(item)}
-      </div>
-      <div className="mt-2 flex items-center gap-2">
-        <TinyPill tone="warn">Low stock</TinyPill>
-        <span className="text-sm text-[var(--muted)]">
-          Qty:{" "}
-          <b className="text-[var(--app-fg)]">
-            {Number(item?.qtyOnHand ?? item?.qty_on_hand ?? 0)}
-          </b>
-        </span>
+    <div className="rounded-[22px] border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_6px_18px_rgba(15,23,42,0.05)] dark:shadow-[0_10px_22px_rgba(0,0,0,0.16)]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-black text-[var(--app-fg)]">
+            {productLabel(item)}
+          </div>
+          <div className="mt-2 text-sm text-[var(--muted)]">
+            Qty remaining:{" "}
+            <b className="text-[var(--app-fg)]">{qty.toLocaleString()}</b>
+          </div>
+        </div>
+
+        <TinyPill tone="warn">Low</TinyPill>
       </div>
     </div>
   );
@@ -109,7 +127,7 @@ function StuckSaleCard({ sale, money, fmt, topItemLabel }) {
   const top = topItemLabel(sale);
 
   return (
-    <div className="rounded-[26px] border border-[var(--border)] bg-[var(--card)] p-4">
+    <div className="rounded-[24px] border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_8px_22px_rgba(15,23,42,0.05)] dark:shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -120,13 +138,14 @@ function StuckSaleCard({ sale, money, fmt, topItemLabel }) {
               {String(sale?.status ?? "—")}
             </TinyPill>
           </div>
+
           <div className="mt-2 text-xs text-[var(--muted)]">
             Created: {fmt(sale?.createdAt || sale?.created_at)}
           </div>
         </div>
 
         <div className="text-right">
-          <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--muted)]">
+          <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
             Total
           </div>
           <div className="mt-1 text-2xl font-black tracking-[-0.03em] text-[var(--app-fg)]">
@@ -136,11 +155,11 @@ function StuckSaleCard({ sale, money, fmt, topItemLabel }) {
         </div>
       </div>
 
-      <div className="mt-4 rounded-[20px] border border-[var(--border)] bg-[var(--card-2)] p-4">
+      <div className="mt-4 rounded-[18px] border border-[var(--border)] bg-[var(--card-2)] p-4">
         <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
           Top item
         </div>
-        <div className="mt-2 text-sm font-bold text-[var(--app-fg)]">
+        <div className="mt-2 truncate text-sm font-bold text-[var(--app-fg)]">
           {top.name}
         </div>
         <div className="mt-1 text-xs text-[var(--muted)]">
@@ -151,15 +170,24 @@ function StuckSaleCard({ sale, money, fmt, topItemLabel }) {
   );
 }
 
-function QuickActionCard({ title, hint, onClick }) {
+function QuickActionCard({ title, hint, onClick, tone = "neutral" }) {
+  const toneCls =
+    tone === "danger"
+      ? "border-rose-200/70 dark:border-rose-900/30"
+      : tone === "warn"
+        ? "border-amber-200/70 dark:border-amber-900/30"
+        : tone === "info"
+          ? "border-sky-200/70 dark:border-sky-900/30"
+          : "border-[var(--border)]";
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className="rounded-[24px] border border-[var(--border)] bg-[var(--card)] p-4 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--hover)]"
+      className={`rounded-[22px] border ${toneCls} bg-[var(--card)] p-4 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--hover)]`}
     >
       <div className="text-sm font-black text-[var(--app-fg)]">{title}</div>
-      <div className="mt-1 text-sm text-[var(--muted)]">{hint}</div>
+      <div className="mt-1 text-sm leading-6 text-[var(--muted)]">{hint}</div>
     </button>
   );
 }
@@ -252,26 +280,31 @@ export default function ManagerDashboardSection(props) {
               label="Cash"
               count={breakdownTodayTotals?.CASH?.count ?? 0}
               total={formatMoney(breakdownTodayTotals?.CASH?.total ?? 0)}
+              tone="success"
             />
             <MixCard
               label="Momo"
               count={breakdownTodayTotals?.MOMO?.count ?? 0}
               total={formatMoney(breakdownTodayTotals?.MOMO?.total ?? 0)}
+              tone="info"
             />
             <MixCard
               label="Bank"
               count={breakdownTodayTotals?.BANK?.count ?? 0}
               total={formatMoney(breakdownTodayTotals?.BANK?.total ?? 0)}
+              tone="neutral"
             />
             <MixCard
               label="Card"
               count={breakdownTodayTotals?.CARD?.count ?? 0}
               total={formatMoney(breakdownTodayTotals?.CARD?.total ?? 0)}
+              tone="warn"
             />
             <MixCard
               label="Other"
               count={breakdownTodayTotals?.OTHER?.count ?? 0}
               total={formatMoney(breakdownTodayTotals?.OTHER?.total ?? 0)}
+              tone="danger"
             />
           </div>
 
@@ -338,21 +371,25 @@ export default function ManagerDashboardSection(props) {
           <QuickActionCard
             title="Inventory requests"
             hint="Approve or decline stock adjustments."
+            tone="danger"
             onClick={() => goToSection("inv_requests")}
           />
           <QuickActionCard
             title="Pricing"
             hint="Fix missing product selling prices."
+            tone="warn"
             onClick={() => goToSection("pricing")}
           />
           <QuickActionCard
             title="Stock arrivals"
             hint="Review incoming stock activity."
+            tone="info"
             onClick={() => goToSection("arrivals")}
           />
           <QuickActionCard
             title="Suppliers"
             hint="Review supplier balances and bills."
+            tone="neutral"
             onClick={() => goToSection("suppliers")}
           />
         </div>

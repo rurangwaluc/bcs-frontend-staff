@@ -39,7 +39,13 @@ function isOnlineFromUser(u) {
   return Date.now() - d.getTime() <= ONLINE_WINDOW_MS;
 }
 
-function Badge({ tone = "neutral", children }) {
+function roleLabel(role) {
+  const r = String(role || "").toLowerCase();
+  if (!r) return "unknown";
+  return r.replaceAll("_", " ");
+}
+
+function Badge({ tone = "neutral", children, className = "" }) {
   const cls =
     tone === "success"
       ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
@@ -48,7 +54,7 @@ function Badge({ tone = "neutral", children }) {
         : tone === "danger"
           ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
           : tone === "info"
-            ? "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900/40 dark:bg-sky-950/40 dark:text-sky-200"
+            ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]"
             : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]";
 
   return (
@@ -56,41 +62,12 @@ function Badge({ tone = "neutral", children }) {
       className={cx(
         "inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black uppercase tracking-[0.12em]",
         cls,
+        className,
       )}
     >
       {children}
     </span>
   );
-}
-
-function Skeleton({ className = "" }) {
-  return (
-    <div
-      className={cx(
-        "animate-pulse rounded-[22px] bg-slate-200/70 dark:bg-slate-800/70",
-        className,
-      )}
-    />
-  );
-}
-
-function Input({ className = "", ...props }) {
-  return (
-    <input
-      {...props}
-      className={cx(
-        "app-focus w-full rounded-[18px] border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--app-fg)] outline-none transition",
-        "placeholder:text-[var(--muted)] hover:border-[var(--border-strong)]",
-        className,
-      )}
-    />
-  );
-}
-
-function roleLabel(role) {
-  const r = String(role || "").toLowerCase();
-  if (!r) return "unknown";
-  return r.replaceAll("_", " ");
 }
 
 function OnlineBadge({ user }) {
@@ -102,16 +79,68 @@ function OnlineBadge({ user }) {
   return <Badge tone="neutral">Unknown</Badge>;
 }
 
+function Skeleton({ className = "" }) {
+  return (
+    <div
+      className={cx(
+        "animate-pulse rounded-[20px] bg-slate-200/70 dark:bg-slate-800/70",
+        className,
+      )}
+    />
+  );
+}
+
+function Input({ className = "", ...props }) {
+  return (
+    <input
+      {...props}
+      className={cx(
+        "app-focus w-full rounded-[16px] border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--app-fg)] outline-none transition",
+        "placeholder:text-[var(--muted)] hover:border-[var(--border-strong)]",
+        className,
+      )}
+    />
+  );
+}
+
 function SurfaceCard({ children, className = "" }) {
   return (
     <div
       className={cx(
-        "rounded-[28px] border border-[var(--border)] bg-[var(--card)] p-4",
+        "rounded-[26px] border border-[var(--border)] bg-[var(--card)] px-5 py-5",
         "shadow-[0_8px_24px_rgba(2,6,23,0.04)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.18)]",
+        "transition hover:-translate-y-[1px] hover:border-[var(--border-strong)] hover:shadow-[0_12px_34px_rgba(2,6,23,0.10)]",
         className,
       )}
     >
       {children}
+    </div>
+  );
+}
+
+function MetaBlock({ label, value, muted = false }) {
+  return (
+    <div
+      className={cx(
+        "rounded-[16px] px-3 py-2.5",
+        muted
+          ? "bg-[var(--card-2)]"
+          : "bg-[var(--card-2)] ring-1 ring-[var(--border)]",
+      )}
+    >
+      <div className="text-[10px] font-black uppercase tracking-[0.14em] text-[var(--muted)]">
+        {label}
+      </div>
+      <div
+        className={cx(
+          "mt-1.5 text-sm",
+          muted
+            ? "leading-5 text-[var(--muted)]"
+            : "font-semibold text-[var(--app-fg)]",
+        )}
+      >
+        {value}
+      </div>
     </div>
   );
 }
@@ -158,16 +187,12 @@ export default function ManagerUsersPanel({ title = "Staff" }) {
     if (!qq) return list;
 
     return list.filter((u) => {
-      const id = String(u?.id ?? "");
-      const name = String(u?.name ?? "").toLowerCase();
-      const email = String(u?.email ?? "").toLowerCase();
-      const role = String(u?.role ?? "").toLowerCase();
-      return (
-        id.includes(qq) ||
-        name.includes(qq) ||
-        email.includes(qq) ||
-        role.includes(qq)
-      );
+      const hay = [u?.id, u?.name, u?.email, u?.role]
+        .map((x) => String(x ?? ""))
+        .join(" ")
+        .toLowerCase();
+
+      return hay.includes(qq);
     });
   }, [rows, q, onlyActive]);
 
@@ -182,9 +207,9 @@ export default function ManagerUsersPanel({ title = "Staff" }) {
 
     for (const u of filtered) {
       if (u?.isActive === false) continue;
-      const o = isOnlineFromUser(u);
-      if (o === true) online += 1;
-      else if (o === false) offline += 1;
+      const onlineState = isOnlineFromUser(u);
+      if (onlineState === true) online += 1;
+      else if (onlineState === false) offline += 1;
       else unknown += 1;
     }
 
@@ -201,11 +226,9 @@ export default function ManagerUsersPanel({ title = "Staff" }) {
 
   return (
     <div className="overflow-hidden rounded-[32px] border border-[var(--border)] bg-[var(--card)] shadow-[0_10px_30px_rgba(2,6,23,0.04)] dark:shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--border)] p-5">
         <div className="min-w-0">
-          <div className="text-base font-black tracking-[-0.02em] text-[var(--app-fg)]">
-            {title}
-          </div>
+          <div className="text-sm font-bold text-[var(--app-fg)]">{title}</div>
           <div className="mt-1 text-sm text-[var(--muted)]">
             View staff only. Editing is restricted to Admin and Owner.
           </div>
@@ -223,8 +246,8 @@ export default function ManagerUsersPanel({ title = "Staff" }) {
           </div>
         </div>
 
-        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto">
-          <div className="w-full sm:w-[260px]">
+        <div className="flex w-full flex-wrap items-center gap-3 lg:w-auto">
+          <div className="w-full sm:w-[280px]">
             <Input
               placeholder="Search: id, name, email, role"
               value={q}
@@ -232,7 +255,7 @@ export default function ManagerUsersPanel({ title = "Staff" }) {
             />
           </div>
 
-          <label className="inline-flex items-center gap-2 rounded-[18px] border border-[var(--border)] bg-[var(--card-2)] px-3 py-3 text-sm font-semibold text-[var(--app-fg)]">
+          <label className="inline-flex items-center gap-2 rounded-[16px] border border-[var(--border)] bg-[var(--card-2)] px-3 py-3 text-sm font-semibold text-[var(--app-fg)]">
             <input
               type="checkbox"
               checked={onlyActive}
@@ -254,7 +277,7 @@ export default function ManagerUsersPanel({ title = "Staff" }) {
 
       {msg ? (
         <div className="p-5">
-          <div className="rounded-[24px] border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-3 text-sm text-[var(--danger-fg)]">
+          <div className="rounded-[22px] border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-3 text-sm text-[var(--danger-fg)]">
             {msg}
           </div>
         </div>
@@ -267,21 +290,24 @@ export default function ManagerUsersPanel({ title = "Staff" }) {
               <SurfaceCard key={i}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-3">
-                    <Skeleton className="h-12 w-12 rounded-[18px]" />
+                    <Skeleton className="h-14 w-14 rounded-[20px]" />
                     <div className="min-w-0">
-                      <Skeleton className="h-4 w-44" />
-                      <Skeleton className="mt-2 h-3 w-64" />
+                      <Skeleton className="h-4 w-40" />
+                      <Skeleton className="mt-2 h-3 w-52" />
                     </div>
                   </div>
+
                   <div className="flex gap-2">
+                    <Skeleton className="h-7 w-20 rounded-full" />
                     <Skeleton className="h-7 w-20 rounded-full" />
                     <Skeleton className="h-7 w-20 rounded-full" />
                   </div>
                 </div>
-                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                  <Skeleton className="h-16 w-full rounded-[18px]" />
-                  <Skeleton className="h-16 w-full rounded-[18px]" />
-                  <Skeleton className="h-16 w-full rounded-[18px]" />
+
+                <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <Skeleton className="h-[62px] w-full rounded-[16px]" />
+                  <Skeleton className="h-[62px] w-full rounded-[16px]" />
+                  <Skeleton className="h-[62px] w-full rounded-[16px]" />
                 </div>
               </SurfaceCard>
             ))}
@@ -300,30 +326,27 @@ export default function ManagerUsersPanel({ title = "Staff" }) {
               const lastSeen = safeDate(u?.lastSeenAt ?? u?.last_seen_at);
 
               return (
-                <SurfaceCard
-                  key={u?.id}
-                  className="transition hover:border-[var(--border-strong)] hover:bg-[var(--hover)]"
-                >
-                  <div className="flex items-start justify-between gap-3">
+                <SurfaceCard key={u?.id}>
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-[18px] bg-[var(--app-fg)] text-sm font-black text-[var(--app-bg)]">
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[20px] bg-[var(--app-fg)] text-sm font-black text-[var(--app-bg)] shadow-[0_6px_18px_rgba(15,23,42,0.18)]">
                         {initials(name || email)}
                       </div>
 
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-black text-[var(--app-fg)]">
+                        <div className="truncate text-base font-black tracking-[-0.02em] text-[var(--app-fg)]">
                           {name}{" "}
                           <span className="font-semibold text-[var(--muted)]">
                             #{u?.id ?? "—"}
                           </span>
                         </div>
-                        <div className="truncate text-xs text-[var(--muted)]">
+                        <div className="mt-1 truncate text-sm text-[var(--muted)]">
                           {email}
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5 lg:justify-end">
                       <Badge tone={u?.isActive ? "success" : "danger"}>
                         {u?.isActive ? "Active" : "Disabled"}
                       </Badge>
@@ -333,33 +356,13 @@ export default function ManagerUsersPanel({ title = "Staff" }) {
                   </div>
 
                   <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                    <div className="rounded-[20px] border border-[var(--border)] bg-[var(--card)] p-3">
-                      <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                        Created
-                      </div>
-                      <div className="mt-2 truncate text-sm font-bold text-[var(--app-fg)]">
-                        {created}
-                      </div>
-                    </div>
-
-                    <div className="rounded-[20px] border border-[var(--border)] bg-[var(--card)] p-3">
-                      <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                        Last seen
-                      </div>
-                      <div className="mt-2 truncate text-sm font-bold text-[var(--app-fg)]">
-                        {lastSeen}
-                      </div>
-                    </div>
-
-                    <div className="rounded-[20px] border border-[var(--border)] bg-[var(--card-2)] p-3">
-                      <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                        Status meaning
-                      </div>
-                      <div className="mt-2 text-xs leading-5 text-[var(--muted)]">
-                        Online = activity in last 5 min. Unknown = backend did
-                        not send lastSeenAt.
-                      </div>
-                    </div>
+                    <MetaBlock label="Created" value={created} />
+                    <MetaBlock label="Last seen" value={lastSeen} />
+                    <MetaBlock
+                      label="Status meaning"
+                      value="Online = activity in last 5 min. Unknown = backend did not send lastSeenAt."
+                      muted
+                    />
                   </div>
                 </SurfaceCard>
               );
