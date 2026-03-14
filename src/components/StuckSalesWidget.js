@@ -16,15 +16,27 @@ function money(n) {
 function fmtAge(seconds) {
   const s = Number(seconds || 0);
   if (!Number.isFinite(s) || s <= 0) return "—";
+
   const mins = Math.floor(s / 60);
   if (mins < 60) return `${mins}m`;
+
   const hrs = Math.floor(mins / 60);
-  const rem = mins % 60;
-  return `${hrs}h ${rem}m`;
+  const remMins = mins % 60;
+  if (hrs < 24) return `${hrs}h ${remMins}m`;
+
+  const days = Math.floor(hrs / 24);
+  const remHrs = hrs % 24;
+  return `${days}d ${remHrs}h`;
+}
+
+function toStr(v) {
+  if (v === undefined || v === null) return "";
+  return String(v).trim();
 }
 
 function StatusPill({ status }) {
   const s = String(status || "").toUpperCase();
+
   const tone =
     s.includes("CANCEL") || s.includes("VOID")
       ? "danger"
@@ -36,17 +48,17 @@ function StatusPill({ status }) {
 
   const cls =
     tone === "success"
-      ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+      ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
       : tone === "warn"
-        ? "bg-amber-50 text-amber-900 border-amber-200"
+        ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
         : tone === "danger"
-          ? "bg-rose-50 text-rose-900 border-rose-200"
-          : "bg-slate-50 text-slate-800 border-slate-200";
+          ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
+          : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]";
 
   return (
     <span
       className={cx(
-        "inline-flex items-center rounded-xl border px-2.5 py-1 text-[11px] font-extrabold",
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-extrabold uppercase tracking-[0.08em]",
         cls,
       )}
     >
@@ -55,24 +67,76 @@ function StatusPill({ status }) {
   );
 }
 
-/** ✅ Robust id getter: supports id, saleId, sale_id */
+function MiniStat({ label, value, tone = "default" }) {
+  const toneCls =
+    tone === "success"
+      ? "border-[var(--success-border)] bg-[var(--success-bg)]"
+      : tone === "warn"
+        ? "border-[var(--warn-border)] bg-[var(--warn-bg)]"
+        : tone === "danger"
+          ? "border-[var(--danger-border)] bg-[var(--danger-bg)]"
+          : "border-[var(--border)] bg-[var(--card-2)]";
+
+  return (
+    <div className={cx("rounded-2xl border p-3", toneCls)}>
+      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+        {label}
+      </div>
+      <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function Skeleton({ className = "" }) {
+  return (
+    <div
+      className={cx(
+        "animate-pulse rounded-2xl bg-slate-200/70 dark:bg-slate-800/70",
+        className,
+      )}
+    />
+  );
+}
+
+function LoadingCard() {
+  return (
+    <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <Skeleton className="h-5 w-36" />
+          <Skeleton className="mt-2 h-4 w-28" />
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full" />
+          </div>
+
+          <Skeleton className="mt-3 h-4 w-24" />
+        </div>
+
+        <div className="w-20 shrink-0">
+          <Skeleton className="h-4 w-12 ml-auto" />
+          <Skeleton className="mt-2 h-7 w-16 ml-auto" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** supports id, saleId, sale_id */
 function getSaleId(row) {
   const v = row?.id ?? row?.saleId ?? row?.sale_id ?? null;
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** ✅ Robustly extract sale object from ANY likely response shape */
 function extractSaleFromResponse(data) {
   if (!data) return null;
-  // common shapes:
-  // { ok:true, sale:{...} }
   if (data.sale) return data.sale;
-  // { data:{ sale:{...} } }
   if (data.data?.sale) return data.data.sale;
-  // { ok:true, data:{ sale:{...} } }
   if (data.data?.data?.sale) return data.data.data.sale;
-  // fallback: if the response itself looks like a sale
   if (data.items || data.itemsPreview) return data;
   return null;
 }
@@ -87,7 +151,7 @@ function pickTopItemFromSaleObject(saleLike) {
   const first = (preview && preview[0]) || (items && items[0]) || null;
 
   const name =
-    String(first?.productName ?? first?.name ?? first?.title ?? "").trim() ||
+    toStr(first?.productName ?? first?.name ?? first?.title ?? first?.label) ||
     null;
 
   const qtyRaw = first?.qty ?? first?.quantity ?? first?.count ?? null;
@@ -96,21 +160,32 @@ function pickTopItemFromSaleObject(saleLike) {
 
   if (!name && !qtyText) return null;
 
-  return { name: name || "—", qtyText: qtyText || "—" };
+  return {
+    name: name || "—",
+    qtyText: qtyText || "—",
+  };
+}
+
+function topItemTone(state) {
+  if (state === "loading") return "warn";
+  if (state === "missing") return "default";
+  return "success";
 }
 
 export default function StuckSalesWidget({ stuck = [], rule }) {
   const rows = useMemo(() => (Array.isArray(stuck) ? stuck : []), [stuck]);
 
-  // show 10, load more +10
   const [shown, setShown] = useState(10);
   const visible = rows.slice(0, shown);
   const canLoadMore = shown < rows.length;
 
-  // top item cache: saleId -> {name, qtyText, state}
-  // state: "ready" | "loading" | "missing"
+  // saleId -> { name, qtyText, state }
   const [topMap, setTopMap] = useState(() => new Map());
   const fetchingRef = useRef(new Set());
+
+  useEffect(() => {
+    setShown(10);
+  }, [rows]);
 
   useEffect(() => {
     let alive = true;
@@ -120,10 +195,9 @@ export default function StuckSalesWidget({ stuck = [], rule }) {
         const saleId = getSaleId(row);
         if (!saleId) continue;
 
-        // If we already have it, skip
         if (topMap.has(saleId)) continue;
+        if (fetchingRef.current.has(saleId)) continue;
 
-        // If row already includes itemsPreview/items, use it immediately (no fetch)
         const direct = pickTopItemFromSaleObject(row);
         if (direct) {
           setTopMap((prev) => {
@@ -134,11 +208,8 @@ export default function StuckSalesWidget({ stuck = [], rule }) {
           continue;
         }
 
-        // Otherwise fetch /sales/:id (once)
-        if (fetchingRef.current.has(saleId)) continue;
         fetchingRef.current.add(saleId);
 
-        // mark as loading (so UI doesn't show fake 0)
         setTopMap((prev) => {
           const next = new Map(prev);
           next.set(saleId, {
@@ -158,12 +229,15 @@ export default function StuckSalesWidget({ stuck = [], rule }) {
 
           setTopMap((prev) => {
             const next = new Map(prev);
-            if (extracted) next.set(saleId, { ...extracted, state: "ready" });
-            else
+            if (extracted) {
+              next.set(saleId, { ...extracted, state: "ready" });
+            } else {
               next.set(saleId, { name: "—", qtyText: "—", state: "missing" });
+            }
             return next;
           });
         } catch {
+          if (!alive) return;
           setTopMap((prev) => {
             const next = new Map(prev);
             next.set(saleId, { name: "—", qtyText: "—", state: "missing" });
@@ -176,110 +250,181 @@ export default function StuckSalesWidget({ stuck = [], rule }) {
     }
 
     ensureTopItems();
+
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown, rows]);
+  }, [visible, topMap]);
+
+  const totalValue = useMemo(
+    () =>
+      rows.reduce((sum, row) => sum + (Number(row?.totalAmount ?? 0) || 0), 0),
+    [rows],
+  );
+
+  const longestAgeSeconds = useMemo(
+    () =>
+      rows.reduce(
+        (max, row) => Math.max(max, Number(row?.ageSeconds ?? 0) || 0),
+        0,
+      ),
+    [rows],
+  );
 
   return (
-    <div className="grid gap-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-extrabold text-slate-900">
-            Stuck sales
-          </div>
-          <div className="mt-1 text-xs text-slate-600">
-            Rule: <span className="font-semibold">{rule || "—"}</span>
-          </div>
-        </div>
-        <span className="shrink-0 inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-extrabold text-slate-900">
-          {rows.length} item(s)
-        </span>
+    <div className="grid gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <MiniStat
+          label="Stuck sales"
+          value={String(rows.length)}
+          tone={rows.length > 0 ? "warn" : "success"}
+        />
+        <MiniStat
+          label="Total value"
+          value={`${money(totalValue)} RWF`}
+          tone="default"
+        />
+        <MiniStat
+          label="Oldest age"
+          value={fmtAge(longestAgeSeconds)}
+          tone={longestAgeSeconds > 0 ? "danger" : "default"}
+        />
       </div>
 
-      {rows.length === 0 ? (
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-          No stuck sales.
-        </div>
-      ) : (
-        <>
-          <div className="grid gap-2">
-            {visible.map((row, idx) => {
-              const saleId = getSaleId(row);
-              const cached = saleId ? topMap.get(saleId) : null;
-
-              const topName = cached?.name ?? "—";
-              const topQty = cached?.qtyText ?? "—";
-
-              return (
-                <div
-                  key={`${saleId || "sale"}-${idx}`}
-                  className="rounded-2xl border border-slate-200 bg-white p-4 hover:bg-slate-50"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <div className="text-sm font-extrabold text-slate-900">
-                          Sale #{String(saleId ?? row?.id ?? "—")}
-                        </div>
-                        <StatusPill status={row?.status} />
-                      </div>
-
-                      {/* ✅ Two columns inside card */}
-                      <div className="mt-2 grid grid-cols-2 gap-2">
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 min-w-0">
-                          <div className="text-[11px] font-semibold text-slate-600">
-                            Top item
-                          </div>
-                          <div className="mt-1 text-sm font-extrabold text-slate-900 truncate">
-                            {topName}
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                          <div className="text-[11px] font-semibold text-slate-600">
-                            Qty
-                          </div>
-                          <div className="mt-1 text-sm font-extrabold text-slate-900">
-                            {topQty}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-2 text-xs text-slate-600">
-                        Age:{" "}
-                        <span className="font-semibold">
-                          {fmtAge(row?.ageSeconds)}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="text-right">
-                      <div className="text-[11px] font-semibold text-slate-600">
-                        Total
-                      </div>
-                      <div className="text-lg font-extrabold text-slate-900">
-                        {money(row?.totalAmount || 0)}
-                      </div>
-                      <div className="text-[11px] text-slate-500">RWF</div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
+          <div className="min-w-0">
+            <div className="text-base font-black text-[var(--app-fg)]">
+              Stuck sales
+            </div>
+            <div className="mt-1 text-sm app-muted">
+              Rule:{" "}
+              <span className="font-semibold text-[var(--app-fg)]">
+                {rule || "—"}
+              </span>
+            </div>
           </div>
 
-          {canLoadMore ? (
-            <button
-              type="button"
-              onClick={() => setShown((n) => n + 10)}
-              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"
-            >
-              Load more (+10)
-            </button>
-          ) : null}
-        </>
-      )}
+          <span className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--card-2)] px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.08em] text-[var(--app-fg)]">
+            {rows.length} item(s)
+          </span>
+        </div>
+
+        <div className="p-4 sm:p-5">
+          {rows.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-[var(--border-strong)] bg-[var(--card-2)] p-8 text-center">
+              <div className="text-base font-black text-[var(--app-fg)]">
+                No stuck sales
+              </div>
+              <div className="mt-2 text-sm app-muted">
+                Everything is moving normally right now.
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-3">
+                {visible.map((row, idx) => {
+                  const saleId = getSaleId(row);
+                  const cached = saleId ? topMap.get(saleId) : null;
+
+                  const topName = cached?.name ?? "—";
+                  const topQty = cached?.qtyText ?? "—";
+                  const topState = cached?.state ?? "missing";
+
+                  return (
+                    <div
+                      key={`${saleId || "sale"}-${idx}`}
+                      className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm transition hover:bg-[var(--hover)]"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="text-sm font-black text-[var(--app-fg)] sm:text-base">
+                              Sale #{String(saleId ?? row?.id ?? "—")}
+                            </div>
+                            <StatusPill status={row?.status} />
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <div
+                              className={cx(
+                                "rounded-2xl border p-3",
+                                topState === "loading"
+                                  ? "border-[var(--warn-border)] bg-[var(--warn-bg)]"
+                                  : "border-[var(--border)] bg-[var(--card-2)]",
+                              )}
+                            >
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+                                Top item
+                              </div>
+                              <div className="mt-1 truncate text-sm font-black text-[var(--app-fg)]">
+                                {topName}
+                              </div>
+                            </div>
+
+                            <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+                                Qty
+                              </div>
+                              <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
+                                {topQty}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <span className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--card-2)] px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.08em] text-[var(--app-fg)]">
+                              Age {fmtAge(row?.ageSeconds)}
+                            </span>
+
+                            {topState === "loading" ? (
+                              <span className="inline-flex items-center rounded-full border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.08em] text-[var(--warn-fg)]">
+                                Loading item
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 text-right">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+                            Total
+                          </div>
+                          <div className="mt-1 text-lg font-black text-[var(--app-fg)]">
+                            {money(row?.totalAmount || 0)}
+                          </div>
+                          <div className="text-[11px] app-muted">RWF</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {visible.some((row) => {
+                  const saleId = getSaleId(row);
+                  const state = saleId ? topMap.get(saleId)?.state : null;
+                  return state === "loading";
+                }) ? (
+                  <div className="grid gap-3">
+                    <LoadingCard />
+                  </div>
+                ) : null}
+              </div>
+
+              {canLoadMore ? (
+                <div className="mt-4 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setShown((n) => n + 10)}
+                    className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-5 py-3 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+                  >
+                    Load more (+10)
+                  </button>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

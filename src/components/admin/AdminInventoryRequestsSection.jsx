@@ -91,7 +91,7 @@ export default function AdminInventoryRequestsSection({
             </div>
           }
         >
-          <InventoryAdjustRequestsPanel key={`inv-requests-${refreshNonce}`} />
+          <InventoryAdjustRequestsPanel refreshToken={refreshNonce} />
         </AdminSectionCard>
 
         <div className="grid gap-4">

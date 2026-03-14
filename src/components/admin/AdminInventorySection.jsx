@@ -25,20 +25,66 @@ function StatTile({ label, value, sub, tone = "neutral" }) {
             : "border-[var(--border)] bg-[var(--card-2)]";
 
   return (
-    <div className={cx("rounded-2xl border p-4", toneCls)}>
-      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+    <div
+      className={cx(
+        "rounded-3xl border p-4 sm:p-5 transition",
+        "shadow-[0_1px_2px_rgba(0,0,0,0.04)]",
+        toneCls,
+      )}
+    >
+      <div className="text-[10px] font-semibold uppercase tracking-[0.1em] app-muted sm:text-[11px]">
         {label}
       </div>
-      <div className="mt-1 text-xl font-black text-[var(--app-fg)]">
+      <div className="mt-1.5 text-lg font-black leading-tight text-[var(--app-fg)] sm:text-2xl">
         {value}
       </div>
-      {sub ? <div className="mt-1 text-xs app-muted">{sub}</div> : null}
+      {sub ? (
+        <div className="mt-1.5 text-xs leading-5 app-muted sm:text-sm">
+          {sub}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function InfoBlock({ label, value, sub, right }) {
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] app-muted">
+            {label}
+          </div>
+          <div className="mt-1.5 truncate text-sm font-bold text-[var(--app-fg)]">
+            {value || "—"}
+          </div>
+          {sub ? (
+            <div className="mt-1 truncate text-xs app-muted">{sub}</div>
+          ) : null}
+        </div>
+        {right ? <div className="shrink-0">{right}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+function SearchPanel({ label, placeholder, value, onChange, extra }) {
+  return (
+    <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4 sm:p-5">
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-xs font-semibold uppercase tracking-[0.08em] app-muted">
+          {label}
+        </div>
+        {extra ? <div>{extra}</div> : null}
+      </div>
+      <Input placeholder={placeholder} value={value} onChange={onChange} />
     </div>
   );
 }
 
 function InventoryCard({ row, sellingPrice, onOpenProof }) {
   const pid = row?.productId ?? row?.product_id ?? row?.id ?? null;
+
   const name =
     row?.productName ||
     row?.product_name ||
@@ -47,76 +93,88 @@ function InventoryCard({ row, sellingPrice, onOpenProof }) {
     "—";
 
   const sku = row?.sku || "—";
+
   const qty =
     Number(
       row?.qtyOnHand ?? row?.qty_on_hand ?? row?.qty ?? row?.quantity ?? 0,
     ) || 0;
 
   const unit = toStr(row?.stockUnit || row?.unit || row?.salesUnit) || "PIECE";
-
   const category = toStr(row?.category) || "—";
   const brand = toStr(row?.brand) || "—";
 
-  const lowStock =
-    qty <= Number((row?.reorderLevel ?? row?.reorder_level ?? 0) || 0);
+  const reorderLevel = Number(
+    (row?.reorderLevel ?? row?.reorder_level ?? 0) || 0,
+  );
+
+  const lowStock = qty <= reorderLevel;
 
   return (
-    <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
+    <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] sm:p-5">
+      <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <div className="truncate text-sm font-black text-[var(--app-fg)] sm:text-base">
               {name}
             </div>
-            {lowStock ? <Pill tone="warn">Low stock</Pill> : null}
+            {lowStock ? (
+              <Pill tone="warn">Low stock</Pill>
+            ) : (
+              <Pill tone="success">In stock</Pill>
+            )}
             {pid != null ? <Pill tone="info">#{pid}</Pill> : null}
           </div>
 
-          <div className="mt-1 text-xs app-muted">
-            SKU <b>{sku}</b> • {category}
+          <div className="mt-1.5 text-xs app-muted sm:text-sm">
+            SKU <span className="font-bold text-[var(--app-fg)]">{sku}</span>
+            {category && category !== "—" ? ` • ${category}` : ""}
             {brand && brand !== "—" ? ` • ${brand}` : ""}
           </div>
         </div>
 
-        <div className="text-right">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+        <div className="shrink-0 text-right">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] app-muted sm:text-[11px]">
             On hand
           </div>
-          <div className="mt-1 text-lg font-black text-[var(--app-fg)]">
+          <div className="mt-1 text-xl font-black leading-tight text-[var(--app-fg)] sm:text-2xl">
             {qty.toLocaleString()}
           </div>
           <div className="text-[11px] app-muted">{unit}</div>
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
-            Selling price
-          </div>
-          <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
-            {sellingPrice}
-          </div>
-        </div>
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <InfoBlock
+          label="Selling price"
+          value={sellingPrice || "—"}
+          sub="Current visible sell price"
+        />
 
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
-            Evidence
-          </div>
-          <div className="mt-2 flex justify-end">
-            {pid != null ? (
+        <InfoBlock
+          label="Stock threshold"
+          value={reorderLevel > 0 ? reorderLevel.toLocaleString() : "—"}
+          sub={lowStock ? "Needs attention" : "Within acceptable level"}
+          right={lowStock ? <Pill tone="warn">Risk</Pill> : null}
+        />
+      </div>
+
+      <div className="mt-3">
+        <InfoBlock
+          label="Traceability"
+          value={pid != null ? `Product #${pid}` : "No linked product"}
+          sub="Audit trail, changes, and supporting evidence"
+          right={
+            pid != null ? (
               <button
                 type="button"
-                className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs font-semibold text-[var(--app-fg)] hover:bg-[var(--hover)]"
+                className="min-h-10 rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-xs font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
                 onClick={() => onOpenProof?.(row)}
               >
                 Open proof
               </button>
-            ) : (
-              <span className="text-xs app-muted">—</span>
-            )}
-          </div>
-        </div>
+            ) : null
+          }
+        />
       </div>
     </div>
   );
@@ -131,6 +189,15 @@ function ProductAdminCard({
   onRestore,
   onDelete,
 }) {
+  const name =
+    product?.displayName ||
+    product?.name ||
+    product?.productName ||
+    product?.title ||
+    "—";
+
+  const sku = product?.sku || "—";
+
   const selling =
     product?.sellingPrice ??
     product?.selling_price ??
@@ -139,17 +206,16 @@ function ProductAdminCard({
     product?.unit_price ??
     null;
 
+  const category = toStr(product?.category) || "—";
+  const brand = toStr(product?.brand) || "—";
+
   return (
-    <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
+    <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] sm:p-5">
+      <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <div className="truncate text-sm font-black text-[var(--app-fg)] sm:text-base">
-              {product?.displayName ||
-                product?.name ||
-                product?.productName ||
-                product?.title ||
-                "—"}
+              {name}
             </div>
 
             {archived ? (
@@ -161,41 +227,49 @@ function ProductAdminCard({
             {isUnpriced ? <Pill tone="warn">Unpriced</Pill> : null}
           </div>
 
-          <div className="mt-1 text-xs app-muted">
-            SKU <b>{product?.sku || "—"}</b> • Product #{product?.id ?? "—"}
+          <div className="mt-1.5 text-xs app-muted sm:text-sm">
+            SKU <span className="font-bold text-[var(--app-fg)]">{sku}</span>
+            {" • "}
+            Product #{product?.id ?? "—"}
+            {category && category !== "—" ? ` • ${category}` : ""}
+            {brand && brand !== "—" ? ` • ${brand}` : ""}
           </div>
         </div>
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
-            Selling price
-          </div>
-          <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
-            {selling == null ? "—" : `${money(selling)} RWF`}
-          </div>
-        </div>
+        <InfoBlock
+          label="Selling price"
+          value={selling == null ? "—" : `${money(selling)} RWF`}
+          sub={isUnpriced ? "Needs pricing review" : "Current configured price"}
+          right={isUnpriced ? <Pill tone="warn">Review</Pill> : null}
+        />
 
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
-            Category
-          </div>
-          <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
-            {toStr(product?.category) || "—"}
-          </div>
-        </div>
+        <InfoBlock
+          label="Category"
+          value={category}
+          sub={brand && brand !== "—" ? `Brand: ${brand}` : "No brand set"}
+        />
+      </div>
+
+      <div className="mt-3">
+        <InfoBlock
+          label="Traceability"
+          value={`Product #${product?.id ?? "—"}`}
+          sub="Open proof to investigate changes, pricing, and history"
+          right={
+            <button
+              type="button"
+              className="min-h-10 rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-xs font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+              onClick={() => onOpenProof?.(product)}
+            >
+              Open proof
+            </button>
+          }
+        />
       </div>
 
       <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-        <button
-          type="button"
-          className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs font-semibold text-[var(--app-fg)] hover:bg-[var(--hover)]"
-          onClick={() => onOpenProof?.(product)}
-        >
-          Proof
-        </button>
-
         <AsyncButton
           variant="secondary"
           size="sm"
@@ -210,7 +284,7 @@ function ProductAdminCard({
 
         <button
           type="button"
-          className="rounded-xl border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-2 text-xs font-semibold text-[var(--danger-fg)] hover:opacity-90"
+          className="min-h-10 rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-2 text-xs font-semibold text-[var(--danger-fg)] transition hover:opacity-90"
           onClick={() => onDelete?.(product)}
         >
           Delete
@@ -226,14 +300,25 @@ function InventoryLoadingState() {
       {Array.from({ length: 6 }).map((_, i) => (
         <div
           key={i}
-          className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4"
+          className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5"
         >
-          <Skeleton className="h-5 w-52" />
-          <Skeleton className="mt-2 h-4 w-72" />
-          <div className="mt-4 grid grid-cols-2 gap-3">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <Skeleton className="h-5 w-48" />
+              <Skeleton className="mt-2 h-4 w-64 max-w-full" />
+            </div>
+            <div className="w-24 shrink-0">
+              <Skeleton className="ml-auto h-4 w-16" />
+              <Skeleton className="mt-2 ml-auto h-8 w-20" />
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Skeleton className="h-20 w-full rounded-2xl" />
             <Skeleton className="h-20 w-full rounded-2xl" />
           </div>
+
+          <Skeleton className="mt-3 h-16 w-full rounded-2xl" />
         </div>
       ))}
     </div>
@@ -242,9 +327,11 @@ function InventoryLoadingState() {
 
 function EmptyState({ title, hint }) {
   return (
-    <div className="rounded-3xl border border-dashed border-[var(--border-strong)] bg-[var(--card-2)] p-8 text-center">
-      <div className="text-base font-black text-[var(--app-fg)]">{title}</div>
-      <div className="mt-2 text-sm app-muted">{hint}</div>
+    <div className="rounded-3xl border border-dashed border-[var(--border-strong)] bg-[var(--card-2)] p-8 text-center sm:p-10">
+      <div className="text-base font-black text-[var(--app-fg)] sm:text-lg">
+        {title}
+      </div>
+      <div className="mt-2 text-sm leading-6 app-muted">{hint}</div>
     </div>
   );
 }
@@ -276,13 +363,14 @@ export default function AdminInventorySection({
   const inventoryRows = Array.isArray(filteredInventory)
     ? filteredInventory
     : [];
+
   const productRows = Array.isArray(filteredProducts) ? filteredProducts : [];
 
   return (
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.02fr_0.98fr]">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.02fr_0.98fr] 2xl:grid-cols-[1.02fr_0.98fr]">
       <SectionCard
         title="Inventory command view"
-        hint="Operational stock visibility with pricing preview and proof access."
+        hint="Operational stock visibility with pricing preview, thresholds, and proof access."
         right={
           <AsyncButton
             variant="secondary"
@@ -300,7 +388,7 @@ export default function AdminInventorySection({
           />
         }
       >
-        <div className="grid gap-4">
+        <div className="grid gap-4 sm:gap-5">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <StatTile
               label="Inventory rows"
@@ -311,33 +399,29 @@ export default function AdminInventorySection({
             <StatTile
               label="Filtered rows"
               value={String(inventoryRows.length)}
-              sub="Current search result"
+              sub="Current visible result"
             />
             <StatTile
               label="Pricing gaps"
               value={String(unpricedCount)}
-              sub="Products missing selling price"
+              sub="Products missing sell price"
               tone={unpricedCount > 0 ? "warn" : "success"}
             />
           </div>
 
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
-              Search inventory
-            </div>
-            <Input
-              placeholder="Search by name, SKU, product number…"
-              value={invQ}
-              onChange={(e) => setInvQ?.(e.target.value)}
-            />
-          </div>
+          <SearchPanel
+            label="Search inventory"
+            placeholder="Search by product name, SKU, or product number…"
+            value={invQ}
+            onChange={(e) => setInvQ?.(e.target.value)}
+          />
 
           {invLoading || prodLoading ? (
             <InventoryLoadingState />
           ) : inventoryRows.length === 0 ? (
             <EmptyState
               title="No inventory rows"
-              hint="Try another search word or reload inventory data."
+              hint="Try another search word or reload the inventory data."
             />
           ) : (
             <div className="grid gap-3">
@@ -375,12 +459,12 @@ export default function AdminInventorySection({
           </label>
         }
       >
-        <div className="grid gap-4">
+        <div className="grid gap-4 sm:gap-5">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <StatTile
               label="Loaded products"
               value={String(Array.isArray(products) ? products.length : 0)}
-              sub="Raw product list"
+              sub="Raw product records"
             />
             <StatTile
               label="Current view"
@@ -400,16 +484,17 @@ export default function AdminInventorySection({
             />
           </div>
 
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
-              Search products
-            </div>
-            <Input
-              placeholder="Search products by id, name, display name, sku…"
-              value={prodQ}
-              onChange={(e) => setProdQ?.(e.target.value)}
-            />
-          </div>
+          <SearchPanel
+            label="Search products"
+            placeholder="Search by id, name, display name, or SKU…"
+            value={prodQ}
+            onChange={(e) => setProdQ?.(e.target.value)}
+            extra={
+              <Pill tone={showArchivedProducts ? "danger" : "success"}>
+                {showArchivedProducts ? "Archived mode" : "Active mode"}
+              </Pill>
+            }
+          />
 
           {prodLoading ? (
             <InventoryLoadingState />
@@ -422,6 +507,7 @@ export default function AdminInventorySection({
             <div className="grid gap-3">
               {productRows.slice(0, 50).map((product) => {
                 const archived = isArchivedProduct?.(product);
+
                 const selling =
                   product?.sellingPrice ??
                   product?.selling_price ??
@@ -451,9 +537,9 @@ export default function AdminInventorySection({
             </div>
           )}
 
-          <div className="rounded-2xl border border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--warn-fg)]">
-            Delete is permanent. If delete fails because of linked operational
-            history, archive the product instead.
+          <div className="rounded-2xl border border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-3 text-xs leading-6 text-[var(--warn-fg)]">
+            Delete is permanent. If delete fails because the product is linked
+            to operational history, archive the product instead.
           </div>
         </div>
       </SectionCard>
