@@ -52,6 +52,7 @@ export function useAdminCoverage({
 
   const isCashierCoverage = coverageRole === "cashier";
   const isStoreKeeperCoverage = coverageRole === "store_keeper";
+  const isSellerCoverage = coverageRole === "seller";
 
   const actAsHref = useMemo(() => {
     if (actAs === "seller") return "/seller";
@@ -65,6 +66,7 @@ export function useAdminCoverage({
     setCoverageActingAsRole("store_keeper");
     setCoverageReason("SICK_LEAVE");
     setCoverageNote("");
+    setCoverageStartState("idle");
     setCoverageModalOpen(true);
   }, []);
 
@@ -102,7 +104,10 @@ export function useAdminCoverage({
         },
       });
 
-      const nextCoverage = data?.coverage || { active: true };
+      const nextCoverage = data?.coverage || {
+        active: true,
+        actingAsRole: coverageActingAsRole,
+      };
       const nextRole = normalizeRoleValue(nextCoverage?.actingAsRole);
       const nextSection = COVERAGE_DEFAULT_SECTION[nextRole] || "dashboard";
 
@@ -190,6 +195,7 @@ export function useAdminCoverage({
     coverageRole,
     isCashierCoverage,
     isStoreKeeperCoverage,
+    isSellerCoverage,
 
     openCoverageModal,
     loadCoverage,

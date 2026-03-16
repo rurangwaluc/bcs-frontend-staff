@@ -23,6 +23,7 @@ import AdminPaymentsSection from "../../components/admin/AdminPaymentsSection";
 import AdminPricingSection from "../../components/admin/AdminPricingSection";
 import AdminSalesSection from "../../components/admin/AdminSalesSection";
 import AdminSectionTabs from "../../components/admin/AdminSectionTabs";
+import AdminSellerCoverageSection from "../../components/admin/AdminSellerCoverageSection";
 import AdminShell from "../../components/admin/AdminShell";
 import AdminStoreKeeperCoverageSection from "../../components/admin/AdminStoreKeeperCoverageSection";
 import AdminUsersPanel from "../../components/AdminUsersPanel";
@@ -117,7 +118,11 @@ export default function AdminPage() {
         ) : null}
 
         {admin.section === "sales" ? (
-          <AdminSalesSection {...admin.salesProps} />
+          admin.isSellerCoverage ? (
+            <AdminSellerCoverageSection {...admin.sellerCoverageProps} />
+          ) : (
+            <AdminSalesSection {...admin.salesProps} />
+          )
         ) : null}
 
         {admin.section === "payments" ? (

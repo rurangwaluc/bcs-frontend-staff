@@ -16,52 +16,8 @@ function prettyRole(role) {
 
 export default function AdminCashierCoverageSection({
   coverage,
-
-  currentOpenSession,
-  sessions,
-  sessionsLoading,
-  openingBalance,
-  setOpeningBalance,
-  openBtnState,
-  closeNote,
-  setCloseNote,
-  closeBtnState,
-  loadSessions,
-  money,
-  safeDate,
-  onOpenSession,
-  onCloseSession,
-
-  salesLoading,
-  loadSales,
-  salesQ,
-  setSalesQ,
-  awaitingSales,
-  selectedSale,
-  setSelectedSale,
-  amount,
-  setAmount,
-  method,
-  setMethod,
-  note,
-  setNote,
-  methods,
-  paymentBtnState,
-  getSellerPaymentMethodFromSale,
-  ensureSaleDetails,
-  saleDetailsById,
-  saleDetailsLoadingById,
-  itemsSummary,
-  payments,
-  paymentsLoading,
-  payQ,
-  setPayQ,
-  canReadPayments,
-  loadSummary,
-  loadPayments,
-  paymentAmountStatus,
-  selectedSaleExpectedAmount,
-  onSubmitPayment,
+  sessionsProps,
+  paymentsProps,
 }) {
   const coverageActive =
     !!coverage?.active &&
@@ -99,58 +55,9 @@ export default function AdminCashierCoverageSection({
             </div>
           </div>
 
-          <CashierSessionsSection
-            currentOpenSession={currentOpenSession}
-            sessions={sessions}
-            sessionsLoading={sessionsLoading}
-            openingBalance={openingBalance}
-            setOpeningBalance={setOpeningBalance}
-            openBtnState={openBtnState}
-            closeNote={closeNote}
-            setCloseNote={setCloseNote}
-            closeBtnState={closeBtnState}
-            loadSessions={loadSessions}
-            money={money}
-            safeDate={safeDate}
-            onOpenSession={onOpenSession}
-            onCloseSession={onCloseSession}
-          />
+          <CashierSessionsSection {...(sessionsProps || {})} />
 
-          <CashierPaymentsSection
-            salesLoading={salesLoading}
-            loadSales={loadSales}
-            salesQ={salesQ}
-            setSalesQ={setSalesQ}
-            awaitingSales={awaitingSales}
-            selectedSale={selectedSale}
-            setSelectedSale={setSelectedSale}
-            amount={amount}
-            setAmount={setAmount}
-            method={method}
-            setMethod={setMethod}
-            note={note}
-            setNote={setNote}
-            methods={methods}
-            paymentBtnState={paymentBtnState}
-            currentOpenSession={currentOpenSession}
-            getSellerPaymentMethodFromSale={getSellerPaymentMethodFromSale}
-            ensureSaleDetails={ensureSaleDetails}
-            saleDetailsById={saleDetailsById}
-            saleDetailsLoadingById={saleDetailsLoadingById}
-            itemsSummary={itemsSummary}
-            money={money}
-            safeDate={safeDate}
-            payments={payments}
-            paymentsLoading={paymentsLoading}
-            payQ={payQ}
-            setPayQ={setPayQ}
-            canReadPayments={canReadPayments}
-            loadSummary={loadSummary}
-            loadPayments={loadPayments}
-            paymentAmountStatus={paymentAmountStatus}
-            selectedSaleExpectedAmount={selectedSaleExpectedAmount}
-            onSubmitPayment={onSubmitPayment}
-          />
+          <CashierPaymentsSection {...(paymentsProps || {})} />
         </div>
       </SectionCard>
     </div>

@@ -187,6 +187,10 @@ export default function SellerSalesSection({
               const id = s?.id;
               const st = String(s?.status || "").toUpperCase();
 
+              const creditStatus = String(
+                s?.credit?.status ?? s?.creditStatus ?? "",
+              ).toUpperCase();
+
               const cname = s?.customerName ?? s?.customer_name ?? "Walk-in";
               const cphone = s?.customerPhone ?? s?.customer_phone ?? "";
               const customerLabel = [toStr(cname), toStr(cphone)]
@@ -194,22 +198,35 @@ export default function SellerSalesSection({
                 .join(" • ");
 
               const total = Number(s?.totalAmount ?? s?.total ?? 0) || 0;
-              const amountPaid = Number(s?.amountPaid ?? 0) || 0;
+              const amountPaid =
+                Number(
+                  s?.credit?.paidAmount ??
+                    s?.credit?.paid_amount ??
+                    s?.amountPaid ??
+                    0,
+                ) || 0;
 
-              const canFinalize = st === "FULFILLED" || st === "PENDING";
+              const canFinalize = st === "FULFILLED";
+              const canRequestCredit = st === "FULFILLED";
 
               const canDeliveryNote =
                 st === "FULFILLED" ||
-                st === "PENDING" ||
                 st === "AWAITING_PAYMENT_RECORD" ||
-                st === "COMPLETED";
+                st === "COMPLETED" ||
+                [
+                  "PENDING_APPROVAL",
+                  "APPROVED",
+                  "PARTIALLY_PAID",
+                  "SETTLED",
+                ].includes(creditStatus);
 
               const canProforma =
                 st === "DRAFT" ||
                 st === "FULFILLED" ||
                 st === "AWAITING_PAYMENT_RECORD";
 
-              const canInvoice = st === "COMPLETED";
+              const canInvoice =
+                st === "COMPLETED" || creditStatus === "SETTLED";
 
               const pm = salePayMethod[id] || "CASH";
               const btnState = markBtnState[id] || "idle";
@@ -232,10 +249,25 @@ export default function SellerSalesSection({
                 s?.due_date ||
                 null;
 
-              const creditAmount = Number(credit?.amount ?? total) || total;
+              const creditPrincipal =
+                Number(
+                  credit?.principalAmount ??
+                    credit?.principal_amount ??
+                    s?.creditPrincipalAmount ??
+                    s?.creditAmount ??
+                    total,
+                ) || total;
+
               const remaining =
-                st === "PENDING"
-                  ? Math.max(0, creditAmount - amountPaid)
+                creditStatus &&
+                ["PENDING_APPROVAL", "APPROVED", "PARTIALLY_PAID"].includes(
+                  creditStatus,
+                )
+                  ? Number(
+                      credit?.remainingAmount ??
+                        credit?.remaining_amount ??
+                        Math.max(0, creditPrincipal - amountPaid),
+                    ) || 0
                   : null;
 
               const itemsPreview = Array.isArray(s?.itemsPreview)
@@ -258,7 +290,7 @@ export default function SellerSalesSection({
                           <div className="text-lg font-black text-[var(--app-fg)] sm:text-xl">
                             Sale #{id ?? "—"}
                           </div>
-                          <StatusBadge status={st} />
+                          <StatusBadge status={creditStatus || st} />
                         </div>
 
                         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -278,7 +310,7 @@ export default function SellerSalesSection({
                           />
                           <StatChip
                             label="Paid date"
-                            value={st === "COMPLETED" ? safeDate(paidAt) : "—"}
+                            value={canInvoice ? safeDate(paidAt) : "—"}
                           />
                         </div>
 
@@ -359,7 +391,7 @@ export default function SellerSalesSection({
                             </DocumentButton>
                           ) : (
                             <DocumentButton disabled>
-                              Invoice after payment
+                              Invoice after settlement
                             </DocumentButton>
                           )}
                         </div>
@@ -398,18 +430,28 @@ export default function SellerSalesSection({
                       </div>
                     ) : null}
 
-                    {st === "PENDING" ? <CreditSummary sale={s} /> : null}
+                    {creditStatus ? <CreditSummary sale={s} /> : null}
 
                     <div className="mt-4 border-t border-[var(--border)] pt-4">
-                      {!canFinalize ? (
+                      {!canFinalize && !canRequestCredit ? (
                         <SurfaceNote>
                           {st === "DRAFT"
                             ? "Waiting for store keeper to release stock."
                             : st === "AWAITING_PAYMENT_RECORD"
                               ? "Waiting cashier to record payment."
-                              : st === "COMPLETED"
-                                ? "Sale completed. Invoice is available."
-                                : "No action required for this sale."}
+                              : creditStatus === "PENDING_APPROVAL"
+                                ? "Credit request is waiting approval."
+                                : creditStatus === "APPROVED"
+                                  ? "Credit is approved and waiting collection."
+                                  : creditStatus === "PARTIALLY_PAID"
+                                    ? "Credit is being collected in parts."
+                                    : creditStatus === "SETTLED"
+                                      ? "Credit fully settled. Invoice is available."
+                                      : creditStatus === "REJECTED"
+                                        ? "Credit request was rejected."
+                                        : st === "COMPLETED"
+                                          ? "Sale completed. Invoice is available."
+                                          : "No action required for this sale."}
                         </SurfaceNote>
                       ) : (
                         <div
@@ -447,23 +489,19 @@ export default function SellerSalesSection({
                                 variant="primary"
                                 size="md"
                                 state={btnState}
-                                text={
-                                  st === "PENDING"
-                                    ? "Record payment"
-                                    : "Mark paid"
-                                }
+                                text="Mark paid"
                                 loadingText="Saving…"
                                 successText="Saved"
                                 onClick={() => markSalePaid(id, pm)}
                               />
 
-                              {st === "FULFILLED" ? (
+                              {canRequestCredit ? (
                                 <button
                                   type="button"
                                   className="app-focus rounded-2xl border border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-2.5 text-sm font-black text-[var(--warn-fg)] shadow-sm transition hover:opacity-90"
                                   onClick={() => openCreditModal(s)}
                                 >
-                                  Mark credit
+                                  Request credit
                                 </button>
                               ) : null}
                             </div>

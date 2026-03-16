@@ -13,6 +13,45 @@ import { METHODS } from "../../staff/cashier/cashier-constants";
 import { apiFetch } from "../../../lib/api";
 import { money } from "../../admin/adminShared";
 
+function upper(v) {
+  return String(v || "")
+    .trim()
+    .toUpperCase();
+}
+
+function isAwaitingPaymentSale(sale) {
+  const status = upper(sale?.status);
+  const paymentStatus = upper(
+    sale?.paymentStatus ?? sale?.payment_status ?? sale?.collectionStatus,
+  );
+
+  const total = Number(sale?.totalAmount ?? sale?.total ?? 0) || 0;
+  const paid = Number(sale?.amountPaid ?? sale?.amount_paid ?? 0) || 0;
+
+  if (
+    paymentStatus === "AWAITING_PAYMENT_RECORD" ||
+    paymentStatus === "AWAITING_PAYMENT" ||
+    paymentStatus === "PENDING_PAYMENT" ||
+    paymentStatus === "UNPAID"
+  ) {
+    return true;
+  }
+
+  if (
+    status === "AWAITING_PAYMENT_RECORD" ||
+    status === "AWAITING_PAYMENT" ||
+    status === "PENDING_PAYMENT"
+  ) {
+    return true;
+  }
+
+  if (status === "FULFILLED" && Math.round(paid) < Math.round(total)) {
+    return true;
+  }
+
+  return false;
+}
+
 export function useAdminCashierCoverage({
   toast,
   sales,
@@ -54,7 +93,7 @@ export function useAdminCashierCoverage({
   const currentOpenSession = useMemo(() => {
     const list = Array.isArray(sessions) ? sessions : [];
     const open = list
-      .filter((s) => String(s?.status || "").toUpperCase() === "OPEN")
+      .filter((s) => upper(s?.status) === "OPEN")
       .sort(
         (a, b) =>
           new Date(b?.openedAt || b?.opened_at || 0).getTime() -
@@ -70,22 +109,24 @@ export function useAdminCashierCoverage({
       .toLowerCase();
 
     return list
-      .filter(
-        (s) =>
-          String(s?.status || "").toUpperCase() === "AWAITING_PAYMENT_RECORD",
-      )
+      .filter((s) => isAwaitingPaymentSale(s))
       .filter((s) => {
         if (!q) return true;
+
         const hay = [
           s?.id,
+          s?.status,
+          s?.paymentStatus ?? s?.payment_status,
           s?.customerName ?? s?.customer_name,
           s?.customerPhone ?? s?.customer_phone,
           s?.totalAmount ?? s?.total,
+          s?.amountPaid ?? s?.amount_paid,
           s?.paymentMethod ?? s?.payment_method,
         ]
           .map((x) => String(x ?? ""))
           .join(" ")
           .toLowerCase();
+
         return hay.includes(q);
       })
       .slice()
@@ -158,7 +199,7 @@ export function useAdminCashierCoverage({
       });
       const list = Array.isArray(data?.sessions)
         ? data.sessions
-        : data?.items || data?.rows || [];
+        : data?.items || data?.rows || data?.data || [];
       setSessions(Array.isArray(list) ? list : []);
     } catch (e) {
       setSessions([]);
@@ -193,7 +234,7 @@ export function useAdminCashierCoverage({
 
   const handleOpenSession = useCallback(
     async (e) => {
-      e.preventDefault();
+      e?.preventDefault?.();
       if (openBtnState === "loading") return;
 
       const n = numOrNull(openingBalance);
@@ -227,7 +268,7 @@ export function useAdminCashierCoverage({
 
   const handleCloseSession = useCallback(
     async (e) => {
-      e.preventDefault();
+      e?.preventDefault?.();
       if (closeBtnState === "loading") return;
 
       if (!currentOpenSession?.id) {
@@ -264,7 +305,7 @@ export function useAdminCashierCoverage({
 
   const handleSubmitPayment = useCallback(
     async (e) => {
-      e.preventDefault();
+      e?.preventDefault?.();
       if (paymentBtnState === "loading") return;
 
       if (!currentOpenSession?.id) {
@@ -307,9 +348,9 @@ export function useAdminCashierCoverage({
         setNote("");
 
         await Promise.all([
-          loadSales(),
-          loadPaymentsSummary(),
-          loadPayments(),
+          loadSales?.(),
+          loadPaymentsSummary?.(),
+          loadPayments?.(),
           loadSessions(),
         ]);
 

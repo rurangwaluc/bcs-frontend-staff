@@ -101,14 +101,49 @@ export function nowLocalDatetimeValue() {
 export function statusUi(statusRaw) {
   const st = String(statusRaw || "").toUpperCase();
 
-  if (st === "PENDING") return { label: "CREDIT", tone: "warn" };
+  if (st === "PENDING_APPROVAL") {
+    return { label: "CREDIT REQUEST", tone: "warn" };
+  }
+
+  if (st === "APPROVED") {
+    return { label: "CREDIT APPROVED", tone: "info" };
+  }
+
+  if (st === "PARTIALLY_PAID") {
+    return { label: "PARTIAL CREDIT", tone: "info" };
+  }
+
+  if (st === "SETTLED") {
+    return { label: "CREDIT SETTLED", tone: "success" };
+  }
+
+  if (st === "REJECTED") {
+    return { label: "CREDIT REJECTED", tone: "danger" };
+  }
+
   if (st === "AWAITING_PAYMENT_RECORD") {
     return { label: "WAITING CASHIER", tone: "info" };
   }
-  if (st === "DRAFT") return { label: "WAITING RELEASE", tone: "neutral" };
-  if (st === "FULFILLED") return { label: "READY", tone: "success" };
-  if (st === "COMPLETED") return { label: "PAID", tone: "success" };
-  if (st === "CANCELLED") return { label: "CANCELLED", tone: "danger" };
+
+  if (st === "DRAFT") {
+    return { label: "WAITING RELEASE", tone: "neutral" };
+  }
+
+  if (st === "FULFILLED") {
+    return { label: "READY", tone: "success" };
+  }
+
+  if (st === "COMPLETED") {
+    return { label: "PAID", tone: "success" };
+  }
+
+  if (st === "CANCELLED") {
+    return { label: "CANCELLED", tone: "danger" };
+  }
+
+  if (st === "PENDING") {
+    return { label: "CREDIT", tone: "warn" };
+  }
 
   return { label: st || "—", tone: "neutral" };
 }

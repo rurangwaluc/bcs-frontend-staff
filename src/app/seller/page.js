@@ -13,16 +13,15 @@ import {
 import {
   isToday,
   locationLabel,
-  nowLocalDatetimeValue,
   toInt,
   toStr,
 } from "../../components/staff/seller/seller-utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import CreditsPanel from "../../components/CreditsPanel";
 import RoleBar from "../../components/RoleBar";
 import SellerCreateSection from "../../components/staff/seller/SellerCreateSection";
 import SellerCreditSetupModal from "../../components/staff/seller/SellerCreditSetupModal";
+import SellerCreditsSection from "../../components/staff/seller/SellerCreditsSection";
 import SellerDashboardSection from "../../components/staff/seller/SellerDashboardSection";
 import SellerDeliveryNoteModal from "../../components/staff/seller/SellerDeliveryNoteModal";
 import SellerInvoiceModal from "../../components/staff/seller/SellerInvoiceModal";
@@ -96,6 +95,16 @@ function isInventoryTracked(productOrItem) {
   );
 }
 
+function toIsoEndOfDay(dateValue) {
+  const raw = String(dateValue || "").trim();
+  if (!raw) return undefined;
+
+  const d = new Date(`${raw}T23:59:59.999`);
+  if (Number.isNaN(d.getTime())) return undefined;
+
+  return d.toISOString();
+}
+
 function TopSectionSwitcher({
   title,
   me,
@@ -121,7 +130,7 @@ function TopSectionSwitcher({
               Seller rule:
             </span>{" "}
             Create sales, generate customer documents, follow releases, then
-            finalize payment or credit.
+            finalize payment or submit credit request.
           </div>
         </div>
 
@@ -398,7 +407,7 @@ export default function SellerPage() {
       if (prevSt === "DRAFT" && nextSt === "FULFILLED") {
         notifySeller(
           "success",
-          `Store keeper released stock for Sale #${id}. You can now mark paid or credit.`,
+          `Store keeper released stock for Sale #${id}. You can now mark paid or request credit.`,
           {
             title: "Sale released",
             urgent: true,
@@ -456,8 +465,10 @@ export default function SellerPage() {
       const data = await apiFetch(ENDPOINTS.CUSTOMERS_SEARCH(qq), {
         method: "GET",
       });
-      const rows = Array.isArray(data?.customers) ? data.customers : [];
-      setCustomerResults(rows);
+      const rows = Array.isArray(data?.customers)
+        ? data.customers
+        : data?.items || data?.rows || [];
+      setCustomerResults(Array.isArray(rows) ? rows : []);
     } catch {
       setCustomerResults([]);
     } finally {
@@ -515,7 +526,6 @@ export default function SellerPage() {
     const q = String(prodQ || "")
       .trim()
       .toLowerCase();
-
     if (!q) return list;
 
     return list.filter((p) => {
@@ -604,9 +614,10 @@ export default function SellerPage() {
 
   const creditCount = useMemo(() => {
     const list = Array.isArray(sales) ? sales : [];
-    return list.filter(
-      (s) => String(s?.status || "").toUpperCase() === "PENDING",
-    ).length;
+    return list.filter((s) => {
+      const st = String(s?.status || "").toUpperCase();
+      return ["PENDING", "APPROVED", "PARTIALLY_PAID"].includes(st);
+    }).length;
   }, [sales]);
 
   function productToCartItem(p) {
@@ -996,38 +1007,52 @@ export default function SellerPage() {
     setCreditSale({
       ...(sale || null),
       _defaults: {
-        issueDate: nowLocalDatetimeValue(),
-        expectedPayDate: "",
-        installment: "",
+        dueDate: "",
         note: "",
       },
     });
     setCreditOpen(true);
   }
 
-  async function confirmCredit() {
-    const sid = Number(creditSale?.id);
-    if (!sid) return;
+  const confirmCredit = useCallback(
+    async (payload = {}) => {
+      const sid = Number(creditSale?.id);
+      if (!sid) return;
 
-    setCreditSaving(true);
-    setMsg("");
+      setCreditSaving(true);
+      setMsg("");
 
-    try {
-      await apiFetch(ENDPOINTS.SALE_MARK(sid), {
-        method: "POST",
-        body: { status: "PENDING" },
-      });
+      try {
+        const dueDateIso = toIsoEndOfDay(payload?.dueDate);
 
-      pushToast("success", `Sale #${sid} marked credit`);
-      setCreditOpen(false);
-      setCreditSale(null);
-      await loadSales();
-    } catch (e) {
-      pushToast("danger", e?.data?.error || e?.message || "Mark credit failed");
-    } finally {
-      setCreditSaving(false);
-    }
-  }
+        await apiFetch("/credits", {
+          method: "POST",
+          body: {
+            saleId: sid,
+            creditMode: payload?.creditMode || "OPEN_BALANCE",
+            dueDate: dueDateIso,
+            note: toStr(payload?.note) || undefined,
+            installments: Array.isArray(payload?.installments)
+              ? payload.installments
+              : undefined,
+          },
+        });
+
+        pushToast("success", `Credit request created for sale #${sid}`);
+        setCreditOpen(false);
+        setCreditSale(null);
+        await loadSales();
+      } catch (e) {
+        pushToast(
+          "danger",
+          e?.data?.error || e?.message || "Create credit request failed",
+        );
+      } finally {
+        setCreditSaving(false);
+      }
+    },
+    [creditSale, loadSales],
+  );
 
   async function openSaleInvoice(saleId) {
     const sid = Number(saleId);
@@ -1226,17 +1251,9 @@ export default function SellerPage() {
             {section === "credits" ? (
               <SectionCard
                 title="Credits"
-                hint="Credit history and detail view."
+                hint="Credit history, approval status, payment progress, and installments."
               >
-                <CreditsPanel
-                  title="Credits (Seller)"
-                  capabilities={{
-                    canView: true,
-                    canCreate: false,
-                    canDecide: false,
-                    canSettle: false,
-                  }}
-                />
+                <SellerCreditsSection />
               </SectionCard>
             ) : null}
           </main>

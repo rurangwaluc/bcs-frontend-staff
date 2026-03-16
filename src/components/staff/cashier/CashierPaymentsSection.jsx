@@ -13,54 +13,105 @@ import {
 import AsyncButton from "../../../components/AsyncButton";
 
 export default function CashierPaymentsSection({
-  salesLoading,
+  salesLoading = false,
   loadSales,
-  salesQ,
+  salesQ = "",
   setSalesQ,
-  awaitingSales,
-  selectedSale,
+  awaitingSales = [],
+  selectedSale = null,
   setSelectedSale,
-  amount,
+  amount = "",
   setAmount,
-  method,
+  method = "CASH",
   setMethod,
-  note,
+  note = "",
   setNote,
-  methods,
-  paymentBtnState,
-  currentOpenSession,
+  methods = [],
+  paymentBtnState = "idle",
+  currentOpenSession = null,
   getSellerPaymentMethodFromSale,
   ensureSaleDetails,
-  saleDetailsById,
-  saleDetailsLoadingById,
+  saleDetailsById = {},
+  saleDetailsLoadingById = {},
   itemsSummary,
   money,
   safeDate,
-  payments,
-  paymentsLoading,
-  payQ,
+  payments = [],
+  paymentsLoading = false,
+  payQ = "",
   setPayQ,
-  canReadPayments,
+  canReadPayments = true,
   loadSummary,
   loadPayments,
-  paymentAmountStatus,
-  selectedSaleExpectedAmount,
+  paymentAmountStatus = null,
+  selectedSaleExpectedAmount = 0,
   onSubmitPayment,
 }) {
   const isLocked = !currentOpenSession;
+
+  const waitingSales = Array.isArray(awaitingSales) ? awaitingSales : [];
+  const paymentRows = Array.isArray(payments) ? payments : [];
+  const methodRows = Array.isArray(methods) ? methods : [];
+  const detailsMap =
+    saleDetailsById && typeof saleDetailsById === "object"
+      ? saleDetailsById
+      : {};
+  const detailsLoadingMap =
+    saleDetailsLoadingById && typeof saleDetailsLoadingById === "object"
+      ? saleDetailsLoadingById
+      : {};
+
+  const renderItemsSummary = (items) => {
+    if (typeof itemsSummary === "function") return itemsSummary(items);
+    const safeItems = Array.isArray(items) ? items : [];
+    if (safeItems.length === 0) return "No items";
+    return `${safeItems.length} item(s)`;
+  };
+
+  const formatMoney = (value) => {
+    if (typeof money === "function") return money(value);
+    return String(value ?? 0);
+  };
+
+  const formatDate = (value) => {
+    if (typeof safeDate === "function") return safeDate(value);
+    return String(value ?? "—");
+  };
+
+  const resolveSellerMethod = (sale) => {
+    if (typeof getSellerPaymentMethodFromSale === "function") {
+      return getSellerPaymentMethodFromSale(sale);
+    }
+    return "";
+  };
+
+  const handleEnsureSaleDetails = (saleId) => {
+    if (!saleId) return;
+    if (typeof ensureSaleDetails === "function") {
+      ensureSaleDetails(saleId);
+    }
+  };
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
       <SectionCard
         title="Sales waiting for payment"
-        hint="Pick a sale, confirm items, then record payment."
+        hint="Pick a sale, confirm items, then record the final sale payment."
         right={<RefreshButton loading={salesLoading} onClick={loadSales} />}
       >
+        <div className="mb-4">
+          <Banner kind="info">
+            This section is only for <b>normal sale payments</b>. Approved
+            credits, partial credit payments, final credit settlement, and
+            installment collections belong in the <b>Credits</b> tab.
+          </Banner>
+        </div>
+
         <div className="grid gap-3">
           <Input
             placeholder="Search by sale ID, customer or phone"
             value={salesQ}
-            onChange={(e) => setSalesQ(e.target.value)}
+            onChange={(e) => setSalesQ?.(e.target.value)}
           />
 
           {salesLoading ? (
@@ -69,20 +120,18 @@ export default function CashierPaymentsSection({
               <Skeleton className="h-24 w-full" />
               <Skeleton className="h-24 w-full" />
             </div>
-          ) : awaitingSales.length === 0 ? (
+          ) : waitingSales.length === 0 ? (
             <div className="text-sm app-muted">No sales waiting.</div>
           ) : (
             <div className="grid gap-2">
-              {awaitingSales.slice(0, 20).map((s) => {
+              {waitingSales.slice(0, 20).map((s) => {
                 const total = s?.totalAmount ?? s?.total ?? 0;
                 const cname = s?.customerName ?? s?.customer_name ?? "—";
                 const cphone = s?.customerPhone ?? s?.customer_phone ?? "";
-                const sellerMethod = getSellerPaymentMethodFromSale(s);
+                const sellerMethod = resolveSellerMethod(s);
                 const sid = Number(s?.id || 0) || null;
-                const isLoadingItems = sid
-                  ? !!saleDetailsLoadingById[sid]
-                  : false;
-                const items = sid ? saleDetailsById[sid]?.items || [] : [];
+                const isLoadingItems = sid ? !!detailsLoadingMap[sid] : false;
+                const items = sid ? detailsMap[sid]?.items || [] : [];
 
                 return (
                   <button
@@ -95,12 +144,12 @@ export default function CashierPaymentsSection({
                         : "border-[var(--border)] bg-[var(--card)] hover:bg-[var(--hover)]",
                     ].join(" ")}
                     onClick={() => {
-                      if (sid) ensureSaleDetails(sid);
-                      const sm = getSellerPaymentMethodFromSale(s);
-                      setSelectedSale(s);
-                      setAmount(String(Math.round(Number(total) || 0)));
-                      setMethod(sm || "CASH");
-                      setNote("");
+                      if (sid) handleEnsureSaleDetails(sid);
+                      const sm = resolveSellerMethod(s);
+                      setSelectedSale?.(s);
+                      setAmount?.(String(Math.round(Number(total) || 0)));
+                      setMethod?.(sm || "CASH");
+                      setNote?.("");
                     }}
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -117,13 +166,15 @@ export default function CashierPaymentsSection({
                         </div>
                         <div className="mt-2 text-xs app-muted break-words">
                           <span className="font-semibold">Items:</span>{" "}
-                          {isLoadingItems ? "Loading…" : itemsSummary(items)}
+                          {isLoadingItems
+                            ? "Loading…"
+                            : renderItemsSummary(items)}
                         </div>
                       </div>
 
                       <div className="shrink-0 text-right">
                         <div className="text-sm font-extrabold text-[var(--app-fg)]">
-                          {money(total)}
+                          {formatMoney(total)}
                         </div>
                         <div className="text-[11px] app-muted">RWF</div>
                       </div>
@@ -138,14 +189,20 @@ export default function CashierPaymentsSection({
 
       <SectionCard
         title="Record payment"
-        hint="Open session required. Amount must match the sale total."
+        hint="Open session required. Sale payment amount must match the sale total exactly."
       >
         {!currentOpenSession ? (
           <Banner kind="warn">Open a cash session first.</Banner>
         ) : null}
 
         {!selectedSale ? (
-          <div className="text-sm app-muted">Pick a sale on the left.</div>
+          <div className="grid gap-3">
+            <div className="text-sm app-muted">Pick a sale on the left.</div>
+            <Banner kind="info">
+              Need to collect an approved credit instead? Go to the{" "}
+              <b>Credits</b> tab.
+            </Banner>
+          </div>
         ) : (
           <div
             className={[
@@ -155,10 +212,8 @@ export default function CashierPaymentsSection({
           >
             {(() => {
               const sid = Number(selectedSale?.id || 0) || null;
-              const isLoadingItems = sid
-                ? !!saleDetailsLoadingById[sid]
-                : false;
-              const items = sid ? saleDetailsById[sid]?.items || [] : [];
+              const isLoadingItems = sid ? !!detailsLoadingMap[sid] : false;
+              const items = sid ? detailsMap[sid]?.items || [] : [];
 
               return (
                 <>
@@ -167,11 +222,12 @@ export default function CashierPaymentsSection({
                       Sale #{selectedSale?.id}
                     </div>
                     <div className="mt-1 text-xs app-muted">
-                      Total: <b>{money(selectedSaleExpectedAmount)}</b> RWF
+                      Total: <b>{formatMoney(selectedSaleExpectedAmount)}</b>{" "}
+                      RWF
                     </div>
                     <div className="mt-2 text-xs app-muted break-words">
                       <span className="font-semibold">Items:</span>{" "}
-                      {isLoadingItems ? "Loading…" : itemsSummary(items)}
+                      {isLoadingItems ? "Loading…" : renderItemsSummary(items)}
                     </div>
                   </div>
 
@@ -192,26 +248,33 @@ export default function CashierPaymentsSection({
                     <Input
                       placeholder="Amount (RWF)"
                       value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
+                      onChange={(e) => setAmount?.(e.target.value)}
                       disabled={isLocked}
                     />
 
                     <Select
                       value={method}
-                      onChange={(e) => setMethod(e.target.value)}
+                      onChange={(e) => setMethod?.(e.target.value)}
                       disabled={isLocked}
                     >
-                      {methods.map((m) => (
-                        <option key={m.value} value={m.value}>
-                          {m.label}
-                        </option>
-                      ))}
+                      {methodRows.length === 0 ? (
+                        <option value="CASH">CASH</option>
+                      ) : (
+                        methodRows.map((m, idx) => (
+                          <option
+                            key={m?.value || m?.label || idx}
+                            value={m?.value || "CASH"}
+                          >
+                            {m?.label || m?.value || "CASH"}
+                          </option>
+                        ))
+                      )}
                     </Select>
 
                     <Input
                       placeholder="Note (optional)"
                       value={note}
-                      onChange={(e) => setNote(e.target.value)}
+                      onChange={(e) => setNote?.(e.target.value)}
                       disabled={isLocked}
                     />
 
@@ -228,7 +291,7 @@ export default function CashierPaymentsSection({
                       <button
                         type="button"
                         className="rounded-2xl border border-[var(--border)] px-4 py-2.5 text-sm font-bold text-[var(--app-fg)]"
-                        onClick={() => setSelectedSale(null)}
+                        onClick={() => setSelectedSale?.(null)}
                       >
                         Cancel
                       </button>
@@ -244,6 +307,10 @@ export default function CashierPaymentsSection({
           <div className="text-sm font-semibold text-[var(--app-fg)]">
             Payments list
           </div>
+          <div className="mt-1 text-xs app-muted">
+            This list shows recorded sale payments. Credit payment history is in
+            the Credits tab.
+          </div>
 
           {!canReadPayments ? (
             <div className="mt-3">
@@ -258,13 +325,13 @@ export default function CashierPaymentsSection({
                   className="flex-1"
                   placeholder="Search"
                   value={payQ}
-                  onChange={(e) => setPayQ(e.target.value)}
+                  onChange={(e) => setPayQ?.(e.target.value)}
                 />
                 <RefreshButton
                   loading={paymentsLoading}
                   onClick={() => {
-                    loadSummary();
-                    loadPayments();
+                    loadSummary?.();
+                    loadPayments?.();
                   }}
                 />
               </div>
@@ -277,7 +344,7 @@ export default function CashierPaymentsSection({
                 </div>
               ) : (
                 <div className="grid gap-2">
-                  {(Array.isArray(payments) ? payments : [])
+                  {paymentRows
                     .filter((p) => {
                       const q = String(payQ || "")
                         .trim()
@@ -298,10 +365,10 @@ export default function CashierPaymentsSection({
                     .map((p, idx) => {
                       const saleId =
                         Number(p?.saleId ?? p?.sale_id ?? 0) || null;
-                      const details = saleId ? saleDetailsById[saleId] : null;
+                      const details = saleId ? detailsMap[saleId] : null;
                       const items = details?.items || [];
                       const isLoadingItems = saleId
-                        ? !!saleDetailsLoadingById[saleId]
+                        ? !!detailsLoadingMap[saleId]
                         : false;
 
                       return (
@@ -326,14 +393,16 @@ export default function CashierPaymentsSection({
 
                               <div className="mt-1 text-xs app-muted">
                                 Time:{" "}
-                                <b>{safeDate(p?.createdAt || p?.created_at)}</b>
+                                <b>
+                                  {formatDate(p?.createdAt || p?.created_at)}
+                                </b>
                               </div>
 
                               <div className="mt-2 text-xs app-muted break-words">
                                 <span className="font-semibold">Items:</span>{" "}
                                 {isLoadingItems
                                   ? "Loading…"
-                                  : itemsSummary(items)}
+                                  : renderItemsSummary(items)}
                               </div>
 
                               {saleId && !details && !isLoadingItems ? (
@@ -341,7 +410,9 @@ export default function CashierPaymentsSection({
                                   <button
                                     type="button"
                                     className="rounded-2xl border border-[var(--border)] px-3 py-2 text-xs font-extrabold text-[var(--app-fg)]"
-                                    onClick={() => ensureSaleDetails(saleId)}
+                                    onClick={() =>
+                                      handleEnsureSaleDetails(saleId)
+                                    }
                                   >
                                     Load items
                                   </button>
@@ -352,7 +423,7 @@ export default function CashierPaymentsSection({
                             <div className="shrink-0 text-right">
                               <div className="text-xs app-muted">Paid</div>
                               <div className="text-lg font-extrabold text-[var(--app-fg)]">
-                                {money(p?.amount ?? 0)}
+                                {formatMoney(p?.amount ?? 0)}
                               </div>
                               <div className="text-[11px] app-muted">RWF</div>
                             </div>
@@ -361,7 +432,7 @@ export default function CashierPaymentsSection({
                       );
                     })}
 
-                  {(Array.isArray(payments) ? payments : []).length === 0 ? (
+                  {paymentRows.length === 0 ? (
                     <div className="text-sm app-muted">No payments yet.</div>
                   ) : null}
                 </div>

@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getMe } from "../../../lib/auth";
 import { useAdminCashierCoverage } from "./useAdminCashierCoverage";
 import { useAdminDerivedState } from "./useAdminDerivedState";
+import { useAdminSellerCoverage } from "./useAdminSellerCoverage";
 import { useAdminStoreKeeperCoverage } from "./useAdminStoreKeeperCoverage";
 
 export function useAdminPageState({ router }) {
@@ -39,22 +40,21 @@ export function useAdminPageState({ router }) {
 
   const loadedSectionsRef = useRef(new Set());
   const previousCoverageRoleRef = useRef(null);
-  const invReqPollRef = useRef(null);
 
   const toast = useCallback((kind, text) => {
     setMsgKind(kind || "info");
     setMsg(text || "");
   }, []);
 
-  const data = useAdminDataLoaders({ toast, router });
+  const data = useAdminDataLoaders({ toast });
 
   const cashier = useAdminCashierCoverage({
     toast,
-    sales: data.sales,
+    sales: data.awaitingPaymentSales,
     salesQ,
     setSalesQ,
     payments: data.payments,
-    loadSales: data.loadSales,
+    loadSales: data.loadAwaitingPaymentSales,
     loadPayments: data.loadPayments,
     loadPaymentsSummary: data.loadPaymentsSummary,
   });
@@ -67,6 +67,18 @@ export function useAdminPageState({ router }) {
     loadInventory: data.loadInventory,
     loadArrivals: data.loadArrivals,
     loadInvReqPendingCount: data.loadInvReqPendingCount,
+  });
+
+  const seller = useAdminSellerCoverage({
+    toast,
+    me,
+    products: data.products,
+    productsLoading: data.prodLoading,
+    loadProducts: data.loadProducts,
+    sales: data.sales,
+    salesLoading: data.salesLoading,
+    loadSales: data.loadSales,
+    loadCreditsOpen: data.loadCreditsOpen,
   });
 
   const loadCoverageWorkspaceForRole = useCallback(
@@ -92,14 +104,19 @@ export function useAdminPageState({ router }) {
         await Promise.all([
           data.loadPaymentsSummary(),
           data.loadPayments(),
-          data.loadSales(),
+          data.loadAwaitingPaymentSales(),
           cashier.loadSessions(),
         ]);
         return;
       }
 
       if (r === "seller") {
-        await Promise.all([data.loadSales(), data.loadPayments()]);
+        seller.setSellerSection("dashboard");
+        await Promise.all([
+          data.loadSales(),
+          data.loadProducts({ includeInactive: false }),
+          data.loadCreditsOpen(),
+        ]);
         return;
       }
 
@@ -118,11 +135,13 @@ export function useAdminPageState({ router }) {
       data.loadInvReqPendingCount,
       data.loadPaymentsSummary,
       data.loadPayments,
+      data.loadAwaitingPaymentSales,
       data.loadSales,
       data.loadAdminDash,
       data.loadCreditsOpen,
       storeKeeper.loadMyAdjustRequests,
       cashier.loadSessions,
+      seller.setSellerSection,
     ],
   );
 
@@ -133,6 +152,8 @@ export function useAdminPageState({ router }) {
       loadedSectionsRef.current.delete("inventory");
       loadedSectionsRef.current.delete("arrivals");
       loadedSectionsRef.current.delete("inv_requests");
+      loadedSectionsRef.current.delete("payments");
+      loadedSectionsRef.current.delete("sales");
       setSection("dashboard");
     },
   });
@@ -237,34 +258,41 @@ export function useAdminPageState({ router }) {
     if (!isAuthorized) return;
 
     coverage.loadCoverage();
-    data.loadInvReqPendingCount();
 
-    if (invReqPollRef.current) {
-      clearInterval(invReqPollRef.current);
-      invReqPollRef.current = null;
+    const shouldPollInvReqCount = section !== "inv_requests";
+
+    if (shouldPollInvReqCount) {
+      data.loadInvReqPendingCount();
     }
 
-    invReqPollRef.current = setInterval(() => {
-      data.loadInvReqPendingCount();
-    }, 30000);
+    const t = shouldPollInvReqCount
+      ? setInterval(() => {
+          data.loadInvReqPendingCount();
+        }, 30000)
+      : null;
 
     function onVis() {
-      if (typeof document !== "undefined" && !document.hidden) {
+      if (typeof document === "undefined" || document.hidden) return;
+
+      coverage.loadCoverage();
+
+      if (section !== "inv_requests") {
         data.loadInvReqPendingCount();
-        coverage.loadCoverage();
       }
     }
 
     document.addEventListener("visibilitychange", onVis);
 
     return () => {
-      if (invReqPollRef.current) {
-        clearInterval(invReqPollRef.current);
-        invReqPollRef.current = null;
-      }
+      if (t) clearInterval(t);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [isAuthorized, coverage.loadCoverage, data.loadInvReqPendingCount]);
+  }, [
+    isAuthorized,
+    section,
+    coverage.loadCoverage,
+    data.loadInvReqPendingCount,
+  ]);
 
   useEffect(() => {
     const prev = previousCoverageRoleRef.current;
@@ -274,14 +302,20 @@ export function useAdminPageState({ router }) {
       const nextSection = COVERAGE_DEFAULT_SECTION[next] || "dashboard";
       loadedSectionsRef.current.delete(nextSection);
       setSection(nextSection);
+
+      if (next === "seller") {
+        seller.setSellerSection("dashboard");
+      }
     }
 
     if (prev && !next) {
       loadedSectionsRef.current.delete("dashboard");
+      loadedSectionsRef.current.delete("payments");
+      loadedSectionsRef.current.delete("sales");
     }
 
     previousCoverageRoleRef.current = next || null;
-  }, [coverage.coverageRole]);
+  }, [coverage.coverageRole, seller.setSellerSection]);
 
   useEffect(() => {
     if (!isAuthorized) return;
@@ -305,7 +339,15 @@ export function useAdminPageState({ router }) {
       }
 
       if (section === "sales") {
-        await data.loadSales();
+        if (coverage.isSellerCoverage) {
+          await Promise.all([
+            data.loadSales(),
+            data.loadProducts({ includeInactive: false }),
+            data.loadCreditsOpen(),
+          ]);
+        } else {
+          await data.loadSales();
+        }
         return;
       }
 
@@ -314,7 +356,7 @@ export function useAdminPageState({ router }) {
           await Promise.all([
             data.loadPaymentsSummary(),
             data.loadPayments(),
-            data.loadSales(),
+            data.loadAwaitingPaymentSales(),
             cashier.loadSessions(),
           ]);
         } else {
@@ -384,6 +426,7 @@ export function useAdminPageState({ router }) {
     section,
     coverage.isCashierCoverage,
     coverage.isStoreKeeperCoverage,
+    coverage.isSellerCoverage,
     data.loadAdminDash,
     data.loadSales,
     data.loadInventory,
@@ -391,6 +434,7 @@ export function useAdminPageState({ router }) {
     data.showArchivedProducts,
     data.loadPaymentsSummary,
     data.loadPayments,
+    data.loadAwaitingPaymentSales,
     data.loadArrivals,
     data.loadInvReqPendingCount,
     data.loadCreditsOpen,
@@ -469,13 +513,21 @@ export function useAdminPageState({ router }) {
           data.loadInvReqPendingCount(),
         ]);
       } else if (section === "sales") {
-        await data.loadSales();
+        if (coverage.isSellerCoverage) {
+          await Promise.all([
+            data.loadSales(),
+            data.loadProducts({ includeInactive: false }),
+            data.loadCreditsOpen(),
+          ]);
+        } else {
+          await data.loadSales();
+        }
       } else if (section === "payments") {
         if (coverage.isCashierCoverage) {
           await Promise.all([
             data.loadPaymentsSummary(),
             data.loadPayments(),
-            data.loadSales(),
+            data.loadAwaitingPaymentSales(),
             cashier.loadSessions(),
           ]);
         } else {
@@ -517,6 +569,7 @@ export function useAdminPageState({ router }) {
     section,
     coverage.isCashierCoverage,
     coverage.isStoreKeeperCoverage,
+    coverage.isSellerCoverage,
     coverage.loadCoverage,
     data.loadAdminDash,
     data.loadSales,
@@ -525,6 +578,7 @@ export function useAdminPageState({ router }) {
     data.showArchivedProducts,
     data.loadPaymentsSummary,
     data.loadPayments,
+    data.loadAwaitingPaymentSales,
     data.loadArrivals,
     data.loadInvReqPendingCount,
     data.loadUsers,
@@ -599,8 +653,8 @@ export function useAdminPageState({ router }) {
         onCloseSession: cashier.sessionsProps.onCloseSession,
       },
       paymentsProps: {
-        salesLoading: data.salesLoading,
-        loadSales: data.loadSales,
+        salesLoading: data.awaitingPaymentSalesLoading,
+        loadSales: data.loadAwaitingPaymentSales,
         salesQ,
         setSalesQ,
         awaitingSales: cashier.awaitingSales,
@@ -651,8 +705,8 @@ export function useAdminPageState({ router }) {
       cashier.sessionsProps.safeDate,
       cashier.sessionsProps.onOpenSession,
       cashier.sessionsProps.onCloseSession,
-      data.salesLoading,
-      data.loadSales,
+      data.awaitingPaymentSalesLoading,
+      data.loadAwaitingPaymentSales,
       salesQ,
       setSalesQ,
       cashier.awaitingSales,
@@ -683,6 +737,39 @@ export function useAdminPageState({ router }) {
       cashier.paymentAmountStatus,
       cashier.selectedSaleExpectedAmount,
       cashier.paymentsProps.onSubmitPayment,
+    ],
+  );
+
+  const sellerCoverageProps = useMemo(
+    () => ({
+      coverage: coverage.coverage,
+      sellerSection: seller.sellerSection,
+      setSellerSection: seller.setSellerSection,
+
+      dashboardProps: seller.dashboardProps,
+      createProps: seller.createProps,
+      salesProps: seller.salesProps,
+      creditsProps: seller.creditsProps,
+
+      itemsModalProps: seller.itemsModalProps,
+      creditModalProps: seller.creditModalProps,
+      proformaModalProps: seller.proformaModalProps,
+      deliveryNoteModalProps: seller.deliveryNoteModalProps,
+      invoiceModalProps: seller.invoiceModalProps,
+    }),
+    [
+      coverage.coverage,
+      seller.sellerSection,
+      seller.setSellerSection,
+      seller.dashboardProps,
+      seller.createProps,
+      seller.salesProps,
+      seller.creditsProps,
+      seller.itemsModalProps,
+      seller.creditModalProps,
+      seller.proformaModalProps,
+      seller.deliveryNoteModalProps,
+      seller.invoiceModalProps,
     ],
   );
 
@@ -795,6 +882,7 @@ export function useAdminPageState({ router }) {
     coverageStopState: coverage.coverageStopState,
     isCashierCoverage: coverage.isCashierCoverage,
     isStoreKeeperCoverage: coverage.isStoreKeeperCoverage,
+    isSellerCoverage: coverage.isSellerCoverage,
     openCoverageModal: coverage.openCoverageModal,
     stopCoverageMode: coverage.stopCoverageMode,
 
@@ -804,6 +892,7 @@ export function useAdminPageState({ router }) {
     salesProps,
     paymentsProps,
     cashierCoverageProps,
+    sellerCoverageProps,
     storeKeeperInventoryProps,
     storeKeeperArrivalsProps,
     storeKeeperAdjustmentsProps,

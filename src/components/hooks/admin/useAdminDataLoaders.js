@@ -9,8 +9,14 @@ export const ENDPOINTS = {
   ADMIN_DASH: "/admin/dashboard",
 
   SALES_LIST: "/sales",
+  SALES_CREATE: "/sales",
   SALE_GET: (id) => `/sales/${id}`,
+  SALE_MARK: (id) => `/sales/${id}/mark`,
   SALE_CANCEL: (id) => `/sales/${id}/cancel`,
+
+  CUSTOMERS_SEARCH: (q) =>
+    `/customers/search?q=${encodeURIComponent(String(q || "").trim())}`,
+  CUSTOMERS_CREATE: "/customers",
 
   INVENTORY_LIST: "/inventory",
   PRODUCTS_LIST: "/products",
@@ -29,6 +35,11 @@ export const ENDPOINTS = {
 
   PAYMENTS_LIST: "/payments",
   PAYMENTS_SUMMARY: "/payments/summary",
+  PAYMENT_RECORD: "/payments",
+
+  CASH_SESSIONS_MINE: "/cash-sessions/mine",
+  CASH_SESSION_OPEN: "/cash-sessions/open",
+  CASH_SESSION_CLOSE: (id) => `/cash-sessions/${id}/close`,
 
   CREDITS_OPEN: "/credits/open",
   USERS_LIST: "/users",
@@ -70,12 +81,20 @@ export const COVERAGE_DEFAULT_SECTION = {
 
 export const PAGE_SIZE = 10;
 
-export function useAdminDataLoaders({ toast, router }) {
+function readList(data, keys = []) {
+  return normalizeList(data, [...keys, "items", "rows", "results", "data"]);
+}
+
+export function useAdminDataLoaders({ toast }) {
   const [dash, setDash] = useState(null);
   const [dashLoading, setDashLoading] = useState(false);
 
   const [sales, setSales] = useState([]);
   const [salesLoading, setSalesLoading] = useState(false);
+
+  const [awaitingPaymentSales, setAwaitingPaymentSales] = useState([]);
+  const [awaitingPaymentSalesLoading, setAwaitingPaymentSalesLoading] =
+    useState(false);
 
   const [inventory, setInventory] = useState([]);
   const [invLoading, setInvLoading] = useState(false);
@@ -135,8 +154,10 @@ export function useAdminDataLoaders({ toast, router }) {
   const loadSales = useCallback(async () => {
     setSalesLoading(true);
     try {
-      const data = await apiFetch(ENDPOINTS.SALES_LIST, { method: "GET" });
-      setSales(normalizeList(data, ["sales"]));
+      const data = await apiFetch(`${ENDPOINTS.SALES_LIST}?limit=200`, {
+        method: "GET",
+      });
+      setSales(readList(data, ["sales"]));
     } catch (e) {
       setSales([]);
       toast("danger", e?.data?.error || e?.message || "Failed to load sales");
@@ -145,11 +166,52 @@ export function useAdminDataLoaders({ toast, router }) {
     }
   }, [toast]);
 
+  const loadAwaitingPaymentSales = useCallback(async () => {
+    setAwaitingPaymentSalesLoading(true);
+    try {
+      let list = [];
+
+      try {
+        const qs = new URLSearchParams();
+        qs.set("status", "AWAITING_PAYMENT_RECORD");
+        qs.set("limit", "200");
+
+        const filteredData = await apiFetch(
+          `${ENDPOINTS.SALES_LIST}?${qs.toString()}`,
+          { method: "GET" },
+        );
+        list = readList(filteredData, ["sales"]);
+      } catch {
+        list = [];
+      }
+
+      if (!Array.isArray(list) || list.length === 0) {
+        const fallbackData = await apiFetch(
+          `${ENDPOINTS.SALES_LIST}?limit=200`,
+          {
+            method: "GET",
+          },
+        );
+        list = readList(fallbackData, ["sales"]);
+      }
+
+      setAwaitingPaymentSales(Array.isArray(list) ? list : []);
+    } catch (e) {
+      setAwaitingPaymentSales([]);
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Failed to load awaiting payment sales",
+      );
+    } finally {
+      setAwaitingPaymentSalesLoading(false);
+    }
+  }, [toast]);
+
   const loadInventory = useCallback(async () => {
     setInvLoading(true);
     try {
       const data = await apiFetch(ENDPOINTS.INVENTORY_LIST, { method: "GET" });
-      setInventory(normalizeList(data, ["inventory"]));
+      setInventory(readList(data, ["inventory"]));
     } catch (e) {
       setInventory([]);
       toast(
@@ -175,9 +237,7 @@ export function useAdminDataLoaders({ toast, router }) {
           : ENDPOINTS.PRODUCTS_LIST;
 
         const data = await apiFetch(path, { method: "GET" });
-        setProducts(
-          normalizeList(data, ["products", "pricing", "items", "rows"]),
-        );
+        setProducts(readList(data, ["products", "pricing"]));
       } catch (e) {
         setProducts([]);
         const text = e?.data?.error || e?.message || "";
@@ -200,7 +260,7 @@ export function useAdminDataLoaders({ toast, router }) {
       const data = await apiFetch(ENDPOINTS.INVENTORY_ARRIVALS_LIST, {
         method: "GET",
       });
-      setArrivals(normalizeList(data, ["arrivals"]));
+      setArrivals(readList(data, ["arrivals"]));
     } catch (e) {
       setArrivals([]);
       toast(
@@ -216,7 +276,7 @@ export function useAdminDataLoaders({ toast, router }) {
     setPaymentsLoading(true);
     try {
       const data = await apiFetch(ENDPOINTS.PAYMENTS_LIST, { method: "GET" });
-      setPayments(normalizeList(data, ["payments"]));
+      setPayments(readList(data, ["payments"]));
       setCanReadPayments(true);
     } catch (e) {
       setPayments([]);
@@ -277,7 +337,7 @@ export function useAdminDataLoaders({ toast, router }) {
     setUsersLoading(true);
     try {
       const data = await apiFetch(ENDPOINTS.USERS_LIST, { method: "GET" });
-      setUsers(normalizeList(data, ["users"]));
+      setUsers(readList(data, ["users"]));
     } catch (e) {
       setUsers([]);
       toast("danger", e?.data?.error || e?.message || "Failed to load users");
@@ -300,7 +360,7 @@ export function useAdminDataLoaders({ toast, router }) {
         { method: "GET" },
       );
 
-      const rows = normalizeList(data, [
+      const rows = readList(data, [
         "requests",
         "adjustRequests",
         "inventoryAdjustRequests",
@@ -337,12 +397,13 @@ export function useAdminDataLoaders({ toast, router }) {
       setCancelOpen(false);
       setCancelSaleId(null);
       setCancelReason("");
-      await loadSales();
+
+      await Promise.all([loadSales(), loadAwaitingPaymentSales()]);
     } catch (e) {
       setCancelState("idle");
       toast("danger", e?.data?.error || e?.message || "Cancel failed");
     }
-  }, [cancelSaleId, cancelReason, loadSales, toast]);
+  }, [cancelSaleId, cancelReason, loadSales, loadAwaitingPaymentSales, toast]);
 
   const openArchiveProduct = useCallback((prod) => {
     if (!prod?.id) return;
@@ -512,6 +573,10 @@ export function useAdminDataLoaders({ toast, router }) {
     sales,
     salesLoading,
     loadSales,
+
+    awaitingPaymentSales,
+    awaitingPaymentSalesLoading,
+    loadAwaitingPaymentSales,
 
     inventory,
     invLoading,

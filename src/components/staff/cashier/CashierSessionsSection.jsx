@@ -37,11 +37,10 @@ export default function CashierSessionsSection({
           <AsyncButton
             type="submit"
             variant="primary"
-            state={!!currentOpenSession ? "success" : openBtnState}
+            state={openBtnState}
             text="Open session"
             loadingText="Opening…"
             successText="Opened"
-            disabled={!!currentOpenSession}
           />
         </form>
 

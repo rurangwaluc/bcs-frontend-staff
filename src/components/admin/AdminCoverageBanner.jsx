@@ -9,6 +9,7 @@ function prettyRole(role) {
   if (!v) return "—";
   return v
     .split("_")
+    .filter(Boolean)
     .map((x) => x.charAt(0).toUpperCase() + x.slice(1))
     .join(" ");
 }
@@ -18,6 +19,7 @@ function prettyReason(reason) {
   if (!v) return "—";
   return v
     .split("_")
+    .filter(Boolean)
     .map((x) => x.charAt(0) + x.slice(1).toLowerCase())
     .join(" ");
 }
@@ -41,7 +43,7 @@ export default function AdminCoverageBanner({
   return (
     <div
       className={cx(
-        "rounded-3xl border p-4 sm:p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]",
+        "rounded-3xl border p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] sm:p-5",
         active
           ? "border-[var(--warn-border)] bg-[var(--warn-bg)]"
           : "border-[var(--border)] bg-[var(--card)]",
@@ -53,6 +55,7 @@ export default function AdminCoverageBanner({
             <div className="text-sm font-black text-[var(--app-fg)] sm:text-base">
               Coverage mode
             </div>
+
             {active ? (
               <Pill tone="warn">Active</Pill>
             ) : (
@@ -95,8 +98,7 @@ export default function AdminCoverageBanner({
             <button
               type="button"
               onClick={onOpenStart}
-              disabled={loading}
-              className="min-h-11 rounded-2xl border border-[var(--border)] bg-[var(--app-fg)] px-4 py-2.5 text-sm font-semibold text-[var(--app-bg)] transition hover:opacity-90 disabled:opacity-60"
+              className="min-h-11 rounded-2xl border border-[var(--border)] bg-[var(--app-fg)] px-4 py-2.5 text-sm font-semibold text-[var(--app-bg)] transition hover:opacity-90"
             >
               Start coverage
             </button>

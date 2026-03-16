@@ -5,7 +5,22 @@ import { useEffect, useMemo, useState } from "react";
 import InternalNotesPanel from "./InternalNotesPanel";
 import { apiFetch } from "../lib/api";
 
-const STATUSES = ["", "PENDING", "APPROVED", "SETTLED", "REJECTED"];
+const STATUSES = [
+  "",
+  "PENDING",
+  "APPROVED",
+  "PARTIALLY_PAID",
+  "SETTLED",
+  "REJECTED",
+];
+
+const PAYMENT_METHODS = [
+  { value: "CASH", label: "Cash" },
+  { value: "MOMO", label: "MoMo" },
+  { value: "CARD", label: "Card" },
+  { value: "BANK", label: "Bank" },
+  { value: "OTHER", label: "Other" },
+];
 
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
@@ -14,6 +29,11 @@ function cx(...classes) {
 function toStr(v) {
   if (v === undefined || v === null) return "";
   return String(v).trim();
+}
+
+function toInt(v, def = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : def;
 }
 
 function money(n) {
@@ -44,9 +64,43 @@ function statusLabel(status) {
   if (!st) return "ALL";
   if (st === "PENDING") return "Waiting approval";
   if (st === "APPROVED") return "Approved";
-  if (st === "SETTLED") return "Paid";
+  if (st === "PARTIALLY_PAID") return "Partially paid";
+  if (st === "SETTLED") return "Settled";
   if (st === "REJECTED") return "Rejected";
   return st;
+}
+
+function creditModeLabel(mode) {
+  const m = String(mode || "").toUpperCase();
+  if (m === "INSTALLMENT_PLAN") return "Installment plan";
+  if (m === "OPEN_BALANCE") return "Open balance";
+  return m || "—";
+}
+
+function collectibleScopeLabel(detail) {
+  const mode = String(
+    detail?.creditMode ?? detail?.credit_mode ?? "OPEN_BALANCE",
+  ).toUpperCase();
+
+  const status = String(detail?.status || "").toUpperCase();
+
+  if (!["APPROVED", "PARTIALLY_PAID"].includes(status)) {
+    return "Collection locked";
+  }
+
+  if (mode === "INSTALLMENT_PLAN") {
+    return "Collect against active installments";
+  }
+
+  return "Collect against remaining balance";
+}
+
+function installmentStatusLabel(status) {
+  const st = String(status || "").toUpperCase();
+  if (st === "PAID") return "Paid";
+  if (st === "PARTIALLY_PAID") return "Partially paid";
+  if (st === "OVERDUE") return "Overdue";
+  return st || "Pending";
 }
 
 function StatusBadge({ status }) {
@@ -58,11 +112,13 @@ function StatusBadge({ status }) {
       ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
       : st === "APPROVED"
         ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]"
-        : st === "SETTLED"
-          ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
-          : st === "REJECTED"
-            ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
-            : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]";
+        : st === "PARTIALLY_PAID"
+          ? "border-sky-300 bg-sky-100 text-sky-800"
+          : st === "SETTLED"
+            ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
+            : st === "REJECTED"
+              ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
+              : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]";
 
   return (
     <span
@@ -112,6 +168,19 @@ function Select({ className = "", ...props }) {
       {...props}
       className={cx(
         "app-focus w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-sm text-[var(--app-fg)] outline-none",
+        className,
+      )}
+    />
+  );
+}
+
+function TextArea({ className = "", ...props }) {
+  return (
+    <textarea
+      {...props}
+      className={cx(
+        "app-focus w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-sm text-[var(--app-fg)] outline-none",
+        "placeholder:text-[var(--muted-2)]",
         className,
       )}
     />
@@ -210,7 +279,9 @@ function ItemsList({ items }) {
 function PaymentsList({ payments }) {
   const rows = Array.isArray(payments) ? payments : [];
   if (!rows.length) {
-    return <div className="text-sm app-muted">No payments recorded yet.</div>;
+    return (
+      <div className="text-sm app-muted">No credit payments recorded yet.</div>
+    );
   }
 
   return (
@@ -235,11 +306,87 @@ function PaymentsList({ payments }) {
               <div className="mt-1 text-xs app-muted">
                 Date: <b>{formatDate(at)}</b>
               </div>
+              {p?.reference ? (
+                <div className="mt-1 break-words text-xs app-muted">
+                  Ref: {toStr(p.reference)}
+                </div>
+              ) : null}
               {p?.note ? (
                 <div className="mt-1 break-words text-xs app-muted">
                   Note: {toStr(p.note)}
                 </div>
               ) : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function InstallmentsList({ installments }) {
+  const rows = Array.isArray(installments) ? installments : [];
+  if (!rows.length) {
+    return <div className="text-sm app-muted">No installment schedule.</div>;
+  }
+
+  return (
+    <div className="grid gap-2">
+      {rows.map((it, idx) => {
+        const status = String(it?.status || "PENDING").toUpperCase();
+
+        const pillCls =
+          status === "PAID"
+            ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
+            : status === "PARTIALLY_PAID"
+              ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]"
+              : status === "OVERDUE"
+                ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
+                : "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]";
+
+        return (
+          <div
+            key={it?.id || idx}
+            className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-extrabold text-[var(--app-fg)]">
+                  Installment #{it?.installmentNo ?? idx + 1}
+                </div>
+                <div className="mt-1 text-xs app-muted">
+                  Due: <b>{formatDate(it?.dueDate || it?.due_date)}</b>
+                </div>
+                {it?.note ? (
+                  <div className="mt-1 break-words text-xs app-muted">
+                    Note: {toStr(it.note)}
+                  </div>
+                ) : null}
+              </div>
+
+              <span
+                className={cx(
+                  "inline-flex items-center rounded-xl border px-2.5 py-1 text-xs font-extrabold",
+                  pillCls,
+                )}
+              >
+                {installmentStatusLabel(status)}
+              </span>
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <MiniStat
+                label="Amount"
+                value={`${money(it?.amount ?? 0)} RWF`}
+              />
+              <MiniStat
+                label="Paid"
+                value={`${money(it?.paidAmount ?? 0)} RWF`}
+              />
+              <MiniStat
+                label="Remaining"
+                value={`${money(it?.remainingAmount ?? 0)} RWF`}
+              />
             </div>
           </div>
         );
@@ -281,6 +428,18 @@ export default function CreditsPanel({
   const [creditDetail, setCreditDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
+  const [decisionLoading, setDecisionLoading] = useState(false);
+  const [decisionNote, setDecisionNote] = useState("");
+
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentForm, setPaymentForm] = useState({
+    amount: "",
+    method: "CASH",
+    note: "",
+    reference: "",
+    cashSessionId: "",
+  });
+
   function toast(kind, text) {
     setMsgKind(kind);
     setMsg(text || "");
@@ -303,8 +462,13 @@ export default function CreditsPanel({
     toast("info", "");
     try {
       const data = await apiFetch(`/credits?${queryString}`, { method: "GET" });
-      setRows(normalizeList(data));
+      const items = normalizeList(data);
+      setRows(items);
       setNextCursor(data?.nextCursor ?? null);
+
+      if (items.length > 0 && !selectedId) {
+        setSelectedId(items[0].id);
+      }
     } catch (e) {
       setRows([]);
       setNextCursor(null);
@@ -341,9 +505,45 @@ export default function CreditsPanel({
     setCreditDetail(null);
     setDetailLoading(true);
     toast("info", "");
+
     try {
       const data = await apiFetch(`/credits/${id}`, { method: "GET" });
-      setCreditDetail(data?.credit ?? null);
+      const detail = data?.credit ?? null;
+      setCreditDetail(detail);
+
+      const remaining = Number(detail?.remainingAmount ?? 0) || 0;
+      const installments = Array.isArray(detail?.installments)
+        ? detail.installments
+        : [];
+
+      const nextInstallment =
+        installments.find((x) =>
+          ["PENDING", "PARTIALLY_PAID", "OVERDUE"].includes(
+            String(x?.status || "").toUpperCase(),
+          ),
+        ) || null;
+
+      const nextInstallmentRemaining =
+        nextInstallment?.remainingAmount ??
+        Math.max(
+          0,
+          (Number(nextInstallment?.amount ?? 0) || 0) -
+            (Number(nextInstallment?.paidAmount ?? 0) || 0),
+        );
+
+      const suggestedAmount =
+        Number(nextInstallmentRemaining) > 0
+          ? Number(nextInstallmentRemaining)
+          : remaining;
+
+      setPaymentForm({
+        amount: suggestedAmount > 0 ? String(suggestedAmount) : "",
+        method: "CASH",
+        note: "",
+        reference: "",
+        cashSessionId: "",
+      });
+      setDecisionNote("");
     } catch (e) {
       toast(
         "danger",
@@ -354,9 +554,82 @@ export default function CreditsPanel({
     }
   }
 
+  async function decideCredit(decision) {
+    if (!capabilities.canDecide || !creditDetail?.id || decisionLoading) return;
+
+    setDecisionLoading(true);
+    toast("info", "");
+    try {
+      await apiFetch(`/credits/${creditDetail.id}/decision`, {
+        method: "PATCH",
+        body: {
+          decision,
+          note: toStr(decisionNote) || undefined,
+        },
+      });
+
+      toast(
+        "success",
+        decision === "APPROVE"
+          ? "Credit approved successfully"
+          : "Credit rejected successfully",
+      );
+
+      await Promise.all([loadFirstPage(), openCredit(creditDetail.id)]);
+    } catch (e) {
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Failed to process credit decision",
+      );
+    } finally {
+      setDecisionLoading(false);
+    }
+  }
+
+  async function recordCreditPayment() {
+    if (!capabilities.canSettle || !creditDetail?.id || paymentLoading) return;
+
+    const amt = Number(paymentForm.amount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      toast("warn", "Enter a valid amount.");
+      return;
+    }
+
+    setPaymentLoading(true);
+    toast("info", "");
+    try {
+      const body = {
+        amount: Math.round(amt),
+        method: toStr(paymentForm.method || "CASH").toUpperCase(),
+      };
+
+      if (toStr(paymentForm.note)) body.note = toStr(paymentForm.note);
+      if (toStr(paymentForm.reference))
+        body.reference = toStr(paymentForm.reference);
+      if (toStr(paymentForm.cashSessionId))
+        body.cashSessionId = Number(paymentForm.cashSessionId);
+
+      await apiFetch(`/credits/${creditDetail.id}/payment`, {
+        method: "PATCH",
+        body,
+      });
+
+      toast("success", "Credit payment recorded");
+      await Promise.all([loadFirstPage(), openCredit(creditDetail.id)]);
+    } catch (e) {
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Failed to record credit payment",
+      );
+    } finally {
+      setPaymentLoading(false);
+    }
+  }
+
   useEffect(() => {
     loadFirstPage();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (!capabilities.canView) {
     return (
@@ -369,18 +642,35 @@ export default function CreditsPanel({
   const detail = creditDetail || null;
   const payments = Array.isArray(detail?.payments) ? detail.payments : [];
   const items = Array.isArray(detail?.items) ? detail.items : [];
-  const paidSum = payments.reduce(
-    (sum, p) => sum + (Number(p?.amount || 0) || 0),
-    0,
-  );
-  const amount = Number(detail?.amount || 0) || 0;
-  const remaining = Math.max(0, amount - paidSum);
+  const installments = Array.isArray(detail?.installments)
+    ? detail.installments
+    : [];
+
+  const principal = Number(detail?.principalAmount ?? detail?.amount ?? 0) || 0;
+  const paidSum =
+    Number(detail?.paidAmount ?? 0) ||
+    payments.reduce((sum, p) => sum + (Number(p?.amount || 0) || 0), 0);
+  const remaining =
+    Number(detail?.remainingAmount ?? Math.max(0, principal - paidSum)) || 0;
+
+  const detailStatus = String(detail?.status || "").toUpperCase();
+  const creditMode = String(
+    detail?.creditMode ?? detail?.credit_mode ?? "OPEN_BALANCE",
+  ).toUpperCase();
+
+  const modeLabel = creditModeLabel(creditMode);
+  const collectionLabel = collectibleScopeLabel(detail);
+
+  const hasInstallmentPlan = creditMode === "INSTALLMENT_PLAN";
+  const canCollect =
+    capabilities.canSettle &&
+    ["APPROVED", "PARTIALLY_PAID"].includes(detailStatus);
 
   return (
     <div className="grid gap-4">
       <SectionCard
         title={title}
-        hint="Issue date, payment progress, items taken and payment history."
+        hint="Credit request, approval, partial collection, and final settlement."
         right={
           <button
             onClick={loadFirstPage}
@@ -394,7 +684,10 @@ export default function CreditsPanel({
         {msg ? <Banner kind={msgKind}>{msg}</Banner> : null}
       </SectionCard>
 
-      <SectionCard title="Filters" hint="Search by customer name or phone.">
+      <SectionCard
+        title="Filters"
+        hint="Search by customer name, phone, sale id, or credit id."
+      >
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           <Select value={status} onChange={(e) => setStatus(e.target.value)}>
             {STATUSES.map((s) => (
@@ -405,7 +698,7 @@ export default function CreditsPanel({
           </Select>
 
           <Input
-            placeholder="Search name or phone"
+            placeholder="Search name, phone, sale or credit"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -445,65 +738,72 @@ export default function CreditsPanel({
                 No credits found.
               </div>
             ) : (
-              rows.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => openCredit(c.id)}
-                  className={cx(
-                    "w-full rounded-3xl border p-4 text-left transition",
-                    selectedId === c.id
-                      ? "border-[var(--border-strong)] bg-[var(--card-2)] shadow-sm"
-                      : "border-[var(--border)] bg-[var(--card)] hover:bg-[var(--hover)]",
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="truncate text-base font-black text-[var(--app-fg)]">
-                          {c.customerName || "—"}
-                          {c.customerPhone ? ` • ${c.customerPhone}` : ""}
+              rows.map((c) => {
+                const rowMode = creditModeLabel(
+                  c?.creditMode ?? c?.credit_mode ?? "OPEN_BALANCE",
+                );
+
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => openCredit(c.id)}
+                    className={cx(
+                      "w-full rounded-3xl border p-4 text-left transition",
+                      selectedId === c.id
+                        ? "border-[var(--border-strong)] bg-[var(--card-2)] shadow-sm"
+                        : "border-[var(--border)] bg-[var(--card)] hover:bg-[var(--hover)]",
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="truncate text-base font-black text-[var(--app-fg)]">
+                            {c.customerName || "—"}
+                            {c.customerPhone ? ` • ${c.customerPhone}` : ""}
+                          </div>
+                          <StatusBadge status={c.status} />
                         </div>
-                        <StatusBadge status={c.status} />
+
+                        <div className="mt-2 text-xs app-muted">
+                          Sale: <b>#{c.saleId ?? "—"}</b> • Mode:{" "}
+                          <b>{rowMode}</b>
+                        </div>
+
+                        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2">
+                            <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
+                              Principal
+                            </div>
+                            <div className="mt-1 text-sm font-semibold text-[var(--app-fg)]">
+                              {money(c.principalAmount ?? c.amount)} RWF
+                            </div>
+                          </div>
+
+                          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2">
+                            <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
+                              Remaining
+                            </div>
+                            <div className="mt-1 text-sm font-semibold text-[var(--app-fg)]">
+                              {money(c.remainingAmount)} RWF
+                            </div>
+                          </div>
+                        </div>
                       </div>
 
-                      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2">
-                          <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
-                            Issue date
-                          </div>
-                          <div className="mt-1 text-sm font-semibold text-[var(--app-fg)]">
-                            {formatDate(c.createdAt)}
-                          </div>
+                      <div className="shrink-0 rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-right">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
+                          Paid
                         </div>
-
-                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2">
-                          <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
-                            Paid date
-                          </div>
-                          <div className="mt-1 text-sm font-semibold text-[var(--app-fg)]">
-                            {c.settledAt ? formatDate(c.settledAt) : "—"}
-                          </div>
+                        <div className="mt-1 text-base font-black text-[var(--app-fg)]">
+                          {money(c.paidAmount)}
                         </div>
-                      </div>
-
-                      <div className="mt-2 text-xs app-muted">
-                        Sale: <b>#{c.saleId ?? "—"}</b>
+                        <div className="text-[11px] app-muted">RWF</div>
                       </div>
                     </div>
-
-                    <div className="shrink-0 rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-right">
-                      <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
-                        Amount
-                      </div>
-                      <div className="mt-1 text-base font-black text-[var(--app-fg)]">
-                        {money(c.amount)}
-                      </div>
-                      <div className="text-[11px] app-muted">RWF</div>
-                    </div>
-                  </div>
-                </button>
-              ))
+                  </button>
+                );
+              })
             )}
           </div>
 
@@ -528,7 +828,7 @@ export default function CreditsPanel({
 
         <SectionCard
           title="Credit detail"
-          hint="Items, payments and internal notes."
+          hint="Items, schedule, collection history, and internal notes."
         >
           {detailLoading ? (
             <div className="grid gap-3">
@@ -560,27 +860,182 @@ export default function CreditsPanel({
 
                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   <MiniStat
-                    label="Credit amount"
-                    value={`${money(detail.amount)} RWF`}
+                    label="Principal"
+                    value={`${money(principal)} RWF`}
+                  />
+                  <MiniStat label="Paid" value={`${money(paidSum)} RWF`} />
+                  <MiniStat
+                    label="Remaining"
+                    value={`${money(remaining)} RWF`}
                   />
                   <MiniStat
                     label="Issue date"
                     value={formatDate(detail.createdAt)}
                   />
                   <MiniStat
-                    label="Paid date"
-                    value={
-                      detail.settledAt ? formatDate(detail.settledAt) : "—"
-                    }
+                    label="Due date"
+                    value={detail.dueDate ? formatDate(detail.dueDate) : "—"}
                   />
-                  <MiniStat label="Paid sum" value={`${money(paidSum)} RWF`} />
-                  <MiniStat
-                    label="Remaining"
-                    value={`${money(remaining)} RWF`}
-                  />
-                  <MiniStat label="Payments" value={String(payments.length)} />
+                  <MiniStat label="Mode" value={modeLabel} />
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
+                      Collection scope
+                    </div>
+                    <div className="mt-1 text-sm font-bold text-[var(--app-fg)]">
+                      {collectionLabel}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
+                      Plan structure
+                    </div>
+                    <div className="mt-1 text-sm font-bold text-[var(--app-fg)]">
+                      {hasInstallmentPlan
+                        ? installments.length
+                          ? `${installments.length} installment${installments.length === 1 ? "" : "s"}`
+                          : "Installment plan"
+                        : "Single running balance"}
+                    </div>
+                  </div>
                 </div>
               </div>
+
+              {capabilities.canDecide && detailStatus === "PENDING" ? (
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
+                  <div className="text-sm font-extrabold text-[var(--app-fg)]">
+                    Decision
+                  </div>
+
+                  <div className="mt-1 text-sm app-muted">
+                    Approve to activate collection. Reject to send the request
+                    back.
+                  </div>
+
+                  <div className="mt-3">
+                    <TextArea
+                      rows={3}
+                      placeholder="Decision note (optional)"
+                      value={decisionNote}
+                      onChange={(e) => setDecisionNote(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={decisionLoading}
+                      onClick={() => decideCredit("APPROVE")}
+                      className="app-focus rounded-2xl bg-[var(--app-fg)] px-4 py-2.5 text-sm font-semibold text-[var(--app-bg)] transition hover:opacity-90 disabled:opacity-60"
+                    >
+                      {decisionLoading ? "Saving…" : "Approve"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={decisionLoading}
+                      onClick={() => decideCredit("REJECT")}
+                      className="app-focus rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-2.5 text-sm font-semibold text-[var(--danger-fg)] transition hover:opacity-90 disabled:opacity-60"
+                    >
+                      {decisionLoading ? "Saving…" : "Reject"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {canCollect ? (
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
+                  <div className="text-sm font-extrabold text-[var(--app-fg)]">
+                    Record payment
+                  </div>
+                  <div className="mt-1 text-sm app-muted">
+                    {hasInstallmentPlan
+                      ? "Record a collection for this approved installment plan. Backend will allocate it against the proper installment flow."
+                      : "Record a partial or full collection against this approved open balance."}
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <Input
+                      type="number"
+                      min="1"
+                      max={String(remaining || 0)}
+                      placeholder="Amount"
+                      value={paymentForm.amount}
+                      onChange={(e) =>
+                        setPaymentForm((p) => ({
+                          ...p,
+                          amount: e.target.value,
+                        }))
+                      }
+                    />
+
+                    <Select
+                      value={paymentForm.method}
+                      onChange={(e) =>
+                        setPaymentForm((p) => ({
+                          ...p,
+                          method: e.target.value,
+                        }))
+                      }
+                    >
+                      {PAYMENT_METHODS.map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </Select>
+
+                    <Input
+                      placeholder="Reference (optional)"
+                      value={paymentForm.reference}
+                      onChange={(e) =>
+                        setPaymentForm((p) => ({
+                          ...p,
+                          reference: e.target.value,
+                        }))
+                      }
+                    />
+
+                    <Input
+                      placeholder="Cash session id (optional)"
+                      value={paymentForm.cashSessionId}
+                      onChange={(e) =>
+                        setPaymentForm((p) => ({
+                          ...p,
+                          cashSessionId: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+
+                  <div className="mt-3">
+                    <TextArea
+                      rows={3}
+                      placeholder="Payment note (optional)"
+                      value={paymentForm.note}
+                      onChange={(e) =>
+                        setPaymentForm((p) => ({
+                          ...p,
+                          note: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={paymentLoading}
+                      onClick={recordCreditPayment}
+                      className="app-focus rounded-2xl bg-[var(--app-fg)] px-4 py-2.5 text-sm font-semibold text-[var(--app-bg)] transition hover:opacity-90 disabled:opacity-60"
+                    >
+                      {paymentLoading ? "Saving…" : "Record payment"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
                 <div className="text-sm font-extrabold text-[var(--app-fg)]">
@@ -591,9 +1046,36 @@ export default function CreditsPanel({
                 </div>
               </div>
 
+              {hasInstallmentPlan ? (
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-extrabold text-[var(--app-fg)]">
+                        Installment schedule
+                      </div>
+                      <div className="mt-1 text-sm app-muted">
+                        Planned repayment milestones for this credit.
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-3 py-2 text-sm font-bold text-[var(--app-fg)]">
+                      {installments.length} row
+                      {installments.length === 1 ? "" : "s"}
+                    </div>
+                  </div>
+
+                  <div className="mt-3">
+                    <InstallmentsList installments={installments} />
+                  </div>
+                </div>
+              ) : null}
+
               <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
                 <div className="text-sm font-extrabold text-[var(--app-fg)]">
-                  Payments
+                  Payment history
+                </div>
+                <div className="mt-1 text-sm app-muted">
+                  Recorded collections for this credit.
                 </div>
                 <div className="mt-3">
                   <PaymentsList payments={payments} />

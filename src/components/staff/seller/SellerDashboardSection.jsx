@@ -41,7 +41,7 @@ export default function SellerDashboardSection({
 
       <SectionCard
         title="Today focus"
-        hint="Prioritize released sales so payment gets completed faster."
+        hint="Prioritize released sales so payment or credit workflow moves fast."
         right={
           <AsyncButton
             variant="secondary"
@@ -77,7 +77,7 @@ export default function SellerDashboardSection({
               Finalize sales
             </div>
             <div className="mt-2 text-sm app-muted">
-              Mark released sales as paid or credit.
+              Mark released sales as paid or submit a credit request.
             </div>
           </button>
         </div>
