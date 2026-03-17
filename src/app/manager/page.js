@@ -35,12 +35,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import AuditLogsPanel from "../../components/AuditLogsPanel";
 import CashReportsPanel from "../../components/CashReportsPanel";
-import CreditsPanel from "../../components/CreditsPanel";
 import InventoryAdjustRequestsPanel from "../../components/InventoryAdjustRequestsPanel";
 import ManagerArchiveRestoreProductModal from "../../components/staff/manager/ManagerArchiveRestoreProductModal";
 import ManagerArrivalsSection from "../../components/staff/manager/ManagerArrivalsSection";
 import ManagerCancelSaleModal from "../../components/staff/manager/ManagerCancelSaleModal";
 import ManagerControlStrip from "../../components/staff/manager/ManagerControlStrip";
+import ManagerCreditsSection from "../../components/staff/manager/ManagerCreditsSection";
 import ManagerDashboardSection from "../../components/staff/manager/ManagerDashboardSection";
 import ManagerInventorySection from "../../components/staff/manager/ManagerInventorySection";
 import ManagerPaymentsSection from "../../components/staff/manager/ManagerPaymentsSection";
@@ -1218,21 +1218,7 @@ export default function ManagerPage() {
             ) : null}
 
             {section === "credits" ? (
-              <SectionCard
-                title="Credits"
-                hint="Approve or decline credit requests."
-              >
-                <CreditsPanel
-                  key={`credits-${refreshNonce}`}
-                  title="Credits (Manager)"
-                  capabilities={{
-                    canView: true,
-                    canCreate: false,
-                    canDecide: true,
-                    canSettle: false,
-                  }}
-                />
-              </SectionCard>
+              <ManagerCreditsSection key={`credits-${refreshNonce}`} />
             ) : null}
 
             {section === "staff" ? (

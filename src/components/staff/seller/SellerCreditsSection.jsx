@@ -10,30 +10,98 @@ function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
-function StatusPill({ status }) {
+function statusLabel(row) {
+  const status = String(row?.status || "").toUpperCase();
+  const mode = String(
+    row?.creditMode ?? row?.credit_mode ?? "OPEN_BALANCE",
+  ).toUpperCase();
+
+  if (status === "PENDING" || status === "PENDING_APPROVAL") {
+    return "Pending approval";
+  }
+  if (status === "APPROVED") {
+    return mode === "INSTALLMENT_PLAN"
+      ? "Approved as installment plan"
+      : "Approved as open balance";
+  }
+  if (status === "PARTIALLY_PAID") {
+    return "Partially paid";
+  }
+  if (status === "SETTLED") {
+    return "Settled";
+  }
+  if (status === "REJECTED") {
+    return "Rejected";
+  }
+  return status || "—";
+}
+
+function pillTone(status) {
   const st = String(status || "").toUpperCase();
 
-  const cls =
-    st === "SETTLED"
-      ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
-      : st === "PARTIALLY_PAID"
-        ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]"
-        : st === "APPROVED"
-          ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]"
-          : st === "REJECTED"
-            ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
-            : "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]";
+  if (st === "SETTLED") {
+    return "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]";
+  }
+  if (st === "APPROVED" || st === "PARTIALLY_PAID") {
+    return "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]";
+  }
+  if (st === "REJECTED") {
+    return "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]";
+  }
+  return "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]";
+}
 
+function StatusPill({ row }) {
   return (
     <span
       className={cx(
         "inline-flex items-center rounded-md border px-2 py-[2px] text-[11px] font-semibold uppercase tracking-wide",
-        cls,
+        pillTone(row?.status),
       )}
     >
-      {st || "—"}
+      {statusLabel(row)}
     </span>
   );
+}
+
+function rowSummaryLine(c) {
+  const mode = String(
+    c?.creditMode ?? c?.credit_mode ?? "OPEN_BALANCE",
+  ).toUpperCase();
+
+  const remaining = Number(c?.remainingAmount || 0) || 0;
+
+  const count =
+    Number(
+      c?.installmentCount ??
+        c?.installment_count ??
+        c?.plannedInstallmentsCount ??
+        0,
+    ) || 0;
+
+  const nextDue =
+    c?.nextInstallmentDue ??
+    c?.next_installment_due ??
+    c?.dueDate ??
+    c?.due_date ??
+    null;
+
+  if (mode === "INSTALLMENT_PLAN") {
+    const countLabel =
+      count > 0
+        ? `${count} installment${count === 1 ? "" : "s"} planned`
+        : "Installment plan";
+
+    const nextLabel = nextDue
+      ? `Next installment due ${safeDate(nextDue)}`
+      : "";
+    const remainingLabel = `Remaining balance ${money(remaining)} RWF`;
+
+    return [countLabel, nextLabel, remainingLabel].filter(Boolean).join(" • ");
+  }
+
+  const dueLabel = nextDue ? `Due ${safeDate(nextDue)}` : "Due not set";
+  return `Open balance • ${dueLabel} • Remaining balance ${money(remaining)} RWF`;
 }
 
 export default function SellerCreditsSection() {
@@ -89,13 +157,15 @@ export default function SellerCreditsSection() {
       const customer = String(c?.customerName || "").toLowerCase();
       const phone = String(c?.customerPhone || "").toLowerCase();
       const status = String(c?.status || "").toLowerCase();
+      const mode = String(c?.creditMode ?? c?.credit_mode ?? "").toLowerCase();
 
       return (
         id.includes(query) ||
         saleId.includes(query) ||
         customer.includes(query) ||
         phone.includes(query) ||
-        status.includes(query)
+        status.includes(query) ||
+        mode.includes(query)
       );
     });
   }, [credits, q]);
@@ -109,7 +179,8 @@ export default function SellerCreditsSection() {
               Credits
             </div>
             <div className="mt-1 text-sm app-muted">
-              View requests, approval status, and collection progress.
+              View requests, approval status, payment progress, and installment
+              plans.
             </div>
           </div>
 
@@ -182,7 +253,7 @@ export default function SellerCreditsSection() {
                     </div>
                   </div>
 
-                  <StatusPill status={c.status} />
+                  <StatusPill row={c} />
                 </div>
 
                 <div className="mt-3 grid grid-cols-2 gap-2">
@@ -203,6 +274,10 @@ export default function SellerCreditsSection() {
                       {money(c.remainingAmount || 0)} RWF
                     </div>
                   </div>
+                </div>
+
+                <div className="mt-2 text-[11px] app-muted">
+                  {rowSummaryLine(c)}
                 </div>
 
                 <div className="mt-2 text-[11px] app-muted">

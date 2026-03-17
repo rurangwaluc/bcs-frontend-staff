@@ -2,8 +2,11 @@
 
 import { Input, SectionCard, Skeleton, TextArea } from "./seller-ui";
 import { money, toStr } from "./seller-utils";
+import { useMemo, useState } from "react";
 
 import AsyncButton from "../../../components/AsyncButton";
+
+const PRODUCT_PAGE_SIZE = 10;
 
 function getAvailableQty(productOrItem) {
   return (
@@ -20,6 +23,61 @@ function getAvailableQty(productOrItem) {
 function isInventoryTracked(productOrItem) {
   return Boolean(
     productOrItem?.trackInventory ?? productOrItem?.track_inventory,
+  );
+}
+
+function hasValidSellingPrice(productOrItem) {
+  const n = Number(
+    productOrItem?.sellingPrice ?? productOrItem?.selling_price ?? 0,
+  );
+  return Number.isFinite(n) && n > 0;
+}
+
+function ProductAlertPill({ tone = "neutral", children }) {
+  const toneCls =
+    tone === "danger"
+      ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
+      : tone === "warn"
+        ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
+        : "border-[var(--border)] bg-[var(--card)] text-[var(--app-fg)]";
+
+  return (
+    <span
+      className={[
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.08em]",
+        toneCls,
+      ].join(" ")}
+    >
+      {children}
+    </span>
+  );
+}
+
+function ProductReadinessBanner({
+  blockedByPrice,
+  blockedByStock,
+  availableQty,
+  tracked,
+}) {
+  if (!blockedByPrice && !blockedByStock) return null;
+
+  return (
+    <div
+      className={[
+        "mt-4 rounded-2xl border px-4 py-3 text-sm",
+        "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]",
+      ].join(" ")}
+    >
+      <div className="font-black">Action blocked</div>
+
+      <div className="mt-1">
+        {blockedByPrice && blockedByStock
+          ? `This product cannot be added because it has no selling price and is out of stock${tracked ? ` (available: ${availableQty})` : ""}.`
+          : blockedByPrice
+            ? "This product cannot be added because selling price is not set yet."
+            : `This product cannot be added because it is out of stock${tracked ? ` (available: ${availableQty})` : ""}.`}
+      </div>
+    </div>
   );
 }
 
@@ -60,6 +118,20 @@ export default function SellerCreateSection({
   createSale,
   createSaleBtn,
 }) {
+  const [visibleProductCount, setVisibleProductCount] =
+    useState(PRODUCT_PAGE_SIZE);
+
+  const safeFilteredProducts = Array.isArray(filteredProducts)
+    ? filteredProducts
+    : [];
+
+  const visibleProducts = useMemo(() => {
+    return safeFilteredProducts.slice(0, visibleProductCount);
+  }, [safeFilteredProducts, visibleProductCount]);
+
+  const canLoadMoreProducts =
+    visibleProducts.length < safeFilteredProducts.length;
+
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.95fr_1.05fr]">
       <SectionCard
@@ -81,7 +153,10 @@ export default function SellerCreateSection({
           <Input
             placeholder="Search by product name or SKU"
             value={prodQ}
-            onChange={(e) => setProdQ(e.target.value)}
+            onChange={(e) => {
+              setProdQ(e.target.value);
+              setVisibleProductCount(PRODUCT_PAGE_SIZE);
+            }}
           />
 
           {productsLoading ? (
@@ -91,13 +166,13 @@ export default function SellerCreateSection({
               <Skeleton className="h-24 w-full" />
               <Skeleton className="h-24 w-full" />
             </div>
-          ) : filteredProducts.length === 0 ? (
+          ) : safeFilteredProducts.length === 0 ? (
             <div className="rounded-3xl border border-[var(--border-strong)] bg-[var(--card-2)] p-5 text-sm app-muted shadow-sm">
               No products found.
             </div>
           ) : (
-            <div className="thin-scrollbar grid max-h-[720px] gap-3 overflow-y-auto pr-1">
-              {filteredProducts.slice(0, 40).map((p) => {
+            <div className="grid gap-3">
+              {visibleProducts.map((p) => {
                 const selling =
                   Number(p?.sellingPrice ?? p?.selling_price ?? 0) || 0;
                 const maxp =
@@ -107,17 +182,49 @@ export default function SellerCreateSection({
                 const availableQty = getAvailableQty(p);
                 const tracked = isInventoryTracked(p);
                 const outOfStock = tracked && availableQty <= 0;
+                const missingPrice = !hasValidSellingPrice(p);
+                const addBlocked = outOfStock || missingPrice;
+
+                const cardTone = addBlocked
+                  ? "border-[var(--danger-border)] bg-[var(--danger-bg)]"
+                  : "border-[var(--border-strong)] bg-[var(--card-2)]";
+
+                const statusText = missingPrice
+                  ? "Price missing"
+                  : tracked
+                    ? outOfStock
+                      ? "Out of stock"
+                      : "Ready"
+                    : "Ready";
 
                 return (
                   <div
                     key={String(p?.id)}
-                    className="rounded-3xl border border-[var(--border-strong)] bg-[var(--card-2)] p-4 shadow-sm"
+                    className={[
+                      "rounded-3xl border p-4 shadow-sm",
+                      cardTone,
+                    ].join(" ")}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="truncate text-base font-black text-[var(--app-fg)]">
-                          {p?.name || "—"}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="truncate text-base font-black text-[var(--app-fg)]">
+                            {p?.name || "—"}
+                          </div>
+
+                          {missingPrice ? (
+                            <ProductAlertPill tone="danger">
+                              No price
+                            </ProductAlertPill>
+                          ) : null}
+
+                          {outOfStock ? (
+                            <ProductAlertPill tone="danger">
+                              Out of stock
+                            </ProductAlertPill>
+                          ) : null}
                         </div>
+
                         <div className="mt-1 text-sm app-muted">
                           SKU:{" "}
                           <b className="text-[var(--app-fg)]">
@@ -130,8 +237,17 @@ export default function SellerCreateSection({
                             <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
                               Selling price
                             </div>
-                            <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
-                              {money(selling)} RWF
+                            <div
+                              className={[
+                                "mt-1 text-sm font-black",
+                                missingPrice
+                                  ? "text-[var(--danger-fg)]"
+                                  : "text-[var(--app-fg)]",
+                              ].join(" ")}
+                            >
+                              {missingPrice
+                                ? "Not set"
+                                : `${money(selling)} RWF`}
                             </div>
                           </div>
 
@@ -139,7 +255,14 @@ export default function SellerCreateSection({
                             <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
                               Stock available
                             </div>
-                            <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
+                            <div
+                              className={[
+                                "mt-1 text-sm font-black",
+                                outOfStock
+                                  ? "text-[var(--danger-fg)]"
+                                  : "text-[var(--app-fg)]",
+                              ].join(" ")}
+                            >
                               {tracked ? availableQty : "Not tracked"}
                             </div>
                           </div>
@@ -157,24 +280,39 @@ export default function SellerCreateSection({
                             <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
                               Status
                             </div>
-                            <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
-                              {tracked
-                                ? outOfStock
-                                  ? "Out of stock"
-                                  : "Available"
-                                : "Available"}
+                            <div
+                              className={[
+                                "mt-1 text-sm font-black",
+                                addBlocked
+                                  ? "text-[var(--danger-fg)]"
+                                  : "text-[var(--success-fg)]",
+                              ].join(" ")}
+                            >
+                              {statusText}
                             </div>
                           </div>
                         </div>
+
+                        <ProductReadinessBanner
+                          blockedByPrice={missingPrice}
+                          blockedByStock={outOfStock}
+                          availableQty={availableQty}
+                          tracked={tracked}
+                        />
                       </div>
 
                       <button
                         type="button"
-                        className="app-focus shrink-0 rounded-2xl border border-[var(--border-strong)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] shadow-sm transition hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                        className={[
+                          "app-focus shrink-0 rounded-2xl border px-4 py-2.5 text-sm font-semibold shadow-sm transition",
+                          addBlocked
+                            ? "cursor-not-allowed border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)] opacity-80"
+                            : "border-[var(--border-strong)] bg-[var(--card)] text-[var(--app-fg)] hover:bg-[var(--hover)]",
+                        ].join(" ")}
                         onClick={() => addProductToSaleCart(p)}
-                        disabled={outOfStock}
+                        disabled={addBlocked}
                       >
-                        Add
+                        {addBlocked ? "Blocked" : "Add"}
                       </button>
                     </div>
                   </div>
@@ -183,10 +321,26 @@ export default function SellerCreateSection({
             </div>
           )}
 
-          {filteredProducts.length > 40 ? (
+          {canLoadMoreProducts ? (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                className="app-focus rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-black text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+                onClick={() =>
+                  setVisibleProductCount((prev) => prev + PRODUCT_PAGE_SIZE)
+                }
+              >
+                Load more products
+              </button>
+            </div>
+          ) : null}
+
+          {safeFilteredProducts.length > PRODUCT_PAGE_SIZE ? (
             <div className="text-xs app-muted">
-              Showing the first 40 results. Refine your search for faster
-              selection.
+              Showing{" "}
+              {Math.min(visibleProducts.length, safeFilteredProducts.length)} of{" "}
+              {safeFilteredProducts.length} product
+              {safeFilteredProducts.length === 1 ? "" : "s"}.
             </div>
           ) : null}
         </div>

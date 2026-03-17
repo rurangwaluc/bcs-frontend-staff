@@ -9,28 +9,56 @@ function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
-function StatusPill({ status }) {
+function creditStatusLabel(detail) {
+  const status = String(detail?.status || "").toUpperCase();
+  const mode = String(
+    detail?.creditMode ?? detail?.credit_mode ?? "OPEN_BALANCE",
+  ).toUpperCase();
+
+  if (status === "PENDING" || status === "PENDING_APPROVAL") {
+    return "Pending approval";
+  }
+  if (status === "APPROVED") {
+    return mode === "INSTALLMENT_PLAN"
+      ? "Approved as installment plan"
+      : "Approved as open balance";
+  }
+  if (status === "PARTIALLY_PAID") {
+    return "Partially paid";
+  }
+  if (status === "SETTLED") {
+    return "Settled";
+  }
+  if (status === "REJECTED") {
+    return "Rejected";
+  }
+  return status || "—";
+}
+
+function statusTone(status) {
   const st = String(status || "").toUpperCase();
 
-  const cls =
-    st === "SETTLED"
-      ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
-      : st === "PARTIALLY_PAID"
-        ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]"
-        : st === "APPROVED"
-          ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]"
-          : st === "REJECTED"
-            ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
-            : "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]";
+  if (st === "SETTLED") {
+    return "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]";
+  }
+  if (st === "PARTIALLY_PAID" || st === "APPROVED") {
+    return "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]";
+  }
+  if (st === "REJECTED") {
+    return "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]";
+  }
+  return "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]";
+}
 
+function StatusPill({ detail }) {
   return (
     <span
       className={cx(
         "inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black uppercase tracking-[0.08em]",
-        cls,
+        statusTone(detail?.status),
       )}
     >
-      {st || "—"}
+      {creditStatusLabel(detail)}
     </span>
   );
 }
@@ -44,6 +72,17 @@ function MiniCard({ label, value }) {
       <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
         {value}
       </div>
+    </div>
+  );
+}
+
+function InfoLine({ label, value }) {
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+        {label}
+      </div>
+      <div className="mt-1 text-sm font-bold text-[var(--app-fg)]">{value}</div>
     </div>
   );
 }
@@ -107,41 +146,58 @@ function PaymentsBlock({ payments }) {
 
   return (
     <div className="grid gap-3">
-      {rows.map((p, idx) => (
-        <div
-          key={p?.id || `payment-${idx}`}
-          className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-sm font-black text-[var(--app-fg)]">
-                {money(p?.amount || 0)} RWF
-              </div>
-              <div className="mt-1 text-xs app-muted">
-                Method:{" "}
-                <b className="text-[var(--app-fg)]">
-                  {String(p?.method || "—")}
-                </b>
-              </div>
-              <div className="mt-1 text-xs app-muted">
-                Date:{" "}
-                <b className="text-[var(--app-fg)]">
-                  {safeDate(p?.createdAt || p?.created_at)}
-                </b>
-              </div>
-              {p?.reference ? (
-                <div className="mt-1 text-xs app-muted">
-                  Reference:{" "}
-                  <b className="text-[var(--app-fg)]">{p.reference}</b>
+      {rows.map((p, idx) => {
+        const installmentNo =
+          p?.installmentNo ??
+          p?.installment_no ??
+          p?.installmentSequenceNo ??
+          p?.sequenceNo ??
+          null;
+
+        return (
+          <div
+            key={p?.id || `payment-${idx}`}
+            className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-black text-[var(--app-fg)]">
+                  {money(p?.amount || 0)} RWF
                 </div>
-              ) : null}
-              {p?.note ? (
-                <div className="mt-2 text-xs app-muted">{p.note}</div>
-              ) : null}
+                <div className="mt-1 text-xs app-muted">
+                  Method:{" "}
+                  <b className="text-[var(--app-fg)]">
+                    {String(p?.method || "—")}
+                  </b>
+                </div>
+                <div className="mt-1 text-xs app-muted">
+                  Date:{" "}
+                  <b className="text-[var(--app-fg)]">
+                    {safeDate(p?.createdAt || p?.created_at)}
+                  </b>
+                </div>
+                {installmentNo ? (
+                  <div className="mt-1 text-xs app-muted">
+                    Applied to:{" "}
+                    <b className="text-[var(--app-fg)]">
+                      Installment #{installmentNo}
+                    </b>
+                  </div>
+                ) : null}
+                {p?.reference ? (
+                  <div className="mt-1 text-xs app-muted">
+                    Reference:{" "}
+                    <b className="text-[var(--app-fg)]">{p.reference}</b>
+                  </div>
+                ) : null}
+                {p?.note ? (
+                  <div className="mt-2 text-xs app-muted">{p.note}</div>
+                ) : null}
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -167,7 +223,12 @@ function InstallmentsBlock({ installments }) {
             ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
             : st === "PARTIALLY_PAID"
               ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]"
-              : "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]";
+              : st === "OVERDUE"
+                ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
+                : "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]";
+
+        const installmentNo =
+          it?.installmentNo ?? it?.installment_no ?? it?.sequenceNo ?? idx + 1;
 
         return (
           <div
@@ -177,7 +238,7 @@ function InstallmentsBlock({ installments }) {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-sm font-black text-[var(--app-fg)]">
-                  Installment #{it?.installmentNo ?? idx + 1}
+                  Installment #{installmentNo}
                 </div>
                 <div className="mt-1 text-xs app-muted">
                   Due:{" "}
@@ -207,11 +268,19 @@ function InstallmentsBlock({ installments }) {
               />
               <MiniCard
                 label="Paid"
-                value={`${money(it?.paidAmount || 0)} RWF`}
+                value={`${money(it?.paidAmount || it?.paid_amount || 0)} RWF`}
               />
               <MiniCard
                 label="Remaining"
-                value={`${money(it?.remainingAmount || 0)} RWF`}
+                value={`${money(
+                  it?.remainingAmount ??
+                    it?.remaining_amount ??
+                    Math.max(
+                      0,
+                      Number(it?.amount || 0) -
+                        Number(it?.paidAmount ?? it?.paid_amount ?? 0),
+                    ),
+                )} RWF`}
               />
             </div>
           </div>
@@ -219,6 +288,56 @@ function InstallmentsBlock({ installments }) {
       })}
     </div>
   );
+}
+
+function buildSummary(detail) {
+  const principal =
+    Number(
+      detail?.principalAmount ??
+        detail?.principal_amount ??
+        detail?.amount ??
+        0,
+    ) || 0;
+
+  const paid = Number(detail?.paidAmount ?? detail?.paid_amount ?? 0) || 0;
+
+  const remaining =
+    Number(
+      detail?.remainingAmount ??
+        detail?.remaining_amount ??
+        Math.max(0, principal - paid),
+    ) || 0;
+
+  const status = String(detail?.status || "").toUpperCase();
+  const mode = String(
+    detail?.creditMode ?? detail?.credit_mode ?? "OPEN_BALANCE",
+  ).toUpperCase();
+
+  const installments = Array.isArray(detail?.installments)
+    ? detail.installments
+    : [];
+
+  const activeInstallments = installments.filter((it) =>
+    ["PENDING", "PARTIALLY_PAID", "OVERDUE"].includes(
+      String(it?.status || "").toUpperCase(),
+    ),
+  );
+
+  const nextInstallment = activeInstallments.slice().sort((a, b) => {
+    const ad = new Date(a?.dueDate || a?.due_date || 0).getTime();
+    const bd = new Date(b?.dueDate || b?.due_date || 0).getTime();
+    return ad - bd;
+  })[0];
+
+  return {
+    principal,
+    paid,
+    remaining,
+    status,
+    mode,
+    installments,
+    nextInstallment,
+  };
 }
 
 export default function SellerCreditDetails({ creditId }) {
@@ -248,31 +367,7 @@ export default function SellerCreditDetails({ creditId }) {
     loadDetail();
   }, [creditId]);
 
-  const summary = useMemo(() => {
-    const principal =
-      Number(
-        detail?.principalAmount ??
-          detail?.principal_amount ??
-          detail?.amount ??
-          0,
-      ) || 0;
-
-    const paid = Number(detail?.paidAmount ?? detail?.paid_amount ?? 0) || 0;
-
-    const remaining =
-      Number(
-        detail?.remainingAmount ??
-          detail?.remaining_amount ??
-          Math.max(0, principal - paid),
-      ) || 0;
-
-    const status = String(detail?.status || "").toUpperCase();
-    const mode = String(
-      detail?.creditMode ?? detail?.credit_mode ?? "OPEN_BALANCE",
-    ).toUpperCase();
-
-    return { principal, paid, remaining, status, mode };
-  }, [detail]);
+  const summary = useMemo(() => buildSummary(detail), [detail]);
 
   if (!creditId) {
     return (
@@ -306,6 +401,13 @@ export default function SellerCreditDetails({ creditId }) {
     );
   }
 
+  const plannedInstallmentsCount = summary.installments.length;
+  const nextInstallmentDue = summary.nextInstallment
+    ? safeDate(
+        summary.nextInstallment?.dueDate || summary.nextInstallment?.due_date,
+      )
+    : "—";
+
   return (
     <div className="grid gap-4">
       {error ? (
@@ -333,7 +435,7 @@ export default function SellerCreditDetails({ creditId }) {
             </div>
           </div>
 
-          <StatusPill status={detail?.status} />
+          <StatusPill detail={detail} />
         </div>
 
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -353,7 +455,7 @@ export default function SellerCreditDetails({ creditId }) {
         </div>
 
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <MiniCard
+          <InfoLine
             label="Mode"
             value={
               summary.mode === "INSTALLMENT_PLAN"
@@ -361,14 +463,35 @@ export default function SellerCreditDetails({ creditId }) {
                 : "Open balance"
             }
           />
-          <MiniCard
+          <InfoLine
             label="Created"
             value={safeDate(detail?.createdAt || detail?.created_at)}
           />
-          <MiniCard
+          <InfoLine
             label="Settled at"
             value={safeDate(detail?.settledAt || detail?.settled_at)}
           />
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+          <div className="text-sm font-black text-[var(--app-fg)]">
+            Quick summary
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <InfoLine
+              label="Plan"
+              value={
+                summary.mode === "INSTALLMENT_PLAN"
+                  ? `${plannedInstallmentsCount} installment${plannedInstallmentsCount === 1 ? "" : "s"} planned`
+                  : "Single running balance"
+              }
+            />
+            <InfoLine label="Next installment due" value={nextInstallmentDue} />
+            <InfoLine
+              label="Remaining balance"
+              value={`${money(summary.remaining)} RWF`}
+            />
+          </div>
         </div>
       </div>
 
@@ -381,9 +504,21 @@ export default function SellerCreditDetails({ creditId }) {
 
       {summary.mode === "INSTALLMENT_PLAN" ? (
         <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-5">
-          <div className="text-base font-black text-[var(--app-fg)]">
-            Installment schedule
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-base font-black text-[var(--app-fg)]">
+                Installment schedule
+              </div>
+              <div className="mt-1 text-sm app-muted">
+                Planned repayment steps for this credit.
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-bold text-[var(--app-fg)]">
+              {plannedInstallmentsCount} planned
+            </div>
           </div>
+
           <div className="mt-3">
             <InstallmentsBlock installments={detail?.installments} />
           </div>
@@ -404,8 +539,8 @@ export default function SellerCreditDetails({ creditId }) {
           Credit workflow
         </div>
         <div className="mt-2 text-sm app-muted">
-          Seller creates the credit request. Manager approves or rejects it.
-          Cashier or admin records any partial or final payment.
+          Seller submits the request. Manager approves or rejects it. Cashier or
+          admin records partial or final payment until settlement.
         </div>
       </div>
     </div>

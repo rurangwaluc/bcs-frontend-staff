@@ -57,7 +57,23 @@ function normalizeCreditData(sale) {
   const dueDate =
     credit?.dueDate ?? credit?.due_date ?? sale?.creditDueDate ?? null;
 
-  const mode = credit?.creditMode ?? credit?.credit_mode ?? "OPEN_BALANCE";
+  const mode = String(
+    credit?.creditMode ?? credit?.credit_mode ?? "OPEN_BALANCE",
+  ).toUpperCase();
+
+  const installmentCount =
+    Number(
+      credit?.installmentCount ??
+        credit?.installment_count ??
+        sale?.creditInstallmentCount ??
+        0,
+    ) || 0;
+
+  const nextInstallmentDue =
+    credit?.nextInstallmentDue ??
+    credit?.next_installment_due ??
+    sale?.creditNextInstallmentDue ??
+    null;
 
   return {
     principal,
@@ -68,7 +84,30 @@ function normalizeCreditData(sale) {
     settledAt,
     dueDate,
     mode,
+    installmentCount,
+    nextInstallmentDue,
   };
+}
+
+function creditStatusLabel(summary) {
+  if (summary.status === "PENDING" || summary.status === "PENDING_APPROVAL") {
+    return "Pending approval";
+  }
+  if (summary.status === "APPROVED") {
+    return summary.mode === "INSTALLMENT_PLAN"
+      ? "Approved as installment plan"
+      : "Approved as open balance";
+  }
+  if (summary.status === "PARTIALLY_PAID") {
+    return "Partially paid";
+  }
+  if (summary.status === "SETTLED") {
+    return "Settled";
+  }
+  if (summary.status === "REJECTED") {
+    return "Rejected";
+  }
+  return "Credit";
 }
 
 export default function SellerCreditSummary({ sale }) {
@@ -85,16 +124,21 @@ export default function SellerCreditSummary({ sale }) {
             ? "border-rose-300 bg-rose-100 text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200"
             : "border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200";
 
-  const label =
-    summary.status === "SETTLED"
-      ? "Credit • Settled"
-      : summary.status === "PARTIALLY_PAID"
-        ? "Credit • Partial"
-        : summary.status === "APPROVED"
-          ? "Credit • Approved"
-          : summary.status === "REJECTED"
-            ? "Credit • Rejected"
-            : "Credit • Pending approval";
+  const nextDueLabel =
+    summary.mode === "INSTALLMENT_PLAN"
+      ? summary.nextInstallmentDue
+        ? `Next installment due ${formatWhen(summary.nextInstallmentDue)}`
+        : "Next installment due —"
+      : summary.dueDate
+        ? `Due ${formatWhen(summary.dueDate)}`
+        : "Due not set";
+
+  const planLabel =
+    summary.mode === "INSTALLMENT_PLAN"
+      ? `${
+          summary.installmentCount > 0 ? summary.installmentCount : "—"
+        } installments planned`
+      : "Open balance";
 
   return (
     <div className="mt-4 rounded-3xl border border-amber-200 bg-[#fffaf0] p-4 shadow-sm dark:border-amber-900 dark:bg-amber-950/20">
@@ -112,7 +156,7 @@ export default function SellerCreditSummary({ sale }) {
         <span
           className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.08em] ${pillCls}`}
         >
-          {label}
+          {creditStatusLabel(summary)}
         </span>
       </div>
 
@@ -139,11 +183,9 @@ export default function SellerCreditSummary({ sale }) {
         </div>
 
         <div className="rounded-2xl border border-amber-100 bg-white p-3 shadow-sm dark:border-[var(--border)] dark:bg-[var(--card)]">
-          <div className="text-[11px] font-semibold app-muted">Mode</div>
+          <div className="text-[11px] font-semibold app-muted">Plan</div>
           <div className="mt-1 text-sm font-extrabold text-[var(--app-fg)]">
-            {summary.mode === "INSTALLMENT_PLAN"
-              ? "Installments"
-              : "Open balance"}
+            {planLabel}
           </div>
         </div>
       </div>
@@ -157,9 +199,11 @@ export default function SellerCreditSummary({ sale }) {
         </div>
 
         <div className="rounded-2xl border border-amber-100 bg-white p-3 shadow-sm dark:border-[var(--border)] dark:bg-[var(--card)]">
-          <div className="text-[11px] font-semibold app-muted">Due date</div>
+          <div className="text-[11px] font-semibold app-muted">
+            Next due step
+          </div>
           <div className="mt-1 text-sm font-extrabold text-[var(--app-fg)]">
-            {summary.dueDate ? formatWhen(summary.dueDate) : "—"}
+            {nextDueLabel}
           </div>
         </div>
 
@@ -174,8 +218,7 @@ export default function SellerCreditSummary({ sale }) {
       </div>
 
       <div className="mt-3 text-sm text-amber-700 dark:text-amber-300/80">
-        BCS credit now tracks principal, running paid amount, remaining balance,
-        and lifecycle status until full settlement.
+        Remaining balance: <b>{money(summary.remaining)} RWF</b>
       </div>
     </div>
   );

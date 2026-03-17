@@ -31,11 +31,6 @@ function toStr(v) {
   return String(v).trim();
 }
 
-function toInt(v, def = 0) {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.round(n) : def;
-}
-
 function money(n) {
   const x = Number(n || 0);
   return Number.isFinite(x) ? Math.round(x).toLocaleString() : "0";
@@ -52,6 +47,17 @@ function formatDate(value) {
   }
 }
 
+function formatDateOnly(value) {
+  if (!value) return "—";
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return d.toLocaleDateString();
+  } catch {
+    return String(value);
+  }
+}
+
 function normalizeList(data) {
   if (Array.isArray(data?.rows)) return data.rows;
   if (Array.isArray(data?.items)) return data.items;
@@ -59,15 +65,35 @@ function normalizeList(data) {
   return [];
 }
 
-function statusLabel(status) {
+function normalizeMode(mode) {
+  return String(mode || "").toUpperCase();
+}
+
+function localStatusLabel(status, mode) {
   const st = String(status || "").toUpperCase();
+  const m = normalizeMode(mode);
+
   if (!st) return "ALL";
-  if (st === "PENDING") return "Waiting approval";
-  if (st === "APPROVED") return "Approved";
+  if (st === "PENDING" || st === "PENDING_APPROVAL") return "Pending approval";
+  if (st === "APPROVED") {
+    return m === "INSTALLMENT_PLAN"
+      ? "Approved as installment plan"
+      : "Approved as open balance";
+  }
   if (st === "PARTIALLY_PAID") return "Partially paid";
   if (st === "SETTLED") return "Settled";
-  if (st === "REJECTED") return "Rejected";
+  if (st === "REJECTED") return "Credit request rejected";
   return st;
+}
+
+function resolveStatusLabel(rowOrDetail) {
+  return (
+    toStr(rowOrDetail?.statusLabel) ||
+    localStatusLabel(
+      rowOrDetail?.status,
+      rowOrDetail?.creditMode ?? rowOrDetail?.credit_mode,
+    )
+  );
 }
 
 function creditModeLabel(mode) {
@@ -103,12 +129,73 @@ function installmentStatusLabel(status) {
   return st || "Pending";
 }
 
-function StatusBadge({ status }) {
+function preferredMessage(payload, fallback) {
+  return (
+    payload?.detailMessage ||
+    payload?.message ||
+    payload?.data?.detailMessage ||
+    payload?.data?.message ||
+    fallback
+  );
+}
+
+function resolvePlanSummary(detail) {
+  if (toStr(detail?.planSummary)) return toStr(detail.planSummary);
+
+  const mode = String(
+    detail?.creditMode ?? detail?.credit_mode ?? "OPEN_BALANCE",
+  ).toUpperCase();
+
+  const installments = Array.isArray(detail?.installments)
+    ? detail.installments
+    : [];
+
+  if (mode === "INSTALLMENT_PLAN") {
+    return installments.length
+      ? `${installments.length} installment${installments.length === 1 ? "" : "s"} planned`
+      : "Installment plan";
+  }
+
+  return "Single running balance";
+}
+
+function resolveRemainingBalanceLabel(detail, remaining) {
+  if (toStr(detail?.remainingBalanceLabel)) {
+    return toStr(detail.remainingBalanceLabel);
+  }
+  return `Remaining balance ${money(remaining)} RWF`;
+}
+
+function resolveNextInstallmentDueLabel(detail) {
+  const raw = detail?.nextInstallmentDue;
+  if (!raw) return "—";
+  return formatDateOnly(raw);
+}
+
+function buildRowSummaryLine(row) {
+  const planSummary =
+    toStr(row?.planSummary) ||
+    (normalizeMode(row?.creditMode ?? row?.credit_mode) === "INSTALLMENT_PLAN"
+      ? "Installment plan"
+      : "Open balance");
+
+  const nextDue = row?.nextInstallmentDue
+    ? `Next due ${formatDateOnly(row.nextInstallmentDue)}`
+    : "";
+
+  const remaining =
+    toStr(row?.remainingBalanceLabel) ||
+    `Remaining balance ${money(row?.remainingAmount || 0)} RWF`;
+
+  return [planSummary, nextDue, remaining].filter(Boolean).join(" • ");
+}
+
+function StatusBadge({ status, mode, label }) {
   const st = String(status || "").toUpperCase();
-  const label = statusLabel(st);
+  const resolvedLabel = toStr(label) || localStatusLabel(st, mode);
 
   const cls =
-    st === "PENDING"
+    st === "PENDING" || st === "PENDING_APPROVAL"
       ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
       : st === "APPROVED"
         ? "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]"
@@ -127,7 +214,7 @@ function StatusBadge({ status }) {
         cls,
       )}
     >
-      {label}
+      {resolvedLabel}
     </span>
   );
 }
@@ -290,6 +377,10 @@ function PaymentsList({ payments }) {
         const amt = Number(p?.amount ?? 0) || 0;
         const method = toStr(p?.method) || "—";
         const at = p?.createdAt || p?.created_at || null;
+        const installmentLabel =
+          p?.installmentSequenceNo != null
+            ? `Installment #${p.installmentSequenceNo}`
+            : null;
 
         return (
           <div
@@ -306,6 +397,11 @@ function PaymentsList({ payments }) {
               <div className="mt-1 text-xs app-muted">
                 Date: <b>{formatDate(at)}</b>
               </div>
+              {installmentLabel ? (
+                <div className="mt-1 text-xs app-muted">
+                  Schedule: <b>{installmentLabel}</b>
+                </div>
+              ) : null}
               {p?.reference ? (
                 <div className="mt-1 break-words text-xs app-muted">
                   Ref: {toStr(p.reference)}
@@ -352,7 +448,7 @@ function InstallmentsList({ installments }) {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-sm font-extrabold text-[var(--app-fg)]">
-                  Installment #{it?.installmentNo ?? idx + 1}
+                  Installment #{it?.installmentNo ?? it?.sequenceNo ?? idx + 1}
                 </div>
                 <div className="mt-1 text-xs app-muted">
                   Due: <b>{formatDate(it?.dueDate || it?.due_date)}</b>
@@ -438,6 +534,7 @@ export default function CreditsPanel({
     note: "",
     reference: "",
     cashSessionId: "",
+    installmentId: "",
   });
 
   function toast(kind, text) {
@@ -523,18 +620,23 @@ export default function CreditsPanel({
           ),
         ) || null;
 
-      const nextInstallmentRemaining =
-        nextInstallment?.remainingAmount ??
-        Math.max(
-          0,
-          (Number(nextInstallment?.amount ?? 0) || 0) -
-            (Number(nextInstallment?.paidAmount ?? 0) || 0),
-        );
+      const nextInstallmentRemainingRaw =
+        nextInstallment?.remainingAmount != null
+          ? Number(nextInstallment.remainingAmount)
+          : Math.max(
+              0,
+              (Number(nextInstallment?.amount ?? 0) || 0) -
+                (Number(nextInstallment?.paidAmount ?? 0) || 0),
+            );
+
+      const nextInstallmentRemaining = Number.isFinite(
+        nextInstallmentRemainingRaw,
+      )
+        ? nextInstallmentRemainingRaw
+        : 0;
 
       const suggestedAmount =
-        Number(nextInstallmentRemaining) > 0
-          ? Number(nextInstallmentRemaining)
-          : remaining;
+        nextInstallmentRemaining > 0 ? nextInstallmentRemaining : remaining;
 
       setPaymentForm({
         amount: suggestedAmount > 0 ? String(suggestedAmount) : "",
@@ -542,6 +644,7 @@ export default function CreditsPanel({
         note: "",
         reference: "",
         cashSessionId: "",
+        installmentId: nextInstallment?.id ? String(nextInstallment.id) : "",
       });
       setDecisionNote("");
     } catch (e) {
@@ -560,7 +663,7 @@ export default function CreditsPanel({
     setDecisionLoading(true);
     toast("info", "");
     try {
-      await apiFetch(`/credits/${creditDetail.id}/decision`, {
+      const res = await apiFetch(`/credits/${creditDetail.id}/decision`, {
         method: "PATCH",
         body: {
           decision,
@@ -570,17 +673,17 @@ export default function CreditsPanel({
 
       toast(
         "success",
-        decision === "APPROVE"
-          ? "Credit approved successfully"
-          : "Credit rejected successfully",
+        preferredMessage(
+          res,
+          decision === "APPROVE"
+            ? "Approved successfully"
+            : "Rejected successfully",
+        ),
       );
 
       await Promise.all([loadFirstPage(), openCredit(creditDetail.id)]);
     } catch (e) {
-      toast(
-        "danger",
-        e?.data?.error || e?.message || "Failed to process credit decision",
-      );
+      toast("danger", preferredMessage(e, "Failed to process credit decision"));
     } finally {
       setDecisionLoading(false);
     }
@@ -604,23 +707,26 @@ export default function CreditsPanel({
       };
 
       if (toStr(paymentForm.note)) body.note = toStr(paymentForm.note);
-      if (toStr(paymentForm.reference))
+      if (toStr(paymentForm.reference)) {
         body.reference = toStr(paymentForm.reference);
-      if (toStr(paymentForm.cashSessionId))
+      }
+      if (toStr(paymentForm.cashSessionId)) {
         body.cashSessionId = Number(paymentForm.cashSessionId);
+      }
+      if (toStr(paymentForm.installmentId)) {
+        body.installmentId = Number(paymentForm.installmentId);
+      }
 
-      await apiFetch(`/credits/${creditDetail.id}/payment`, {
+      const res = await apiFetch(`/credits/${creditDetail.id}/payment`, {
         method: "PATCH",
         body,
       });
 
-      toast("success", "Credit payment recorded");
+      toast("success", preferredMessage(res, "Credit payment recorded"));
+
       await Promise.all([loadFirstPage(), openCredit(creditDetail.id)]);
     } catch (e) {
-      toast(
-        "danger",
-        e?.data?.error || e?.message || "Failed to record credit payment",
-      );
+      toast("danger", preferredMessage(e, "Failed to record credit payment"));
     } finally {
       setPaymentLoading(false);
     }
@@ -666,20 +772,19 @@ export default function CreditsPanel({
     capabilities.canSettle &&
     ["APPROVED", "PARTIALLY_PAID"].includes(detailStatus);
 
+  const detailStatusLabel = resolveStatusLabel(detail);
+  const detailPlanSummary = resolvePlanSummary(detail);
+  const detailRemainingBalanceLabel = resolveRemainingBalanceLabel(
+    detail,
+    remaining,
+  );
+  const detailNextInstallmentDueLabel = resolveNextInstallmentDueLabel(detail);
+
   return (
     <div className="grid gap-4">
       <SectionCard
         title={title}
         hint="Credit request, approval, partial collection, and final settlement."
-        right={
-          <button
-            onClick={loadFirstPage}
-            className="app-focus rounded-2xl bg-[var(--app-fg)] px-4 py-2 text-sm font-semibold text-[var(--app-bg)] transition hover:opacity-90 disabled:opacity-60"
-            disabled={loading}
-          >
-            {loading ? "Loading…" : "Refresh"}
-          </button>
-        }
       >
         {msg ? <Banner kind={msgKind}>{msg}</Banner> : null}
       </SectionCard>
@@ -692,7 +797,7 @@ export default function CreditsPanel({
           <Select value={status} onChange={(e) => setStatus(e.target.value)}>
             {STATUSES.map((s) => (
               <option key={s} value={s}>
-                {statusLabel(s)}
+                {localStatusLabel(s)}
               </option>
             ))}
           </Select>
@@ -716,7 +821,7 @@ export default function CreditsPanel({
             className="app-focus rounded-2xl bg-[var(--app-fg)] px-4 py-2.5 text-sm font-semibold text-[var(--app-bg)] transition hover:opacity-90 disabled:opacity-60"
             disabled={loading}
           >
-            Apply
+            {loading ? "Loading…" : "Apply"}
           </button>
         </div>
       </SectionCard>
@@ -739,9 +844,11 @@ export default function CreditsPanel({
               </div>
             ) : (
               rows.map((c) => {
-                const rowMode = creditModeLabel(
-                  c?.creditMode ?? c?.credit_mode ?? "OPEN_BALANCE",
-                );
+                const rowModeValue =
+                  c?.creditMode ?? c?.credit_mode ?? "OPEN_BALANCE";
+                const rowMode = creditModeLabel(rowModeValue);
+                const rowStatusLabel = resolveStatusLabel(c);
+                const rowSummary = buildRowSummaryLine(c);
 
                 return (
                   <button
@@ -762,12 +869,20 @@ export default function CreditsPanel({
                             {c.customerName || "—"}
                             {c.customerPhone ? ` • ${c.customerPhone}` : ""}
                           </div>
-                          <StatusBadge status={c.status} />
+                          <StatusBadge
+                            status={c.status}
+                            mode={rowModeValue}
+                            label={rowStatusLabel}
+                          />
                         </div>
 
                         <div className="mt-2 text-xs app-muted">
                           Sale: <b>#{c.saleId ?? "—"}</b> • Mode:{" "}
                           <b>{rowMode}</b>
+                        </div>
+
+                        <div className="mt-2 text-xs app-muted">
+                          {rowSummary}
                         </div>
 
                         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -855,7 +970,11 @@ export default function CreditsPanel({
                       Sale: <b>#{detail.saleId ?? "—"}</b>
                     </div>
                   </div>
-                  <StatusBadge status={detail.status} />
+                  <StatusBadge
+                    status={detail.status}
+                    mode={creditMode}
+                    label={detailStatusLabel}
+                  />
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -891,16 +1010,24 @@ export default function CreditsPanel({
 
                   <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3">
                     <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
-                      Plan structure
+                      Status
                     </div>
                     <div className="mt-1 text-sm font-bold text-[var(--app-fg)]">
-                      {hasInstallmentPlan
-                        ? installments.length
-                          ? `${installments.length} installment${installments.length === 1 ? "" : "s"}`
-                          : "Installment plan"
-                        : "Single running balance"}
+                      {detailStatusLabel}
                     </div>
                   </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <MiniStat label="Plan summary" value={detailPlanSummary} />
+                  <MiniStat
+                    label="Next due"
+                    value={detailNextInstallmentDueLabel}
+                  />
+                  <MiniStat
+                    label="Remaining balance"
+                    value={detailRemainingBalanceLabel}
+                  />
                 </div>
               </div>
 
@@ -911,8 +1038,7 @@ export default function CreditsPanel({
                   </div>
 
                   <div className="mt-1 text-sm app-muted">
-                    Approve to activate collection. Reject to send the request
-                    back.
+                    Approve to activate collection. Reject to stop the request.
                   </div>
 
                   <div className="mt-3">
@@ -952,7 +1078,7 @@ export default function CreditsPanel({
                   </div>
                   <div className="mt-1 text-sm app-muted">
                     {hasInstallmentPlan
-                      ? "Record a collection for this approved installment plan. Backend will allocate it against the proper installment flow."
+                      ? "Record a collection for this approved installment plan."
                       : "Record a partial or full collection against this approved open balance."}
                   </div>
 
@@ -987,6 +1113,53 @@ export default function CreditsPanel({
                       ))}
                     </Select>
 
+                    {hasInstallmentPlan ? (
+                      <Select
+                        value={paymentForm.installmentId}
+                        onChange={(e) =>
+                          setPaymentForm((p) => ({
+                            ...p,
+                            installmentId: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">Auto-pick next installment</option>
+                        {installments
+                          .filter((x) =>
+                            ["PENDING", "PARTIALLY_PAID", "OVERDUE"].includes(
+                              String(x?.status || "").toUpperCase(),
+                            ),
+                          )
+                          .map((x, idx) => {
+                            const instRemaining =
+                              x?.remainingAmount != null
+                                ? Number(x.remainingAmount)
+                                : Math.max(
+                                    0,
+                                    (Number(x?.amount ?? 0) || 0) -
+                                      (Number(x?.paidAmount ?? 0) || 0),
+                                  );
+
+                            return (
+                              <option key={x.id || idx} value={String(x.id)}>
+                                {`Installment #${x.installmentNo ?? x.sequenceNo ?? idx + 1} • Remaining ${money(instRemaining)} RWF`}
+                              </option>
+                            );
+                          })}
+                      </Select>
+                    ) : (
+                      <Input
+                        placeholder="Cash session id (optional)"
+                        value={paymentForm.cashSessionId}
+                        onChange={(e) =>
+                          setPaymentForm((p) => ({
+                            ...p,
+                            cashSessionId: e.target.value,
+                          }))
+                        }
+                      />
+                    )}
+
                     <Input
                       placeholder="Reference (optional)"
                       value={paymentForm.reference}
@@ -997,18 +1170,22 @@ export default function CreditsPanel({
                         }))
                       }
                     />
-
-                    <Input
-                      placeholder="Cash session id (optional)"
-                      value={paymentForm.cashSessionId}
-                      onChange={(e) =>
-                        setPaymentForm((p) => ({
-                          ...p,
-                          cashSessionId: e.target.value,
-                        }))
-                      }
-                    />
                   </div>
+
+                  {hasInstallmentPlan ? (
+                    <div className="mt-3">
+                      <Input
+                        placeholder="Cash session id (optional)"
+                        value={paymentForm.cashSessionId}
+                        onChange={(e) =>
+                          setPaymentForm((p) => ({
+                            ...p,
+                            cashSessionId: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  ) : null}
 
                   <div className="mt-3">
                     <TextArea

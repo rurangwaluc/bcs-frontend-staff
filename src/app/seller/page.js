@@ -1007,8 +1007,15 @@ export default function SellerPage() {
     setCreditSale({
       ...(sale || null),
       _defaults: {
+        creditMode: "OPEN_BALANCE",
+        amountPaidNow: "",
+        paymentMethodNow: "CASH",
+        cashSessionId: "",
         dueDate: "",
         note: "",
+        installmentCount: "",
+        installmentAmount: "",
+        firstInstallmentDate: "",
       },
     });
     setCreditOpen(true);
@@ -1023,22 +1030,47 @@ export default function SellerPage() {
       setMsg("");
 
       try {
-        const dueDateIso = toIsoEndOfDay(payload?.dueDate);
+        const dueDateIso = payload?.dueDate
+          ? toIsoEndOfDay(payload.dueDate)
+          : undefined;
 
-        await apiFetch("/credits", {
+        const firstInstallmentDateIso = payload?.firstInstallmentDate
+          ? toIsoEndOfDay(payload.firstInstallmentDate)
+          : undefined;
+
+        const body = {
+          saleId: sid,
+          creditMode: String(
+            payload?.creditMode || "OPEN_BALANCE",
+          ).toUpperCase(),
+          amountPaidNow: Number(payload?.amountPaidNow || 0),
+          paymentMethodNow: String(
+            payload?.paymentMethodNow || "CASH",
+          ).toUpperCase(),
+          dueDate: dueDateIso,
+          note: toStr(payload?.note) || undefined,
+        };
+
+        if (payload?.cashSessionId) {
+          body.cashSessionId = Number(payload.cashSessionId);
+        }
+
+        if (body.creditMode === "INSTALLMENT_PLAN") {
+          body.installmentCount = Number(payload?.installmentCount || 0);
+          body.installmentAmount = Number(payload?.installmentAmount || 0);
+          body.firstInstallmentDate = firstInstallmentDateIso;
+        }
+
+        const res = await apiFetch("/credits", {
           method: "POST",
-          body: {
-            saleId: sid,
-            creditMode: payload?.creditMode || "OPEN_BALANCE",
-            dueDate: dueDateIso,
-            note: toStr(payload?.note) || undefined,
-            installments: Array.isArray(payload?.installments)
-              ? payload.installments
-              : undefined,
-          },
+          body,
         });
 
-        pushToast("success", `Credit request created for sale #${sid}`);
+        pushToast(
+          "success",
+          res?.message || `Credit request created for sale #${sid}`,
+        );
+
         setCreditOpen(false);
         setCreditSale(null);
         await loadSales();

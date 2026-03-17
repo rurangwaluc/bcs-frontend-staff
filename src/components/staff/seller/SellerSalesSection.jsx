@@ -106,18 +106,90 @@ function DocumentButton({
   );
 }
 
-function SurfaceNote({ children }) {
+function SurfaceNote({ children, tone = "neutral" }) {
+  const toneCls =
+    tone === "warn"
+      ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
+      : tone === "danger"
+        ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
+        : tone === "success"
+          ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
+          : "border-[var(--border)] bg-[var(--card-2)] text-[var(--muted)]";
+
   return (
     <div
       className={[
         "rounded-2xl border px-4 py-3 text-sm",
-        "border-[var(--border)] bg-[var(--card-2)] text-[var(--muted)]",
+        toneCls,
         "shadow-[0_4px_12px_rgba(15,23,42,0.04)] dark:shadow-none",
       ].join(" ")}
     >
       {children}
     </div>
   );
+}
+
+function resolveActionMessage({ saleStatus, creditStatus }) {
+  if (saleStatus === "DRAFT") {
+    return {
+      tone: "neutral",
+      text: "Waiting for store keeper to release stock before final action.",
+    };
+  }
+
+  if (saleStatus === "AWAITING_PAYMENT_RECORD") {
+    return {
+      tone: "warn",
+      text: "Payment is waiting for cashier recording.",
+    };
+  }
+
+  if (creditStatus === "PENDING_APPROVAL") {
+    return {
+      tone: "warn",
+      text: "Credit request is pending manager approval.",
+    };
+  }
+
+  if (creditStatus === "APPROVED") {
+    return {
+      tone: "success",
+      text: "Credit is approved and ready for collection.",
+    };
+  }
+
+  if (creditStatus === "PARTIALLY_PAID") {
+    return {
+      tone: "warn",
+      text: "Credit is active and being collected in parts.",
+    };
+  }
+
+  if (creditStatus === "SETTLED") {
+    return {
+      tone: "success",
+      text: "Credit is fully settled. Invoice is available.",
+    };
+  }
+
+  if (creditStatus === "REJECTED") {
+    return {
+      tone: "danger",
+      text: "Credit request was rejected.",
+    };
+  }
+
+  if (saleStatus === "COMPLETED") {
+    return {
+      tone: "success",
+      text: "Sale is completed. Invoice is available.",
+    };
+  }
+
+  return {
+    tone: "neutral",
+    text: "No action required for this sale.",
+  };
 }
 
 export default function SellerSalesSection({
@@ -273,6 +345,11 @@ export default function SellerSalesSection({
               const itemsPreview = Array.isArray(s?.itemsPreview)
                 ? s.itemsPreview
                 : [];
+
+              const actionMessage = resolveActionMessage({
+                saleStatus: st,
+                creditStatus,
+              });
 
               return (
                 <div
@@ -434,24 +511,8 @@ export default function SellerSalesSection({
 
                     <div className="mt-4 border-t border-[var(--border)] pt-4">
                       {!canFinalize && !canRequestCredit ? (
-                        <SurfaceNote>
-                          {st === "DRAFT"
-                            ? "Waiting for store keeper to release stock."
-                            : st === "AWAITING_PAYMENT_RECORD"
-                              ? "Waiting cashier to record payment."
-                              : creditStatus === "PENDING_APPROVAL"
-                                ? "Credit request is waiting approval."
-                                : creditStatus === "APPROVED"
-                                  ? "Credit is approved and waiting collection."
-                                  : creditStatus === "PARTIALLY_PAID"
-                                    ? "Credit is being collected in parts."
-                                    : creditStatus === "SETTLED"
-                                      ? "Credit fully settled. Invoice is available."
-                                      : creditStatus === "REJECTED"
-                                        ? "Credit request was rejected."
-                                        : st === "COMPLETED"
-                                          ? "Sale completed. Invoice is available."
-                                          : "No action required for this sale."}
+                        <SurfaceNote tone={actionMessage.tone}>
+                          {actionMessage.text}
                         </SurfaceNote>
                       ) : (
                         <div
