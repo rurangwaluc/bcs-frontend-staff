@@ -35,6 +35,8 @@ function isDocumentFocused() {
 
 function playBeep({ volume = 0.06, durationMs = 180, freq = 880 } = {}) {
   try {
+    if (typeof window === "undefined") return;
+
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return;
 
@@ -50,10 +52,14 @@ function playBeep({ volume = 0.06, durationMs = 180, freq = 880 } = {}) {
     gain.connect(ctx.destination);
 
     osc.start();
-    setTimeout(
+
+    window.setTimeout(
       () => {
         try {
           osc.stop();
+        } catch {}
+
+        try {
           ctx.close?.();
         } catch {}
       },
@@ -157,6 +163,9 @@ function ToastItem({ t, onClose }) {
 }
 
 export default function NotificationsBell({ enabled = true }) {
+  const canUseDOM =
+    typeof window !== "undefined" && typeof document !== "undefined";
+
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -166,6 +175,7 @@ export default function NotificationsBell({ enabled = true }) {
 
   const connRef = useRef(null);
   const userInteractedRef = useRef(false);
+  const toastTimersRef = useRef(new Map());
 
   const topRows = useMemo(() => {
     const list = Array.isArray(rows) ? rows : [];
@@ -185,12 +195,15 @@ export default function NotificationsBell({ enabled = true }) {
   const loadList = useCallback(async () => {
     setLoading(true);
     setErr("");
+
     try {
       const qs = new URLSearchParams();
       qs.set("limit", "30");
+
       const data = await apiFetch(`/notifications?${qs.toString()}`, {
         method: "GET",
       });
+
       const list = data?.notifications ?? data?.rows ?? data?.items ?? [];
       setRows(Array.isArray(list) ? list : []);
     } catch (e) {
@@ -226,6 +239,7 @@ export default function NotificationsBell({ enabled = true }) {
   const markAllRead = useCallback(async () => {
     try {
       await apiFetch("/notifications/read-all", { method: "PATCH" });
+
       setUnread(0);
       setRows((prev) =>
         (Array.isArray(prev) ? prev : []).map((r) => ({
@@ -240,45 +254,71 @@ export default function NotificationsBell({ enabled = true }) {
     }
   }, [loadList, loadUnread]);
 
-  function pushUrgentToast(n) {
-    const pr = String(n?.priority || "normal").toLowerCase();
-    const isUrgent = pr === "urgent" || pr === "high";
-    if (!isUrgent) return;
-
-    const toastId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const toast = { ...n, toastId };
-
-    setToasts((prev) => {
-      const arr = Array.isArray(prev) ? prev : [];
-      return [toast, ...arr].slice(0, 3);
-    });
-
-    setTimeout(() => {
-      setToasts((prev) =>
-        (Array.isArray(prev) ? prev : []).filter((x) => x?.toastId !== toastId),
-      );
-    }, 10000);
-  }
-
-  function closeToast(toastId) {
+  const closeToast = useCallback((toastId) => {
     setToasts((prev) =>
       (Array.isArray(prev) ? prev : []).filter((x) => x?.toastId !== toastId),
     );
-  }
+
+    const timer = toastTimersRef.current.get(toastId);
+    if (timer) {
+      clearTimeout(timer);
+      toastTimersRef.current.delete(toastId);
+    }
+  }, []);
+
+  const pushUrgentToast = useCallback(
+    (n) => {
+      const pr = String(n?.priority || "normal").toLowerCase();
+      const isUrgent = pr === "urgent" || pr === "high";
+      if (!isUrgent) return;
+
+      const toastId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const toast = { ...n, toastId };
+
+      setToasts((prev) => {
+        const arr = Array.isArray(prev) ? prev : [];
+        const next = [toast, ...arr].slice(0, 3);
+
+        if (arr.length >= 3) {
+          const removed = arr.slice(2);
+          removed.forEach((item) => {
+            const timer = toastTimersRef.current.get(item?.toastId);
+            if (timer) {
+              clearTimeout(timer);
+              toastTimersRef.current.delete(item.toastId);
+            }
+          });
+        }
+
+        return next;
+      });
+
+      const timer = window.setTimeout(() => {
+        closeToast(toastId);
+      }, 10000);
+
+      toastTimersRef.current.set(toastId, timer);
+    },
+    [closeToast],
+  );
 
   useEffect(() => {
+    if (!canUseDOM) return;
+
     function markInteracted() {
       userInteractedRef.current = true;
       window.removeEventListener("pointerdown", markInteracted);
       window.removeEventListener("keydown", markInteracted);
     }
-    window.addEventListener("pointerdown", markInteracted);
+
+    window.addEventListener("pointerdown", markInteracted, { passive: true });
     window.addEventListener("keydown", markInteracted);
+
     return () => {
       window.removeEventListener("pointerdown", markInteracted);
       window.removeEventListener("keydown", markInteracted);
     };
-  }, []);
+  }, [canUseDOM]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -286,18 +326,23 @@ export default function NotificationsBell({ enabled = true }) {
     loadUnread();
     loadList();
 
-    const t = setInterval(() => {
+    const t = window.setInterval(() => {
       loadUnread();
     }, 30000);
 
-    return () => clearInterval(t);
+    return () => {
+      window.clearInterval(t);
+    };
   }, [enabled, loadList, loadUnread]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !canUseDOM) return;
+
+    const existing = connRef.current;
+    connRef.current = null;
 
     try {
-      connRef.current?.close?.();
+      existing?.close?.();
     } catch {}
 
     const conn = connectSSE("/notifications/stream", {
@@ -305,6 +350,7 @@ export default function NotificationsBell({ enabled = true }) {
         const n = Number(data?.unread ?? 0);
         if (Number.isFinite(n)) setUnread(n);
       },
+
       onNotification: (n) => {
         if (!n) return;
 
@@ -316,8 +362,10 @@ export default function NotificationsBell({ enabled = true }) {
           return [n, ...arr].slice(0, 60);
         });
 
-        const isRead = n?.isRead ?? n?.is_read;
-        if (!isRead) setUnread((u) => (Number(u) || 0) + 1);
+        const isRead = !!(n?.isRead ?? n?.is_read);
+        if (!isRead) {
+          setUnread((u) => (Number(u) || 0) + 1);
+        }
 
         pushUrgentToast(n);
 
@@ -345,21 +393,27 @@ export default function NotificationsBell({ enabled = true }) {
           } catch {}
         }
       },
-      onError: () => {},
+
+      onError: () => {
+        // silent by design
+      },
     });
 
     connRef.current = conn;
 
     return () => {
-      try {
-        conn.close();
-      } catch {}
+      const current = connRef.current;
       connRef.current = null;
+
+      try {
+        current?.close?.();
+      } catch {}
     };
-  }, [enabled]);
+  }, [enabled, canUseDOM, pushUrgentToast]);
 
   async function enableBrowserAlerts() {
     try {
+      if (!canUseDOM) return;
       if (!("Notification" in window)) return;
       if (Notification.permission === "granted") return;
       await Notification.requestPermission();
@@ -367,28 +421,48 @@ export default function NotificationsBell({ enabled = true }) {
   }
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !canUseDOM) return;
+
     function onKey(e) {
       if (e.key === "Escape") setOpen(false);
     }
+
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+  }, [open, canUseDOM]);
+
+  useEffect(() => {
+    return () => {
+      const current = connRef.current;
+      connRef.current = null;
+
+      try {
+        current?.close?.();
+      } catch {}
+
+      toastTimersRef.current.forEach((timer) => {
+        clearTimeout(timer);
+      });
+      toastTimersRef.current.clear();
+    };
+  }, []);
 
   if (!enabled) return null;
 
   return (
     <>
-      {createPortal(
-        <div className="pointer-events-none fixed right-4 top-4 z-[2147483647] w-[360px] max-w-[90vw]">
-          <div className="grid gap-2">
-            {toasts.map((t) => (
-              <ToastItem key={t.toastId} t={t} onClose={closeToast} />
-            ))}
-          </div>
-        </div>,
-        document.body,
-      )}
+      {canUseDOM
+        ? createPortal(
+            <div className="pointer-events-none fixed right-4 top-4 z-[2147483647] w-[360px] max-w-[90vw]">
+              <div className="grid gap-2">
+                {toasts.map((t) => (
+                  <ToastItem key={t.toastId} t={t} onClose={closeToast} />
+                ))}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       <div className="relative">
         <button
@@ -396,6 +470,7 @@ export default function NotificationsBell({ enabled = true }) {
           onClick={() => {
             const next = !open;
             setOpen(next);
+
             if (next) {
               loadUnread();
               loadList();
@@ -408,6 +483,7 @@ export default function NotificationsBell({ enabled = true }) {
           )}
           title="Notifications"
           aria-label="Notifications"
+          aria-expanded={open}
         >
           <div className="flex items-center gap-2">
             <BellIcon className="h-5 w-5 text-[var(--app-fg)]" />
@@ -423,7 +499,7 @@ export default function NotificationsBell({ enabled = true }) {
           ) : null}
         </button>
 
-        {open
+        {open && canUseDOM
           ? createPortal(
               <div className="fixed inset-0 z-[2147483647]">
                 <div

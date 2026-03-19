@@ -15,7 +15,6 @@ function toUrl(path) {
 
 function isAbortErr(error) {
   if (!error) return false;
-
   if (error.name === "AbortError") return true;
   if (error.code === 20) return true;
 
@@ -25,6 +24,7 @@ function isAbortErr(error) {
 
 /**
  * Fetch-based SSE with cookie support.
+ * Hardened for React StrictMode mount/unmount cycles.
  */
 export function connectSSE(path, { onHello, onNotification, onError } = {}) {
   const url = toUrl(path);
@@ -166,14 +166,12 @@ export function connectSSE(path, { onHello, onNotification, onError } = {}) {
         Promise.resolve(reader.cancel()).catch(() => {});
       }
 
-      if (!ctrl.signal.aborted) {
-        try {
-          ctrl.abort();
-        } catch {
-          // ignore
-        }
-      }
-
+      /**
+       * Critical fix:
+       * aborting Fetch here can surface AbortError in React dev cleanup.
+       * reader.cancel() + stopped=true is enough to terminate the stream cleanly.
+       * So we do NOT call ctrl.abort() during normal close().
+       */
       Promise.resolve(loopPromise).catch(() => {});
     },
   };

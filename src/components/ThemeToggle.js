@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
-function getStoredTheme() {
+const STORAGE_KEY = "bcs-theme";
+const THEME_EVENT = "bcs-theme-change";
+
+function getPreferredTheme() {
   if (typeof window === "undefined") return "light";
-  const saved = window.localStorage.getItem("bcs-theme");
-  if (saved === "light" || saved === "dark") return saved;
 
   const prefersDark =
     typeof window.matchMedia === "function" &&
@@ -14,14 +15,46 @@ function getStoredTheme() {
   return prefersDark ? "dark" : "light";
 }
 
+function getStoredTheme() {
+  if (typeof window === "undefined") return "light";
+
+  const saved = window.localStorage.getItem(STORAGE_KEY);
+  if (saved === "light" || saved === "dark") return saved;
+
+  return getPreferredTheme();
+}
+
 function applyTheme(theme) {
   if (typeof document === "undefined") return;
+
   const root = document.documentElement;
-  if (theme === "dark") {
-    root.classList.add("dark");
-  } else {
-    root.classList.remove("dark");
-  }
+  root.classList.toggle("dark", theme === "dark");
+}
+
+function subscribe(callback) {
+  if (typeof window === "undefined") return () => {};
+
+  const handleChange = () => {
+    const next = getStoredTheme();
+    applyTheme(next);
+    callback();
+  };
+
+  window.addEventListener("storage", handleChange);
+  window.addEventListener(THEME_EVENT, handleChange);
+
+  return () => {
+    window.removeEventListener("storage", handleChange);
+    window.removeEventListener(THEME_EVENT, handleChange);
+  };
+}
+
+function getSnapshot() {
+  return getStoredTheme();
+}
+
+function getServerSnapshot() {
+  return "light";
 }
 
 function SunIcon() {
@@ -71,28 +104,19 @@ export default function ThemeToggle({
   showLabel = true,
   size = "md",
 }) {
-  const [theme, setTheme] = useState("light");
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    const next = getStoredTheme();
-    setTheme(next);
-    applyTheme(next);
-    setReady(true);
-  }, []);
-
-  function toggleTheme() {
-    const next = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    applyTheme(next);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("bcs-theme", next);
-    }
-  }
+  const theme = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   const isDark = theme === "dark";
-
   const sizing = size === "sm" ? "h-10 px-3 text-sm" : "h-11 px-4 text-sm";
+
+  function toggleTheme() {
+    if (typeof window === "undefined") return;
+
+    const next = isDark ? "light" : "dark";
+    window.localStorage.setItem(STORAGE_KEY, next);
+    applyTheme(next);
+    window.dispatchEvent(new Event(THEME_EVENT));
+  }
 
   return (
     <button
@@ -109,8 +133,9 @@ export default function ThemeToggle({
       ].join(" ")}
     >
       <span className="inline-flex h-7 w-7 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--card-2)]">
-        {ready && isDark ? <SunIcon /> : <MoonIcon />}
+        {isDark ? <SunIcon /> : <MoonIcon />}
       </span>
+
       {showLabel ? (
         <span className="font-semibold">{isDark ? "Light" : "Dark"}</span>
       ) : null}

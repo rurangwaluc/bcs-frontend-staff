@@ -197,10 +197,7 @@ export default function AdminPage() {
         ) : null}
 
         {admin.section === "users" ? (
-          <AdminSectionCard
-            title="Staff"
-            hint="Admin manages user accounts and access."
-          >
+          <AdminSectionCard title="" hint="">
             <AdminUsersPanel users={admin.users} loading={admin.usersLoading} />
           </AdminSectionCard>
         ) : null}

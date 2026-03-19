@@ -2,19 +2,21 @@ export default function ThemeScript() {
   const code = `
     (function () {
       try {
-        var stored = localStorage.getItem("bcs-theme");
-        var theme = stored === "dark" || stored === "light"
-          ? stored
-          : "light";
+        var STORAGE_KEY = "bcs-theme";
+        var stored = localStorage.getItem(STORAGE_KEY);
+
+        var prefersDark =
+          typeof window.matchMedia === "function" &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+        var theme =
+          stored === "dark" || stored === "light"
+            ? stored
+            : (prefersDark ? "dark" : "light");
 
         var root = document.documentElement;
 
-        if (theme === "dark") {
-          root.classList.add("dark");
-        } else {
-          root.classList.remove("dark");
-        }
-
+        root.classList.toggle("dark", theme === "dark");
         root.setAttribute("data-theme", theme);
       } catch (e) {}
     })();
