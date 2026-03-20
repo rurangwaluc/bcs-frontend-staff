@@ -63,6 +63,9 @@ export function useAdminPageState({ router }) {
     toast,
     products: data.products,
     inventory: data.inventory,
+    sales: data.sales,
+    salesLoading: data.salesLoading,
+    loadSales: data.loadSales,
     loadProducts: data.loadProducts,
     loadInventory: data.loadInventory,
     loadArrivals: data.loadArrivals,
@@ -94,6 +97,7 @@ export function useAdminPageState({ router }) {
           data.loadInventory(),
           data.loadProducts({ includeInactive: false }),
           data.loadArrivals(),
+          data.loadSales(),
           data.loadInvReqPendingCount(),
           storeKeeper.loadMyAdjustRequests(),
         ]);
@@ -123,6 +127,9 @@ export function useAdminPageState({ router }) {
       if (r === "manager") {
         await Promise.all([
           data.loadAdminDash(),
+          data.loadInventory(),
+          data.loadProducts({ includeInactive: false }),
+          data.loadSales(),
           data.loadInvReqPendingCount(),
           data.loadCreditsOpen(),
         ]);
@@ -132,11 +139,11 @@ export function useAdminPageState({ router }) {
       data.loadInventory,
       data.loadProducts,
       data.loadArrivals,
+      data.loadSales,
       data.loadInvReqPendingCount,
       data.loadPaymentsSummary,
       data.loadPayments,
       data.loadAwaitingPaymentSales,
-      data.loadSales,
       data.loadAdminDash,
       data.loadCreditsOpen,
       storeKeeper.loadMyAdjustRequests,
@@ -152,8 +159,8 @@ export function useAdminPageState({ router }) {
       loadedSectionsRef.current.delete("inventory");
       loadedSectionsRef.current.delete("arrivals");
       loadedSectionsRef.current.delete("inv_requests");
-      loadedSectionsRef.current.delete("payments");
       loadedSectionsRef.current.delete("sales");
+      loadedSectionsRef.current.delete("payments");
       setSection("dashboard");
     },
   });
@@ -312,6 +319,10 @@ export function useAdminPageState({ router }) {
       loadedSectionsRef.current.delete("dashboard");
       loadedSectionsRef.current.delete("payments");
       loadedSectionsRef.current.delete("sales");
+      loadedSectionsRef.current.delete("inventory");
+      loadedSectionsRef.current.delete("arrivals");
+      loadedSectionsRef.current.delete("inv_requests");
+      loadedSectionsRef.current.delete("credits");
     }
 
     previousCoverageRoleRef.current = next || null;
@@ -345,6 +356,12 @@ export function useAdminPageState({ router }) {
             data.loadProducts({ includeInactive: false }),
             data.loadCreditsOpen(),
           ]);
+        } else if (coverage.isStoreKeeperCoverage) {
+          await Promise.all([
+            data.loadSales(),
+            data.loadProducts({ includeInactive: false }),
+            data.loadInventory(),
+          ]);
         } else {
           await data.loadSales();
         }
@@ -366,7 +383,7 @@ export function useAdminPageState({ router }) {
       }
 
       if (section === "inventory") {
-        if (coverage.isStoreKeeperCoverage) {
+        if (coverage.isStoreKeeperCoverage || coverage.isManagerCoverage) {
           await Promise.all([
             data.loadInventory(),
             data.loadProducts({ includeInactive: false }),
@@ -427,6 +444,7 @@ export function useAdminPageState({ router }) {
     coverage.isCashierCoverage,
     coverage.isStoreKeeperCoverage,
     coverage.isSellerCoverage,
+    coverage.isManagerCoverage,
     data.loadAdminDash,
     data.loadSales,
     data.loadInventory,
@@ -519,6 +537,12 @@ export function useAdminPageState({ router }) {
             data.loadProducts({ includeInactive: false }),
             data.loadCreditsOpen(),
           ]);
+        } else if (coverage.isStoreKeeperCoverage) {
+          await Promise.all([
+            data.loadSales(),
+            data.loadProducts({ includeInactive: false }),
+            data.loadInventory(),
+          ]);
         } else {
           await data.loadSales();
         }
@@ -534,7 +558,7 @@ export function useAdminPageState({ router }) {
           await Promise.all([data.loadPaymentsSummary(), data.loadPayments()]);
         }
       } else if (section === "inventory") {
-        if (coverage.isStoreKeeperCoverage) {
+        if (coverage.isStoreKeeperCoverage || coverage.isManagerCoverage) {
           await Promise.all([
             data.loadInventory(),
             data.loadProducts({ includeInactive: false }),
@@ -570,6 +594,7 @@ export function useAdminPageState({ router }) {
     coverage.isCashierCoverage,
     coverage.isStoreKeeperCoverage,
     coverage.isSellerCoverage,
+    coverage.isManagerCoverage,
     coverage.loadCoverage,
     data.loadAdminDash,
     data.loadSales,
@@ -808,6 +833,15 @@ export function useAdminPageState({ router }) {
     [storeKeeper.adjustmentsProps],
   );
 
+  const storeKeeperSalesProps = useMemo(
+    () => ({
+      ...storeKeeper.salesProps,
+      openSaleDetails: () => {},
+      openDeliveryNote: () => {},
+    }),
+    [storeKeeper.salesProps],
+  );
+
   const inventoryProps = useMemo(
     () => ({
       ...derived.inventoryProps,
@@ -883,6 +917,7 @@ export function useAdminPageState({ router }) {
     isCashierCoverage: coverage.isCashierCoverage,
     isStoreKeeperCoverage: coverage.isStoreKeeperCoverage,
     isSellerCoverage: coverage.isSellerCoverage,
+    isManagerCoverage: coverage.isManagerCoverage,
     openCoverageModal: coverage.openCoverageModal,
     stopCoverageMode: coverage.stopCoverageMode,
 
@@ -896,6 +931,7 @@ export function useAdminPageState({ router }) {
     storeKeeperInventoryProps,
     storeKeeperArrivalsProps,
     storeKeeperAdjustmentsProps,
+    storeKeeperSalesProps,
     inventoryProps,
     arrivalsProps,
     inventoryRequestsProps,

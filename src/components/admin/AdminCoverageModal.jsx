@@ -8,7 +8,7 @@ const ROLE_OPTIONS = [
   { value: "store_keeper", label: "Store keeper" },
   { value: "cashier", label: "Cashier" },
   { value: "seller", label: "Seller" },
-  // { value: "manager", label: "Manager" },
+  { value: "manager", label: "Manager" },
 ];
 
 const REASON_OPTIONS = [

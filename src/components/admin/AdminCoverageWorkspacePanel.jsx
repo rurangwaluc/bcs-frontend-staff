@@ -11,7 +11,8 @@ const CONFIG = {
       { key: "inventory", label: "Open inventory" },
       { key: "arrivals", label: "Open arrivals" },
       { key: "inv_requests", label: "Open inventory requests" },
-      { key: "evidence", label: "Open proof & history" },
+      { key: "sales", label: "Open sales" },
+      // { key: "evidence", label: "Open proof & history" },
     ],
   },
   cashier: {
@@ -22,7 +23,7 @@ const CONFIG = {
       { key: "payments", label: "Open payments" },
       { key: "cash", label: "Open cash reports" },
       { key: "sales", label: "Open sales" },
-      { key: "evidence", label: "Open proof & history" },
+      // { key: "evidence", label: "Open proof & history" },
     ],
   },
   seller: {
@@ -33,7 +34,7 @@ const CONFIG = {
       { key: "sales", label: "Open sales" },
       { key: "payments", label: "Open payments" },
       { key: "dashboard", label: "Open dashboard" },
-      { key: "evidence", label: "Open proof & history" },
+      // { key: "evidence", label: "Open proof & history" },
     ],
   },
   manager: {

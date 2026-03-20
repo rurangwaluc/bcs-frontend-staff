@@ -53,6 +53,7 @@ export function useAdminCoverage({
   const isCashierCoverage = coverageRole === "cashier";
   const isStoreKeeperCoverage = coverageRole === "store_keeper";
   const isSellerCoverage = coverageRole === "seller";
+  const isManagerCoverage = coverageRole === "manager";
 
   const actAsHref = useMemo(() => {
     if (actAs === "seller") return "/seller";
@@ -196,6 +197,7 @@ export function useAdminCoverage({
     isCashierCoverage,
     isStoreKeeperCoverage,
     isSellerCoverage,
+    isManagerCoverage,
 
     openCoverageModal,
     loadCoverage,

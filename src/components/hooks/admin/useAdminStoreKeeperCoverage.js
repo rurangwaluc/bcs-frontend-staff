@@ -20,6 +20,9 @@ export function useAdminStoreKeeperCoverage({
   toast,
   products,
   inventory,
+  sales,
+  salesLoading,
+  loadSales,
   loadProducts,
   loadInventory,
   loadArrivals,
@@ -62,6 +65,10 @@ export function useAdminStoreKeeperCoverage({
 
   const [myAdjRequests, setMyAdjRequests] = useState([]);
   const [myAdjLoading, setMyAdjLoading] = useState(false);
+
+  const [salesQ, setSalesQ] = useState("");
+  const [salesTab, setSalesTab] = useState("TO_RELEASE");
+  const [releaseBtnState, setReleaseBtnState] = useState({});
 
   const resetProductForm = useCallback(() => {
     setPName("");
@@ -353,6 +360,36 @@ export function useAdminStoreKeeperCoverage({
     ],
   );
 
+  const releaseStock = useCallback(
+    async (saleId) => {
+      const id = Number(saleId);
+      if (!id) return toast("warn", "Bad sale id.");
+      if (releaseBtnState[id] === "loading") return;
+
+      setReleaseBtnState((p) => ({ ...p, [id]: "loading" }));
+      try {
+        await apiFetch(`/sales/${id}/fulfill`, {
+          method: "POST",
+          body: {},
+        });
+
+        toast("success", `Sale #${id} released.`);
+
+        await Promise.all([loadSales(), loadInventory()]);
+
+        setReleaseBtnState((p) => ({ ...p, [id]: "success" }));
+        setTimeout(
+          () => setReleaseBtnState((p) => ({ ...p, [id]: "idle" })),
+          900,
+        );
+      } catch (e) {
+        setReleaseBtnState((p) => ({ ...p, [id]: "idle" }));
+        toast("danger", e?.data?.error || e?.message || "Release failed");
+      }
+    },
+    [releaseBtnState, loadSales, loadInventory, toast],
+  );
+
   const inventoryProps = useMemo(
     () => ({
       productsLoading: false,
@@ -500,6 +537,101 @@ export function useAdminStoreKeeperCoverage({
     ],
   );
 
+  const draftSalesCount = useMemo(
+    () =>
+      (Array.isArray(sales) ? sales : []).filter(
+        (s) => String(s?.status || "").toUpperCase() === "DRAFT",
+      ).length,
+    [sales],
+  );
+
+  const releasedCount = useMemo(
+    () =>
+      (Array.isArray(sales) ? sales : []).filter(
+        (s) => String(s?.status || "").toUpperCase() === "FULFILLED",
+      ).length,
+    [sales],
+  );
+
+  const lastTenCount = useMemo(
+    () => Math.min(10, Array.isArray(sales) ? sales.length : 0),
+    [sales],
+  );
+
+  const filteredSalesLastTen = useMemo(() => {
+    const list = Array.isArray(sales) ? sales : [];
+    const qq = String(salesQ || "")
+      .trim()
+      .toLowerCase();
+
+    let base = list;
+
+    if (salesTab === "TO_RELEASE") {
+      base = base.filter(
+        (s) => String(s?.status || "").toUpperCase() === "DRAFT",
+      );
+    }
+
+    if (salesTab === "RELEASED") {
+      base = base.filter(
+        (s) => String(s?.status || "").toUpperCase() === "FULFILLED",
+      );
+    }
+
+    if (qq) {
+      base = base.filter((s) => {
+        const id = String(s?.id ?? "").toLowerCase();
+        const status = String(s?.status ?? "").toLowerCase();
+        const seller = String(
+          s?.sellerName ?? s?.sellerId ?? s?.seller_id ?? "",
+        ).toLowerCase();
+        const customerName = String(s?.customerName ?? "").toLowerCase();
+        const customerPhone = String(s?.customerPhone ?? "").toLowerCase();
+
+        return (
+          id.includes(qq) ||
+          status.includes(qq) ||
+          seller.includes(qq) ||
+          customerName.includes(qq) ||
+          customerPhone.includes(qq)
+        );
+      });
+    }
+
+    return base.slice(0, 10);
+  }, [sales, salesQ, salesTab]);
+
+  const salesProps = useMemo(
+    () => ({
+      salesLoading,
+      loadSales,
+      salesQ,
+      setSalesQ,
+      salesTab,
+      setSalesTab,
+      draftSalesCount,
+      releasedCount,
+      lastTenCount,
+      filteredSalesLastTen,
+      releaseBtnState,
+      releaseStock,
+      openSaleDetails: () => {},
+      openDeliveryNote: () => {},
+    }),
+    [
+      salesLoading,
+      loadSales,
+      salesQ,
+      salesTab,
+      draftSalesCount,
+      releasedCount,
+      lastTenCount,
+      filteredSalesLastTen,
+      releaseBtnState,
+      releaseStock,
+    ],
+  );
+
   return {
     loadMyAdjustRequests,
     myAdjRequests,
@@ -507,5 +639,6 @@ export function useAdminStoreKeeperCoverage({
     inventoryProps,
     arrivalsProps,
     adjustmentsProps,
+    salesProps,
   };
 }

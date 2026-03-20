@@ -120,6 +120,14 @@ export default function AdminPage() {
         {admin.section === "sales" ? (
           admin.isSellerCoverage ? (
             <AdminSellerCoverageSection {...admin.sellerCoverageProps} />
+          ) : admin.isStoreKeeperCoverage ? (
+            <AdminStoreKeeperCoverageSection
+              section={admin.section}
+              inventoryProps={admin.storeKeeperInventoryProps}
+              arrivalsProps={admin.storeKeeperArrivalsProps}
+              adjustmentsProps={admin.storeKeeperAdjustmentsProps}
+              salesProps={admin.storeKeeperSalesProps}
+            />
           ) : (
             <AdminSalesSection {...admin.salesProps} />
           )
@@ -140,6 +148,7 @@ export default function AdminPage() {
             inventoryProps={admin.storeKeeperInventoryProps}
             arrivalsProps={admin.storeKeeperArrivalsProps}
             adjustmentsProps={admin.storeKeeperAdjustmentsProps}
+            salesProps={admin.storeKeeperSalesProps}
           />
         ) : null}
 
