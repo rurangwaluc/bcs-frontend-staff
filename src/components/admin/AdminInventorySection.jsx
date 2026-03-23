@@ -12,6 +12,38 @@ import {
 
 import AsyncButton from "../AsyncButton";
 
+function safeNumber(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function rowInventoryValue(row) {
+  const explicit =
+    row?.inventoryValue ??
+    row?.inventory_value ??
+    row?.totalValue ??
+    row?.total_value ??
+    null;
+
+  if (explicit != null && Number.isFinite(Number(explicit))) {
+    return Number(explicit);
+  }
+
+  const qty = safeNumber(
+    row?.qtyOnHand ?? row?.qty_on_hand ?? row?.qty ?? row?.quantity ?? 0,
+  );
+
+  const purchasePrice = safeNumber(
+    row?.purchasePrice ??
+      row?.purchase_price ??
+      row?.costPrice ??
+      row?.cost_price ??
+      0,
+  );
+
+  return qty * purchasePrice;
+}
+
 function StatTile({ label, value, sub, tone = "neutral" }) {
   const toneCls =
     tone === "success"
@@ -108,6 +140,7 @@ function InventoryCard({ row, sellingPrice, onOpenProof }) {
   );
 
   const lowStock = qty <= reorderLevel;
+  const inventoryValue = rowInventoryValue(row);
 
   return (
     <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] sm:p-5">
@@ -143,11 +176,17 @@ function InventoryCard({ row, sellingPrice, onOpenProof }) {
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <InfoBlock
           label="Selling price"
           value={sellingPrice || "—"}
           sub="Current visible sell price"
+        />
+
+        <InfoBlock
+          label="Inventory value"
+          value={`${money(inventoryValue)} RWF`}
+          sub="Qty on hand × purchase price"
         />
 
         <InfoBlock
@@ -313,7 +352,8 @@ function InventoryLoadingState() {
             </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Skeleton className="h-20 w-full rounded-2xl" />
             <Skeleton className="h-20 w-full rounded-2xl" />
             <Skeleton className="h-20 w-full rounded-2xl" />
           </div>
@@ -364,13 +404,42 @@ export default function AdminInventorySection({
     ? filteredInventory
     : [];
 
+  const allInventoryRows = Array.isArray(inventory) ? inventory : [];
   const productRows = Array.isArray(filteredProducts) ? filteredProducts : [];
+
+  const totalInventoryValue = allInventoryRows.reduce(
+    (sum, row) => sum + rowInventoryValue(row),
+    0,
+  );
+
+  const filteredInventoryValue = inventoryRows.reduce(
+    (sum, row) => sum + rowInventoryValue(row),
+    0,
+  );
+
+  const totalQtyOnHand = allInventoryRows.reduce((sum, row) => {
+    return (
+      sum +
+      safeNumber(
+        row?.qtyOnHand ?? row?.qty_on_hand ?? row?.qty ?? row?.quantity ?? 0,
+      )
+    );
+  }, 0);
+
+  const filteredQtyOnHand = inventoryRows.reduce((sum, row) => {
+    return (
+      sum +
+      safeNumber(
+        row?.qtyOnHand ?? row?.qty_on_hand ?? row?.qty ?? row?.quantity ?? 0,
+      )
+    );
+  }, 0);
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.02fr_0.98fr] 2xl:grid-cols-[1.02fr_0.98fr]">
       <SectionCard
         title="Inventory command view"
-        hint="Operational stock visibility with pricing preview, thresholds, and proof access."
+        hint="Operational stock visibility with pricing preview, thresholds, proof access, and clear inventory value."
         right={
           <AsyncButton
             variant="secondary"
@@ -388,60 +457,103 @@ export default function AdminInventorySection({
           />
         }
       >
-        <div className="grid gap-4 sm:gap-5">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid gap-5 sm:gap-6">
+          {/* Stats Section (2 columns → 2 rows) */}
+          <section className="grid grid-cols-2 gap-3 sm:gap-4">
             <StatTile
-              label="Inventory rows"
-              value={String(Array.isArray(inventory) ? inventory.length : 0)}
-              sub="Loaded stock records"
+              label="Branch Inventory Value"
+              value={
+                <span className="text-[19px] font-semibold tracking-tight">
+                  {money(totalInventoryValue)} RWF
+                </span>
+              }
+              sub={`${totalQtyOnHand.toLocaleString()} total units on hand`}
               tone="info"
             />
+
             <StatTile
-              label="Filtered rows"
-              value={String(inventoryRows.length)}
-              sub="Current visible result"
+              label="Filtered Inventory Value"
+              value={
+                <span className="text-[19px] font-semibold tracking-tight">
+                  {money(filteredInventoryValue)} RWF
+                </span>
+              }
+              sub={`${filteredQtyOnHand.toLocaleString()} units in result`}
+              tone="success"
             />
+
             <StatTile
-              label="Pricing gaps"
-              value={String(unpricedCount)}
-              sub="Products missing sell price"
+              label="Inventory Rows"
+              value={
+                <span className="text-[19px] font-semibold tracking-tight">
+                  {allInventoryRows.length.toLocaleString()}
+                </span>
+              }
+              sub="Total stock records loaded"
+            />
+
+            <StatTile
+              label="Pricing Gaps"
+              value={
+                <span className="text-[19px] font-semibold tracking-tight">
+                  {unpricedCount.toLocaleString()}
+                </span>
+              }
+              sub="Products missing selling price"
               tone={unpricedCount > 0 ? "warn" : "success"}
             />
-          </div>
+          </section>
 
-          <SearchPanel
-            label="Search inventory"
-            placeholder="Search by product name, SKU, or product number…"
-            value={invQ}
-            onChange={(e) => setInvQ?.(e.target.value)}
-          />
-
-          {invLoading || prodLoading ? (
-            <InventoryLoadingState />
-          ) : inventoryRows.length === 0 ? (
-            <EmptyState
-              title="No inventory rows"
-              hint="Try another search word or reload the inventory data."
-            />
-          ) : (
-            <div className="grid gap-3">
-              {inventoryRows.slice(0, 60).map((row, idx) => (
-                <InventoryCard
-                  key={row?.id || `${row?.productId || "row"}-${idx}`}
-                  row={row}
-                  sellingPrice={sellingPriceForRow?.(row)}
-                  onOpenProof={onOpenInventoryProof}
-                />
-              ))}
-
-              {inventoryRows.length > 60 ? (
-                <div className="text-center text-xs app-muted">
-                  Showing first 60 inventory rows. Narrow the search to focus
-                  faster.
-                </div>
-              ) : null}
+          {/* Search Section */}
+          <section className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="w-full">
+              <SearchPanel
+                label="Search Inventory"
+                placeholder="Search by product name, SKU, or product number…"
+                value={invQ}
+                onChange={(e) => setInvQ?.(e.target.value)}
+              />
             </div>
-          )}
+
+            <div className="flex justify-end">
+              <Pill tone="info" className="whitespace-nowrap">
+                {inventoryRows.length.toLocaleString()} visible row
+                {inventoryRows.length === 1 ? "" : "s"}
+              </Pill>
+            </div>
+          </section>
+
+          {/* Content Section */}
+          <section className="grid gap-4">
+            {invLoading || prodLoading ? (
+              <InventoryLoadingState />
+            ) : inventoryRows.length === 0 ? (
+              <EmptyState
+                title="No inventory rows found"
+                hint="Try a different search term or refresh inventory data."
+              />
+            ) : (
+              <>
+                <div className="grid gap-3">
+                  {inventoryRows.slice(0, 60).map((row, idx) => (
+                    <InventoryCard
+                      key={row?.id || `${row?.productId || "row"}-${idx}`}
+                      row={row}
+                      sellingPrice={sellingPriceForRow?.(row)}
+                      onOpenProof={onOpenInventoryProof}
+                    />
+                  ))}
+                </div>
+
+                {inventoryRows.length > 60 && (
+                  <div className="text-center text-xs text-gray-500 dark:text-gray-400">
+                    Showing first 60 inventory rows. Refine your search for
+                    faster results.
+                  </div>
+                )}
+              </>
+            )}
+          </section>
         </div>
       </SectionCard>
 

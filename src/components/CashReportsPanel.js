@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+
 import { apiFetch } from "../lib/api";
 
 const ENDPOINTS = {
@@ -43,9 +44,10 @@ function Input({ className = "", ...props }) {
     <input
       {...props}
       className={cx(
-        "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none",
-        "focus:ring-2 focus:ring-slate-300",
-        className
+        "w-full rounded-2xl border border-slate-300 bg-white px-3.5 py-3 text-sm text-slate-900 outline-none transition",
+        "placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-200",
+        "dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-500 dark:focus:ring-slate-800",
+        className,
       )}
     />
   );
@@ -56,9 +58,10 @@ function SmallInput({ className = "", ...props }) {
     <input
       {...props}
       className={cx(
-        "rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none",
-        "focus:ring-2 focus:ring-slate-300",
-        className
+        "rounded-2xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition",
+        "focus:border-slate-500 focus:ring-2 focus:ring-slate-200",
+        "dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800",
+        className,
       )}
     />
   );
@@ -70,10 +73,10 @@ function TabBtn({ active, children, onClick }) {
       type="button"
       onClick={onClick}
       className={cx(
-        "rounded-xl border px-4 py-2 text-sm font-semibold",
+        "rounded-2xl border px-4 py-2.5 text-sm font-semibold transition",
         active
-          ? "bg-slate-900 text-white border-slate-900"
-          : "hover:bg-slate-50 border-slate-200"
+          ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950"
+          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900",
       )}
     >
       {children}
@@ -81,28 +84,99 @@ function TabBtn({ active, children, onClick }) {
   );
 }
 
-function StatCard({ label, value, sub }) {
+function StatCard({ label, value, sub, tone = "neutral" }) {
+  const toneCls =
+    tone === "success"
+      ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/20"
+      : tone === "danger"
+        ? "border-rose-200 bg-rose-50 dark:border-rose-900/50 dark:bg-rose-950/20"
+        : tone === "warn"
+          ? "border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20"
+          : tone === "info"
+            ? "border-sky-200 bg-sky-50 dark:border-sky-900/50 dark:bg-sky-950/20"
+            : "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950";
+
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="text-xs font-semibold text-slate-600">{label}</div>
-      <div className="mt-1 text-2xl font-bold text-slate-900">{value}</div>
-      {sub ? <div className="mt-1 text-xs text-slate-600">{sub}</div> : null}
+    <div className={cx("rounded-[24px] border p-4 shadow-sm", toneCls)}>
+      <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
+        {label}
+      </div>
+      <div className="mt-2 break-words text-2xl font-black text-slate-950 dark:text-slate-50">
+        {value}
+      </div>
+      {sub ? (
+        <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+          {sub}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function EmptyState({ title = "No data", hint = "Try a different date range." }) {
+function EmptyState({
+  title = "No data",
+  hint = "Try a different date range.",
+}) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <div className="text-sm font-semibold text-slate-900">{title}</div>
-      <div className="mt-1 text-xs text-slate-600">{hint}</div>
+    <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50 p-5 dark:border-slate-700 dark:bg-slate-900">
+      <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
+        {title}
+      </div>
+      <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+        {hint}
+      </div>
+    </div>
+  );
+}
+
+function Banner({ kind = "info", children }) {
+  const cls =
+    kind === "success"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300"
+      : kind === "warn"
+        ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300"
+        : kind === "danger"
+          ? "border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300"
+          : "border-slate-200 bg-slate-50 text-slate-800 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200";
+
+  return (
+    <div className={cx("rounded-2xl border px-4 py-3 text-sm", cls)}>
+      {children}
+    </div>
+  );
+}
+
+function SectionTable({ title, children }) {
+  return (
+    <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+      <div className="border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100">
+        {title}
+      </div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function MobileMetricRow({ label, value, sub }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+      <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
+        {label}
+      </div>
+      <div className="mt-1 text-base font-black text-slate-950 dark:text-slate-50">
+        {value}
+      </div>
+      {sub ? (
+        <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+          {sub}
+        </div>
+      ) : null}
     </div>
   );
 }
 
 export default function CashReportsPanel({ title = "Cash Reports" }) {
-  const [tab, setTab] = useState("overview"); // overview | sessions | ledger | refunds
-
+  const [tab, setTab] = useState("overview");
   const [from, setFrom] = useState(ymd(new Date()));
   const [to, setTo] = useState(ymd(new Date()));
   const [limit, setLimit] = useState(200);
@@ -134,7 +208,6 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
     const p = new URLSearchParams({
       from: String(from || ""),
       to: String(to || ""),
-      // backend uses limit for ledger/refunds. safe to include always.
       limit: String(lim),
     });
     return p.toString();
@@ -144,11 +217,16 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
     setSummaryLoading(true);
     toast("info", "");
     try {
-      const data = await apiFetch(`${ENDPOINTS.SUMMARY}?${qs}`, { method: "GET" });
+      const data = await apiFetch(`${ENDPOINTS.SUMMARY}?${qs}`, {
+        method: "GET",
+      });
       setSummary(data?.summary || null);
     } catch (e) {
       setSummary(null);
-      toast("danger", e?.data?.error || e?.message || "Failed to load cash summary");
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Failed to load cash summary",
+      );
     } finally {
       setSummaryLoading(false);
     }
@@ -158,12 +236,16 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
     setSessionsLoading(true);
     toast("info", "");
     try {
-      const data = await apiFetch(`${ENDPOINTS.SESSIONS}?${qs}`, { method: "GET" });
-      const list = Array.isArray(data?.sessions) ? data.sessions : [];
-      setSessions(list);
+      const data = await apiFetch(`${ENDPOINTS.SESSIONS}?${qs}`, {
+        method: "GET",
+      });
+      setSessions(Array.isArray(data?.sessions) ? data.sessions : []);
     } catch (e) {
       setSessions([]);
-      toast("danger", e?.data?.error || e?.message || "Failed to load sessions report");
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Failed to load sessions report",
+      );
     } finally {
       setSessionsLoading(false);
     }
@@ -173,12 +255,16 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
     setLedgerLoading(true);
     toast("info", "");
     try {
-      const data = await apiFetch(`${ENDPOINTS.LEDGER}?${qs}`, { method: "GET" });
-      const list = Array.isArray(data?.rows) ? data.rows : [];
-      setLedger(list);
+      const data = await apiFetch(`${ENDPOINTS.LEDGER}?${qs}`, {
+        method: "GET",
+      });
+      setLedger(Array.isArray(data?.rows) ? data.rows : []);
     } catch (e) {
       setLedger([]);
-      toast("danger", e?.data?.error || e?.message || "Failed to load cash ledger");
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Failed to load cash ledger",
+      );
     } finally {
       setLedgerLoading(false);
     }
@@ -188,19 +274,28 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
     setRefundsLoading(true);
     toast("info", "");
     try {
-      const data = await apiFetch(`${ENDPOINTS.REFUNDS}?${qs}`, { method: "GET" });
-      const list = Array.isArray(data?.rows) ? data.rows : [];
-      setRefunds(list);
+      const data = await apiFetch(`${ENDPOINTS.REFUNDS}?${qs}`, {
+        method: "GET",
+      });
+      setRefunds(Array.isArray(data?.rows) ? data.rows : []);
     } catch (e) {
       setRefunds([]);
-      toast("danger", e?.data?.error || e?.message || "Failed to load refunds report");
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Failed to load refunds report",
+      );
     } finally {
       setRefundsLoading(false);
     }
   }, [qs]);
 
   async function refreshAll() {
-    await Promise.all([loadSummary(), loadSessions(), loadLedger(), loadRefunds()]);
+    await Promise.all([
+      loadSummary(),
+      loadSessions(),
+      loadLedger(),
+      loadRefunds(),
+    ]);
   }
 
   useEffect(() => {
@@ -208,251 +303,416 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qs]);
 
-  const bannerStyle =
-    msgKind === "success"
-      ? "bg-emerald-50 text-emerald-900 border-emerald-200"
-      : msgKind === "warn"
-      ? "bg-amber-50 text-amber-900 border-amber-200"
-      : msgKind === "danger"
-      ? "bg-rose-50 text-rose-900 border-rose-200"
-      : "bg-slate-50 text-slate-800 border-slate-200";
-
-  const byType = summary?.byType || [];
-  const byMethod = summary?.byMethod || [];
+  const byType = Array.isArray(summary?.byType) ? summary.byType : [];
+  const byMethod = Array.isArray(summary?.byMethod) ? summary.byMethod : [];
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <div className="p-4 border-b border-slate-200 flex items-start justify-between gap-3 flex-wrap">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-slate-900">{title}</div>
-          <div className="text-xs text-slate-600 mt-1">
-            Pick dates. Your ledger rows are on 2026-03-01 (UTC), so try From=2026-03-01 To=2026-03-01.
+    <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+      <div className="border-b border-slate-200 px-4 py-4 dark:border-slate-800 sm:px-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0">
+            <div className="text-lg font-black tracking-[-0.02em] text-slate-950 dark:text-slate-50">
+              {title}
+            </div>
+            <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+              Review cash flow, sessions, ledger activity, and refunds with a
+              clean operational view.
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:flex xl:flex-wrap xl:items-end">
+            <div>
+              <div className="mb-1 text-xs font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
+                From
+              </div>
+              <Input
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <div className="mb-1 text-xs font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
+                To
+              </div>
+              <Input
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+              />
+            </div>
+
+            {showLimit ? (
+              <div>
+                <div className="mb-1 text-xs font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
+                  Limit
+                </div>
+                <SmallInput
+                  className="w-full sm:w-28"
+                  value={String(limit)}
+                  onChange={(e) => setLimit(e.target.value)}
+                  inputMode="numeric"
+                />
+              </div>
+            ) : null}
+
+            <div className="xl:pb-[1px]">
+              <button
+                onClick={refreshAll}
+                className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-slate-200"
+              >
+                Refresh
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="flex gap-2 flex-wrap items-center">
-          <div className="text-xs text-slate-600">From</div>
-          <input
-            type="date"
-            className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-          />
-
-          <div className="text-xs text-slate-600">To</div>
-          <input
-            type="date"
-            className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-          />
-
-          {showLimit ? (
-            <div className="flex items-center gap-2">
-              <div className="text-xs text-slate-600">Limit</div>
-              <SmallInput
-                className="w-24"
-                value={String(limit)}
-                onChange={(e) => setLimit(e.target.value)}
-                inputMode="numeric"
-              />
-            </div>
-          ) : null}
-
-          <button
-            onClick={refreshAll}
-            className="rounded-xl bg-slate-900 text-white px-4 py-2.5 text-sm font-semibold hover:bg-slate-800"
+        <div className="mt-4 flex flex-wrap gap-2">
+          <TabBtn
+            active={tab === "overview"}
+            onClick={() => setTab("overview")}
           >
-            Refresh
-          </button>
+            Overview
+          </TabBtn>
+          <TabBtn
+            active={tab === "sessions"}
+            onClick={() => setTab("sessions")}
+          >
+            Sessions
+          </TabBtn>
+          <TabBtn active={tab === "ledger"} onClick={() => setTab("ledger")}>
+            Ledger
+          </TabBtn>
+          <TabBtn active={tab === "refunds"} onClick={() => setTab("refunds")}>
+            Refunds
+          </TabBtn>
         </div>
       </div>
 
       {msg ? (
-        <div className={cx("m-4 rounded-2xl border px-4 py-3 text-sm", bannerStyle)}>{msg}</div>
+        <div className="px-4 pt-4 sm:px-5">
+          <Banner kind={msgKind}>{msg}</Banner>
+        </div>
       ) : null}
 
-      <div className="p-4">
-        <div className="flex flex-wrap gap-2">
-          <TabBtn active={tab === "overview"} onClick={() => setTab("overview")}>Overview</TabBtn>
-          <TabBtn active={tab === "sessions"} onClick={() => setTab("sessions")}>Sessions</TabBtn>
-          <TabBtn active={tab === "ledger"} onClick={() => setTab("ledger")}>Ledger</TabBtn>
-          <TabBtn active={tab === "refunds"} onClick={() => setTab("refunds")}>Refunds</TabBtn>
-        </div>
-
+      <div className="p-4 sm:p-5">
         {tab === "overview" ? (
-          <div className="mt-4 grid gap-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <StatCard label="Cash IN" value={summaryLoading ? "…" : money(summary?.inTotal || 0)} sub="Money coming in" />
-              <StatCard label="Cash OUT" value={summaryLoading ? "…" : money(summary?.outTotal || 0)} sub="Money going out" />
-              <StatCard label="NET" value={summaryLoading ? "…" : money(summary?.net || 0)} sub="IN - OUT" />
+          <div className="grid gap-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <StatCard
+                label="Cash in"
+                value={summaryLoading ? "…" : money(summary?.inTotal || 0)}
+                sub="Money coming in"
+                tone="success"
+              />
+              <StatCard
+                label="Cash out"
+                value={summaryLoading ? "…" : money(summary?.outTotal || 0)}
+                sub="Money going out"
+                tone="danger"
+              />
+              <StatCard
+                label="Net"
+                value={summaryLoading ? "…" : money(summary?.net || 0)}
+                sub="IN − OUT"
+                tone="info"
+              />
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="rounded-2xl border border-slate-200 overflow-hidden">
-                <div className="p-3 border-b border-slate-200 bg-slate-50 text-sm font-semibold text-slate-900">
-                  By type
-                </div>
+            <div className="grid gap-4 xl:grid-cols-2">
+              <SectionTable title="By type">
                 {byType.length === 0 ? (
                   <div className="p-4">
-                    <EmptyState title="No cash movements" hint="No rows in cash_ledger for this date range." />
+                    <EmptyState
+                      title="No cash movements"
+                      hint="No rows in cash ledger for this date range."
+                    />
                   </div>
                 ) : (
-                  <table className="w-full text-sm">
-                    <thead className="text-slate-600">
-                      <tr className="border-b border-slate-200">
-                        <th className="p-3 text-left text-xs font-semibold">Type</th>
-                        <th className="p-3 text-left text-xs font-semibold">Dir</th>
-                        <th className="p-3 text-right text-xs font-semibold">Count</th>
-                        <th className="p-3 text-right text-xs font-semibold">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  <>
+                    <div className="grid gap-3 p-4 md:hidden">
                       {byType.map((r, idx) => (
-                        <tr key={idx} className="border-b border-slate-100">
-                          <td className="p-3">{r.type}</td>
-                          <td className="p-3">{r.direction}</td>
-                          <td className="p-3 text-right">{r.count}</td>
-                          <td className="p-3 text-right font-semibold">{money(r.total)}</td>
-                        </tr>
+                        <MobileMetricRow
+                          key={idx}
+                          label={r.type || "Type"}
+                          value={money(r.total)}
+                          sub={`${r.direction || "—"} • ${r.count || 0} row(s)`}
+                        />
                       ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
+                    </div>
 
-              <div className="rounded-2xl border border-slate-200 overflow-hidden">
-                <div className="p-3 border-b border-slate-200 bg-slate-50 text-sm font-semibold text-slate-900">
-                  By method
-                </div>
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="text-slate-600 dark:text-slate-400">
+                          <tr className="border-b border-slate-200 dark:border-slate-800">
+                            <th className="p-3 text-left text-xs font-semibold">
+                              Type
+                            </th>
+                            <th className="p-3 text-left text-xs font-semibold">
+                              Dir
+                            </th>
+                            <th className="p-3 text-right text-xs font-semibold">
+                              Count
+                            </th>
+                            <th className="p-3 text-right text-xs font-semibold">
+                              Total
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {byType.map((r, idx) => (
+                            <tr
+                              key={idx}
+                              className="border-b border-slate-100 dark:border-slate-900"
+                            >
+                              <td className="p-3 text-slate-900 dark:text-slate-100">
+                                {r.type}
+                              </td>
+                              <td className="p-3 text-slate-700 dark:text-slate-300">
+                                {r.direction}
+                              </td>
+                              <td className="p-3 text-right text-slate-700 dark:text-slate-300">
+                                {r.count}
+                              </td>
+                              <td className="p-3 text-right font-semibold text-slate-900 dark:text-slate-100">
+                                {money(r.total)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </SectionTable>
+
+              <SectionTable title="By method">
                 {byMethod.length === 0 ? (
                   <div className="p-4">
-                    <EmptyState title="No methods to show" hint="Try picking a date where payments happened." />
+                    <EmptyState
+                      title="No methods to show"
+                      hint="Try a date where payments happened."
+                    />
                   </div>
                 ) : (
-                  <table className="w-full text-sm">
-                    <thead className="text-slate-600">
-                      <tr className="border-b border-slate-200">
-                        <th className="p-3 text-left text-xs font-semibold">Method</th>
-                        <th className="p-3 text-left text-xs font-semibold">Dir</th>
-                        <th className="p-3 text-right text-xs font-semibold">Count</th>
-                        <th className="p-3 text-right text-xs font-semibold">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  <>
+                    <div className="grid gap-3 p-4 md:hidden">
                       {byMethod.map((r, idx) => (
-                        <tr key={idx} className="border-b border-slate-100">
-                          <td className="p-3">{r.method}</td>
-                          <td className="p-3">{r.direction}</td>
-                          <td className="p-3 text-right">{r.count}</td>
-                          <td className="p-3 text-right font-semibold">{money(r.total)}</td>
-                        </tr>
+                        <MobileMetricRow
+                          key={idx}
+                          label={r.method || "Method"}
+                          value={money(r.total)}
+                          sub={`${r.direction || "—"} • ${r.count || 0} row(s)`}
+                        />
                       ))}
-                    </tbody>
-                  </table>
+                    </div>
+
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="text-slate-600 dark:text-slate-400">
+                          <tr className="border-b border-slate-200 dark:border-slate-800">
+                            <th className="p-3 text-left text-xs font-semibold">
+                              Method
+                            </th>
+                            <th className="p-3 text-left text-xs font-semibold">
+                              Dir
+                            </th>
+                            <th className="p-3 text-right text-xs font-semibold">
+                              Count
+                            </th>
+                            <th className="p-3 text-right text-xs font-semibold">
+                              Total
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {byMethod.map((r, idx) => (
+                            <tr
+                              key={idx}
+                              className="border-b border-slate-100 dark:border-slate-900"
+                            >
+                              <td className="p-3 text-slate-900 dark:text-slate-100">
+                                {r.method}
+                              </td>
+                              <td className="p-3 text-slate-700 dark:text-slate-300">
+                                {r.direction}
+                              </td>
+                              <td className="p-3 text-right text-slate-700 dark:text-slate-300">
+                                {r.count}
+                              </td>
+                              <td className="p-3 text-right font-semibold text-slate-900 dark:text-slate-100">
+                                {money(r.total)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
                 )}
-              </div>
+              </SectionTable>
             </div>
           </div>
         ) : null}
 
         {tab === "sessions" ? (
-          <div className="mt-4 grid gap-3">
+          <div className="grid gap-3">
             {sessionsLoading ? (
-              <div className="text-sm text-slate-600">Loading…</div>
+              <div className="text-sm text-slate-600 dark:text-slate-400">
+                Loading…
+              </div>
             ) : sessions.length === 0 ? (
-              <EmptyState title="No sessions" hint="Try From=2026-03-01 To=2026-03-01, then widen to last 7 days if needed." />
+              <EmptyState title="No sessions" hint="Try a wider date range." />
             ) : (
-              <div className="grid gap-3">
-                {sessions.map((s) => (
-                  <div key={s?.id} className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-bold text-slate-900">Session #{s?.id}</div>
-                        <div className="mt-1 text-xs text-slate-600">
-                          Cashier: <b>{s?.cashierId ?? "—"}</b> • Status: <b>{s?.status ?? "—"}</b>
+              sessions.map((s) => (
+                <div
+                  key={s?.id}
+                  className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950"
+                >
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="text-sm font-black text-slate-950 dark:text-slate-50">
+                        Session #{s?.id}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                        Cashier: <b>{s?.cashierId ?? "—"}</b> • Status:{" "}
+                        <b>{s?.status ?? "—"}</b>
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                        Opened: {safeDate(s?.openedAt)} • Closed:{" "}
+                        {safeDate(s?.closedAt)}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 sm:min-w-[220px]">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900">
+                        <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
+                          Opening
                         </div>
-                        <div className="mt-1 text-xs text-slate-600">
-                          Opened: {safeDate(s?.openedAt)} • Closed: {safeDate(s?.closedAt)}
+                        <div className="mt-1 text-sm font-black text-slate-950 dark:text-slate-50">
+                          {money(s?.openingBalance)}
                         </div>
                       </div>
-                      <div className="text-right">
-                        <div className="text-xs text-slate-600">Opening</div>
-                        <div className="text-sm font-bold text-slate-900">{money(s?.openingBalance)}</div>
-                        <div className="mt-2 text-xs text-slate-600">Closing</div>
-                        <div className="text-sm font-bold text-slate-900">
-                          {s?.closingBalance == null ? "—" : money(s?.closingBalance)}
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900">
+                        <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
+                          Closing
+                        </div>
+                        <div className="mt-1 text-sm font-black text-slate-950 dark:text-slate-50">
+                          {s?.closingBalance == null
+                            ? "—"
+                            : money(s?.closingBalance)}
                         </div>
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))
             )}
           </div>
         ) : null}
 
         {tab === "ledger" ? (
-          <div className="mt-4 grid gap-3">
+          <div className="grid gap-3">
             {ledgerLoading ? (
-              <div className="text-sm text-slate-600">Loading…</div>
+              <div className="text-sm text-slate-600 dark:text-slate-400">
+                Loading…
+              </div>
             ) : ledger.length === 0 ? (
-              <EmptyState title="No ledger rows" hint="Your rows are on 2026-03-01 and 2026-02-28. Pick those dates." />
+              <EmptyState
+                title="No ledger rows"
+                hint="Pick a date where cash activity happened."
+              />
             ) : (
-              <div className="grid gap-3">
-                {ledger.map((r) => (
-                  <div key={r?.id} className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-bold text-slate-900">Ledger #{r?.id}</div>
-                        <div className="mt-1 text-xs text-slate-600">
-                          Type: <b>{r?.type ?? "—"}</b> • Dir: <b>{r?.direction ?? "—"}</b> • Method: <b>{r?.method || "CASH"}</b>
-                        </div>
-                        <div className="mt-1 text-xs text-slate-600">
-                          Sale: <b>{r?.saleId ?? "—"}</b> • Payment: <b>{r?.paymentId ?? "—"}</b>
-                        </div>
-                        <div className="mt-1 text-xs text-slate-600">Time: {safeDate(r?.createdAt)}</div>
-                        {r?.note ? <div className="mt-2 text-xs text-slate-600">Note: {r.note}</div> : null}
+              ledger.map((r) => (
+                <div
+                  key={r?.id}
+                  className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950"
+                >
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="text-sm font-black text-slate-950 dark:text-slate-50">
+                        Ledger #{r?.id}
                       </div>
-                      <div className="text-right">
-                        <div className="text-xs text-slate-600">Amount</div>
-                        <div className="text-sm font-bold text-slate-900">{money(r?.amount)}</div>
+                      <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                        Type: <b>{r?.type ?? "—"}</b> • Dir:{" "}
+                        <b>{r?.direction ?? "—"}</b> • Method:{" "}
+                        <b>{r?.method || "CASH"}</b>
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                        Sale: <b>{r?.saleId ?? "—"}</b> • Payment:{" "}
+                        <b>{r?.paymentId ?? "—"}</b>
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                        Time: {safeDate(r?.createdAt)}
+                      </div>
+                      {r?.note ? (
+                        <div className="mt-2 text-xs text-slate-600 dark:text-slate-400">
+                          Note: {r.note}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-right dark:border-slate-800 dark:bg-slate-900">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
+                        Amount
+                      </div>
+                      <div className="mt-1 text-lg font-black text-slate-950 dark:text-slate-50">
+                        {money(r?.amount)}
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))
             )}
           </div>
         ) : null}
 
         {tab === "refunds" ? (
-          <div className="mt-4 grid gap-3">
+          <div className="grid gap-3">
             {refundsLoading ? (
-              <div className="text-sm text-slate-600">Loading…</div>
+              <div className="text-sm text-slate-600 dark:text-slate-400">
+                Loading…
+              </div>
             ) : refunds.length === 0 ? (
-              <EmptyState title="No refunds" hint="You have one refund in cash_ledger on 2026-03-01. Pick that day." />
+              <EmptyState
+                title="No refunds"
+                hint="Pick a date where refunds happened."
+              />
             ) : (
-              <div className="grid gap-3">
-                {refunds.map((r) => (
-                  <div key={r?.id} className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-bold text-slate-900">Refund #{r?.id}</div>
-                        <div className="mt-1 text-xs text-slate-600">
-                          Sale: <b>{r?.saleId ?? "—"}</b> • By: <b>{r?.createdByUserId ?? "—"}</b>
-                        </div>
-                        <div className="mt-1 text-xs text-slate-600">Time: {safeDate(r?.createdAt)}</div>
-                        <div className="mt-2 text-xs text-slate-600">Reason: {r?.reason || "—"}</div>
+              refunds.map((r) => (
+                <div
+                  key={r?.id}
+                  className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950"
+                >
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="text-sm font-black text-slate-950 dark:text-slate-50">
+                        Refund #{r?.id}
                       </div>
-                      <div className="text-right">
-                        <div className="text-xs text-slate-600">Amount</div>
-                        <div className="text-sm font-bold text-slate-900">{money(r?.amount)}</div>
+                      <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                        Sale: <b>{r?.saleId ?? "—"}</b> • By:{" "}
+                        <b>{r?.createdByUserId ?? "—"}</b>
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                        Time: {safeDate(r?.createdAt)}
+                      </div>
+                      <div className="mt-2 text-xs text-slate-600 dark:text-slate-400">
+                        Reason: {r?.reason || "—"}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-right dark:border-slate-800 dark:bg-slate-900">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
+                        Amount
+                      </div>
+                      <div className="mt-1 text-lg font-black text-slate-950 dark:text-slate-50">
+                        {money(r?.amount)}
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))
             )}
           </div>
         ) : null}

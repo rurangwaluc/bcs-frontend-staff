@@ -5,9 +5,20 @@ import LowStockWidget from "../LowStockWidget";
 import StuckSalesWidget from "../StuckSalesWidget";
 import TodayMixWidget from "../TodayMixWidget";
 
-function Card({ label, value, sub }) {
+function Card({ label, value, sub, tone = "neutral" }) {
+  const toneCls =
+    tone === "success"
+      ? "border-[var(--success-border)] bg-[var(--success-bg)]"
+      : tone === "warn"
+        ? "border-[var(--warn-border)] bg-[var(--warn-bg)]"
+        : tone === "danger"
+          ? "border-[var(--danger-border)] bg-[var(--danger-bg)]"
+          : tone === "info"
+            ? "border-[var(--info-border)] bg-[var(--info-bg)]"
+            : "border-[var(--border)] bg-[var(--card)]";
+
   return (
-    <div className="rounded-[28px] border border-[var(--border)] bg-[var(--card)] p-5 shadow-sm">
+    <div className={`rounded-[28px] border p-5 shadow-sm ${toneCls}`}>
       <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
         {label}
       </div>
@@ -37,6 +48,15 @@ function SkeletonCard() {
   );
 }
 
+function safeNumber(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatMoney(v) {
+  return safeNumber(v).toLocaleString();
+}
+
 export default function AdminDashboardSection({
   dash,
   dashLoading,
@@ -49,32 +69,101 @@ export default function AdminDashboardSection({
   router,
   setSection,
 }) {
+  const inventoryValue = safeNumber(dash?.inventory?.inventoryValue);
+  const inventoryProductsCount = safeNumber(dash?.inventory?.productsCount);
+  const inventoryQtyOnHand = safeNumber(dash?.inventory?.totalQtyOnHand);
+  const lowStockCount = safeNumber(dash?.inventory?.lowStockCount);
+  const outOfStockCount = safeNumber(dash?.inventory?.outOfStockCount);
+
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <Card
           label="Sales today"
           value={
-            dashLoading
-              ? "…"
-              : String(salesTodayTotal).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+            dashLoading ? (
+              "…"
+            ) : (
+              <span className="text-[19px] font-semibold tracking-tight">
+                {formatMoney(salesTodayTotal)} RWF
+              </span>
+            )
           }
           sub={dashLoading ? "…" : `${salesToday.length} sale(s)`}
+          tone="info"
         />
+
         <Card
           label="Awaiting payment"
-          value={dashLoading ? "…" : String(awaitingPaymentCount)}
+          value={
+            dashLoading ? (
+              "…"
+            ) : (
+              <span className="text-[19px] font-semibold tracking-tight">
+                {awaitingPaymentCount.toLocaleString()}
+              </span>
+            )
+          }
           sub="Needs cashier action"
+          tone="warn"
         />
+
+        <Card
+          label="Inventory value"
+          value={
+            dashLoading ? (
+              "…"
+            ) : (
+              <span className="text-[19px] font-semibold tracking-tight">
+                {formatMoney(inventoryValue)} RWF
+              </span>
+            )
+          }
+          sub={
+            dashLoading
+              ? "…"
+              : `${inventoryProductsCount} products • ${formatMoney(inventoryQtyOnHand)} units`
+          }
+          tone="success"
+        />
+
+        <Card
+          label="Low / out stock"
+          value={
+            dashLoading ? (
+              "…"
+            ) : (
+              <span className="text-[19px] font-semibold tracking-tight">
+                {lowStockCount.toLocaleString()} /{" "}
+                {outOfStockCount.toLocaleString()}
+              </span>
+            )
+          }
+          sub="Low stock / out of stock"
+          tone={
+            outOfStockCount > 0
+              ? "danger"
+              : lowStockCount > 0
+                ? "warn"
+                : "success"
+          }
+        />
+
         <Card
           label="Pricing gaps"
-          value={dashLoading ? "…" : String(unpricedCount)}
-          sub="Unpriced products"
-        />
-        <Card
-          label="Inventory requests"
-          value={dashLoading ? "…" : String(invReqPendingCount)}
-          sub="Pending approvals"
+          value={
+            dashLoading ? (
+              "…"
+            ) : (
+              <span className="text-[19px] font-semibold tracking-tight">
+                {unpricedCount.toLocaleString()}
+              </span>
+            )
+          }
+          sub={`Inventory requests: ${
+            dashLoading ? "…" : invReqPendingCount.toLocaleString()
+          }`}
+          tone={unpricedCount > 0 ? "warn" : "neutral"}
         />
       </div>
 
