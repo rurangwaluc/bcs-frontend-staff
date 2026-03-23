@@ -33,6 +33,12 @@ function hasValidSellingPrice(productOrItem) {
   return Number.isFinite(n) && n > 0;
 }
 
+function clampDiscountPercent(value, maxPct) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(n, Number(maxPct ?? 0) || 0);
+}
+
 function ProductAlertPill({ tone = "neutral", children }) {
   const toneCls =
     tone === "danger"
@@ -597,7 +603,8 @@ export default function SellerCreateSection({
                   Cart
                 </div>
                 <div className="mt-1 text-sm app-muted">
-                  Adjust quantity, price and discount before creating the draft.
+                  Adjust quantity and discount before creating the draft.
+                  Product price is locked to the official selling price.
                 </div>
               </div>
 
@@ -618,12 +625,23 @@ export default function SellerCreateSection({
             ) : (
               <div className="mt-4 grid gap-3">
                 {saleCart.map((it) => {
-                  const line = previewLineTotal(it);
                   const maxPct = Number(it.maxDiscountPercent ?? 0) || 0;
                   const availableQty = getAvailableQty(it);
                   const tracked = isInventoryTracked(it);
                   const enteredQty = Number(it.qty ?? 0) || 0;
                   const exceedsStock = tracked && enteredQty > availableQty;
+                  const lockedSellingPrice = Number(it.sellingPrice ?? 0) || 0;
+                  const safeDiscountPercent = clampDiscountPercent(
+                    it.discountPercent,
+                    maxPct,
+                  );
+
+                  const line = previewLineTotal({
+                    ...it,
+                    unitPrice: lockedSellingPrice,
+                    discountPercent: safeDiscountPercent,
+                    discountAmount: 0,
+                  });
 
                   return (
                     <div
@@ -640,7 +658,7 @@ export default function SellerCreateSection({
                             <b className="text-[var(--app-fg)]">{it.sku}</b> •
                             Selling:{" "}
                             <b className="text-[var(--app-fg)]">
-                              {money(it.sellingPrice)} RWF
+                              {money(lockedSellingPrice)} RWF
                             </b>
                           </div>
                           <div className="mt-2 text-sm app-muted">
@@ -660,7 +678,7 @@ export default function SellerCreateSection({
                         </button>
                       </div>
 
-                      <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
                         <div>
                           <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
                             Qty
@@ -673,6 +691,9 @@ export default function SellerCreateSection({
                             onChange={(e) =>
                               updateCart(it.productId, {
                                 qty: Number(e.target.value || 1),
+                                unitPrice: lockedSellingPrice,
+                                discountPercent: safeDiscountPercent,
+                                discountAmount: 0,
                               })
                             }
                           />
@@ -689,17 +710,13 @@ export default function SellerCreateSection({
                           </div>
                           <Input
                             type="number"
-                            min="0"
-                            max={it.sellingPrice || undefined}
-                            value={String(it.unitPrice)}
-                            onChange={(e) =>
-                              updateCart(it.productId, {
-                                unitPrice: Number(e.target.value || 0),
-                              })
-                            }
+                            value={String(lockedSellingPrice)}
+                            readOnly
+                            disabled
+                            className="cursor-not-allowed opacity-80"
                           />
                           <div className="mt-1 text-[11px] app-muted">
-                            Must be ≤ selling price
+                            Locked to official selling price
                           </div>
                         </div>
 
@@ -711,32 +728,21 @@ export default function SellerCreateSection({
                             type="number"
                             min="0"
                             max={maxPct}
-                            value={String(it.discountPercent || 0)}
+                            value={String(safeDiscountPercent)}
                             onChange={(e) =>
                               updateCart(it.productId, {
-                                discountPercent: Number(e.target.value || 0),
+                                discountPercent: clampDiscountPercent(
+                                  e.target.value,
+                                  maxPct,
+                                ),
+                                unitPrice: lockedSellingPrice,
+                                discountAmount: 0,
                               })
                             }
                           />
                           <div className="mt-1 text-[11px] app-muted">
-                            Max {maxPct}%
+                            Max allowed by manager: {maxPct}%
                           </div>
-                        </div>
-
-                        <div>
-                          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
-                            Discount amount
-                          </div>
-                          <Input
-                            type="number"
-                            min="0"
-                            value={String(it.discountAmount || 0)}
-                            onChange={(e) =>
-                              updateCart(it.productId, {
-                                discountAmount: Number(e.target.value || 0),
-                              })
-                            }
-                          />
                         </div>
                       </div>
 
