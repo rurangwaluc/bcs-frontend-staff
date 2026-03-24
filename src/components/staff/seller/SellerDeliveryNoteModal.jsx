@@ -413,37 +413,101 @@ function printDocument(title, html) {
             white-space: pre-wrap;
           }
 
-          .footer-signatures {
+          .signatures {
+            margin-top: 22px;
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 1fr 220px;
             gap: 16px;
-            margin-top: 18px;
+            align-items: stretch;
           }
 
           .signature-card {
             border: 1px solid #dbe2ea;
-            border-radius: 18px;
-            padding: 14px 16px;
+            border-radius: 20px;
             background: #ffffff;
-            min-height: 106px;
+            padding: 16px;
+            min-height: 185px;
+            display: flex;
+            flex-direction: column;
           }
 
           .signature-title {
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 900;
-            letter-spacing: 0.14em;
+            letter-spacing: 0.16em;
             text-transform: uppercase;
             color: #64748b;
           }
 
+          .signature-space {
+            flex: 1;
+            min-height: 68px;
+          }
+
           .signature-line {
-            margin-top: 46px;
-            padding-top: 8px;
+            margin-top: 8px;
             border-top: 1px solid #0f172a;
+            padding-top: 8px;
             font-size: 13px;
-            line-height: 1.5;
-            color: #0f172a;
             font-weight: 700;
+            color: #0f172a;
+            min-height: 28px;
+          }
+
+          .signature-meta {
+            margin-top: 12px;
+            display: grid;
+            gap: 10px;
+          }
+
+          .signature-meta-row {
+            display: grid;
+            grid-template-columns: 52px 1fr;
+            gap: 10px;
+            align-items: end;
+          }
+
+          .signature-meta-label {
+            font-size: 10px;
+            font-weight: 900;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: #64748b;
+          }
+
+          .signature-meta-line {
+            border-bottom: 1px solid #94a3b8;
+            min-height: 18px;
+          }
+
+          .stamp-card {
+            border: 1px dashed #94a3b8;
+            border-radius: 20px;
+            background: #f8fafc;
+            min-height: 185px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+          }
+
+          .stamp-title {
+            font-size: 10px;
+            font-weight: 900;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: #64748b;
+          }
+
+          .stamp-space {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #94a3b8;
+            font-size: 12px;
+            font-weight: 700;
+            text-align: center;
+            padding: 12px;
           }
 
           @media print {
@@ -535,7 +599,7 @@ function buildDeliveryHtml({ sale, me }) {
             <div class="brand-copy">
               <div class="doc-kicker">Delivery Note</div>
               <h1 class="branch-name">${esc(biz.branchLabel)}</h1>
-              // <div class="company-name">${esc(biz.businessName)}</div>
+              <div class="company-name">${esc(biz.businessName)}</div>
 
               <div class="contact-lines">
                 ${biz.address ? `<div><strong>Address:</strong> ${esc(biz.address)}</div>` : ""}
@@ -610,15 +674,40 @@ function buildDeliveryHtml({ sale, me }) {
           : ""
       }
 
-      <div class="footer-signatures">
+      <div class="signatures">
         <div class="signature-card">
           <div class="signature-title">Prepared / Released By</div>
-          <div class="signature-line">${esc(toStr(sellerName) || "Seller")}</div>
+          <div class="signature-space"></div>
+          <div class="signature-line">${esc(toStr(sellerName) || "—")}</div>
+
+          <div class="signature-meta">
+            <div class="signature-meta-row">
+              <div class="signature-meta-label">Date</div>
+              <div class="signature-meta-line"></div>
+            </div>
+          </div>
         </div>
 
         <div class="signature-card">
           <div class="signature-title">Received By Customer</div>
-          <div class="signature-line">Customer Signature</div>
+          <div class="signature-space"></div>
+          <div class="signature-line"></div>
+
+          <div class="signature-meta">
+            <div class="signature-meta-row">
+              <div class="signature-meta-label">Name</div>
+              <div class="signature-meta-line"></div>
+            </div>
+            <div class="signature-meta-row">
+              <div class="signature-meta-label">Date</div>
+              <div class="signature-meta-line"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="stamp-card">
+          <div class="stamp-title">Company Stamp</div>
+          <div class="stamp-space">Official Stamp Area</div>
         </div>
       </div>
     </div>
@@ -646,6 +735,61 @@ function MetaChip({ label, value }) {
       </div>
       <div className="mt-1 break-words text-[12px] font-extrabold leading-5 text-[var(--app-fg)]">
         {value}
+      </div>
+    </div>
+  );
+}
+
+function SignatureCard({
+  title,
+  lineValue = "",
+  showNameRow = false,
+  showDateRow = true,
+}) {
+  return (
+    <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
+      <div className="text-[10px] font-black uppercase tracking-[0.16em] app-muted">
+        {title}
+      </div>
+
+      <div className="min-h-[72px]" />
+
+      <div className="border-t border-[var(--app-fg)] pt-2 text-sm font-semibold text-[var(--app-fg)]">
+        {lineValue || ""}
+      </div>
+
+      <div className="mt-3 space-y-3">
+        {showNameRow ? (
+          <div className="grid grid-cols-[52px_minmax(0,1fr)] items-end gap-3">
+            <div className="text-[10px] font-black uppercase tracking-[0.1em] app-muted">
+              Name
+            </div>
+            <div className="h-[18px] border-b border-[var(--border-strong)]" />
+          </div>
+        ) : null}
+
+        {showDateRow ? (
+          <div className="grid grid-cols-[52px_minmax(0,1fr)] items-end gap-3">
+            <div className="text-[10px] font-black uppercase tracking-[0.1em] app-muted">
+              Date
+            </div>
+            <div className="h-[18px] border-b border-[var(--border-strong)]" />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function StampCard() {
+  return (
+    <div className="rounded-3xl border border-dashed border-[var(--border-strong)] bg-[var(--card)] p-4">
+      <div className="text-[10px] font-black uppercase tracking-[0.16em] app-muted">
+        Company Stamp
+      </div>
+
+      <div className="flex min-h-[128px] items-center justify-center text-center text-sm font-semibold text-[var(--muted)]">
+        Official Stamp Area
       </div>
     </div>
   );
@@ -878,14 +1022,7 @@ export default function SellerDeliveryNoteModal({
                 </table>
               </div>
 
-              <div className="mt-5 rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
-                <div className="text-[11px] font-black uppercase tracking-[0.14em] app-muted">
-                  Prepared By
-                </div>
-                <div className="mt-2 text-sm font-bold text-[var(--app-fg)]">
-                  {toStr(sellerName) || "—"}
-                </div>
-              </div>
+              <div className="p-4"></div>
 
               {toStr(sale?.note) ? (
                 <div className="mt-5 rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
@@ -898,24 +1035,22 @@ export default function SellerDeliveryNoteModal({
                 </div>
               ) : null}
 
-              <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
-                  <div className="text-[11px] font-black uppercase tracking-[0.14em] app-muted">
-                    Prepared / Released By
-                  </div>
-                  <div className="mt-10 border-t border-[var(--border)] pt-2 text-sm font-semibold text-[var(--app-fg)]">
-                    {toStr(sellerName) || "Seller"}
-                  </div>
-                </div>
+              <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_220px]">
+                <SignatureCard
+                  title="Prepared / Released By"
+                  lineValue={toStr(sellerName) || ""}
+                  showNameRow={false}
+                  showDateRow={true}
+                />
 
-                <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
-                  <div className="text-[11px] font-black uppercase tracking-[0.14em] app-muted">
-                    Received By Customer
-                  </div>
-                  <div className="mt-10 border-t border-[var(--border)] pt-2 text-sm font-semibold text-[var(--app-fg)]">
-                    Customer Signature
-                  </div>
-                </div>
+                <SignatureCard
+                  title="Received By Customer"
+                  lineValue=""
+                  showNameRow={true}
+                  showDateRow={true}
+                />
+
+                <StampCard />
               </div>
             </div>
           )}
