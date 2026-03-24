@@ -13,8 +13,8 @@ function getApiOrigin() {
   const v = String(raw || "")
     .trim()
     .replace(/\/$/, "");
-  if (!v) return "";
 
+  if (!v) return "";
   return v;
 }
 
@@ -22,8 +22,10 @@ function resolveAssetUrl(value) {
   const v = toStr(value);
   if (!v) return "";
   if (v.startsWith("http://") || v.startsWith("https://")) return v;
+
   const base = getApiOrigin();
   if (!base) return v;
+
   return `${base}${v.startsWith("/") ? "" : "/"}${v}`;
 }
 
@@ -93,10 +95,12 @@ function getBusinessIdentity(me) {
   const branchLabel =
     branchName && branchCode
       ? `${branchName} (${branchCode})`
-      : branchName || branchCode || "";
+      : branchName || branchCode || businessName;
 
   return {
     businessName,
+    branchName,
+    branchCode,
     branchLabel,
     email,
     phone,
@@ -123,6 +127,7 @@ function moneyLine(n) {
 
 function printDocument(title, html) {
   if (typeof window === "undefined") return;
+
   const win = window.open("", "_blank", "width=1200,height=900");
   if (!win) return;
 
@@ -142,99 +147,156 @@ function printDocument(title, html) {
             color: #0f172a;
             font-family: Inter, Arial, Helvetica, sans-serif;
           }
+
           body { padding: 24px; }
+
           .page {
             width: 210mm;
             min-height: 297mm;
             margin: 0 auto;
-            background: #fff;
-            padding: 18mm 16mm;
+            background: #ffffff;
+            padding: 16mm 15mm 18mm;
             box-shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
           }
+
+          .top-band {
+            height: 6px;
+            border-radius: 999px;
+            background: #0f172a;
+            margin-bottom: 18px;
+          }
+
           .header {
             display: grid;
-            grid-template-columns: 1.3fr 0.8fr;
+            grid-template-columns: minmax(0, 1fr) auto;
             gap: 18px;
+            align-items: start;
             padding-bottom: 18px;
-            border-bottom: 2px solid #0f172a;
+            border-bottom: 1px solid #dbe2ea;
           }
-          .brand {
+
+          .brand-wrap {
             display: flex;
-            gap: 16px;
             align-items: flex-start;
+            gap: 16px;
+            min-width: 0;
           }
-          .logo-box {
-            width: 90px;
-            height: 90px;
-            min-width: 90px;
+
+          .logo-shell {
+            width: 96px;
+            height: 96px;
+            min-width: 96px;
             border: 1px solid #dbe2ea;
-            border-radius: 20px;
-            background: #fff;
+            border-radius: 22px;
+            background: #ffffff;
             display: flex;
             align-items: center;
             justify-content: center;
             overflow: hidden;
           }
-          .logo-box img { width: 100%; height: 100%; object-fit: contain; }
+
+          .logo-shell img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+          }
+
           .logo-fallback {
-            font-size: 12px;
-            font-weight: 900;
-            letter-spacing: 0.16em;
-            color: #475569;
-            text-transform: uppercase;
-            text-align: center;
             padding: 8px;
-          }
-          .brand-name {
-            font-size: 30px;
+            text-align: center;
+            font-size: 10px;
             font-weight: 900;
-            letter-spacing: -0.02em;
-            line-height: 1.08;
-            margin: 0;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: #475569;
+            line-height: 1.4;
           }
-          .doc-type {
-            margin-top: 10px;
-            font-size: 13px;
+
+          .brand-copy {
+            min-width: 0;
+          }
+
+          .doc-kicker {
+            font-size: 11px;
             font-weight: 900;
             letter-spacing: 0.18em;
             text-transform: uppercase;
-            color: #475569;
+            color: #64748b;
           }
-          .brand-meta {
-            margin-top: 12px;
+
+          .branch-name {
+            margin: 8px 0 0;
+            font-size: 30px;
+            line-height: 1.06;
+            font-weight: 900;
+            letter-spacing: -0.03em;
+            color: #0f172a;
+            word-break: break-word;
+          }
+
+          .company-name {
+            margin-top: 8px;
+            font-size: 13px;
+            line-height: 1.5;
+            color: #475569;
+            font-weight: 700;
+          }
+
+          .contact-lines {
+            margin-top: 14px;
             display: grid;
             gap: 4px;
             font-size: 12px;
-            color: #334155;
             line-height: 1.55;
+            color: #334155;
           }
-          .meta-card {
-            border: 1px solid #dbe2ea;
-            border-radius: 20px;
-            padding: 14px 16px;
-            background: #f8fafc;
-          }
-          .meta-row {
+
+          .meta-stack {
             display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            padding: 7px 0;
-            border-bottom: 1px solid #e2e8f0;
-            font-size: 12px;
+            flex-direction: column;
+            gap: 8px;
+            min-width: 148px;
           }
-          .meta-row:last-child { border-bottom: 0; }
+
+          .meta-chip {
+            border: 1px solid #dbe2ea;
+            border-radius: 14px;
+            background: #f8fafc;
+            padding: 8px 10px;
+          }
+
+          .meta-chip-label {
+            font-size: 9px;
+            line-height: 1.2;
+            font-weight: 900;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: #64748b;
+          }
+
+          .meta-chip-value {
+            margin-top: 4px;
+            font-size: 12px;
+            line-height: 1.35;
+            font-weight: 800;
+            color: #0f172a;
+            word-break: break-word;
+          }
+
           .section-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr;
             gap: 14px;
             margin-top: 18px;
           }
+
           .card {
             border: 1px solid #dbe2ea;
             border-radius: 18px;
             padding: 14px;
-            background: #fff;
+            background: #ffffff;
           }
+
           .card-title {
             font-size: 11px;
             font-weight: 900;
@@ -243,11 +305,13 @@ function printDocument(title, html) {
             color: #64748b;
             margin-bottom: 10px;
           }
+
           .line {
             font-size: 13px;
             line-height: 1.6;
             color: #0f172a;
           }
+
           table {
             width: 100%;
             border-collapse: collapse;
@@ -256,10 +320,11 @@ function printDocument(title, html) {
             border-radius: 18px;
             overflow: hidden;
           }
+
           thead th {
             background: #f8fafc;
             color: #0f172a;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 900;
             text-transform: uppercase;
             letter-spacing: 0.08em;
@@ -267,23 +332,63 @@ function printDocument(title, html) {
             text-align: left;
             border-bottom: 1px solid #e2e8f0;
           }
+
           tbody td {
             padding: 12px 10px;
             font-size: 13px;
+            line-height: 1.5;
             border-bottom: 1px solid #e2e8f0;
             vertical-align: top;
+            color: #0f172a;
           }
-          tbody tr:last-child td { border-bottom: 0; }
-          .right { text-align: right; }
-          .totals {
-            width: 360px;
-            margin-left: auto;
+
+          tbody tr:last-child td {
+            border-bottom: 0;
+          }
+
+          .right {
+            text-align: right;
+          }
+
+          .summary-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 360px;
+            gap: 16px;
+            align-items: start;
             margin-top: 18px;
+          }
+
+          .prepared {
+            border: 1px solid #dbe2ea;
+            border-radius: 18px;
+            background: #f8fafc;
+            padding: 14px 16px;
+          }
+
+          .prepared .title {
+            font-size: 11px;
+            font-weight: 900;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: #64748b;
+            margin-bottom: 8px;
+          }
+
+          .prepared .name {
+            font-size: 14px;
+            font-weight: 800;
+            color: #0f172a;
+            line-height: 1.5;
+          }
+
+          .totals {
+            width: 100%;
             border: 1px solid #dbe2ea;
             border-radius: 18px;
             padding: 14px 16px;
-            background: #fff;
+            background: #ffffff;
           }
+
           .total-row {
             display: flex;
             justify-content: space-between;
@@ -292,11 +397,17 @@ function printDocument(title, html) {
             border-bottom: 1px solid #e2e8f0;
             font-size: 14px;
           }
-          .total-row:last-child { border-bottom: 0; }
+
+          .total-row:last-child {
+            border-bottom: 0;
+          }
+
           .total-row.grand {
             font-size: 18px;
             font-weight: 900;
+            color: #0f172a;
           }
+
           .note {
             margin-top: 18px;
             border: 1px solid #dbe2ea;
@@ -306,18 +417,15 @@ function printDocument(title, html) {
             font-size: 13px;
             line-height: 1.65;
             white-space: pre-wrap;
+            color: #0f172a;
           }
-          .notice {
-            margin-top: 18px;
-            border: 1px solid #facc15;
-            border-radius: 18px;
-            padding: 14px 16px;
-            background: #fefce8;
-            font-size: 13px;
-            line-height: 1.65;
-          }
+
           @media print {
-            body { background: #fff; padding: 0; }
+            body {
+              background: #fff;
+              padding: 0;
+            }
+
             .page {
               margin: 0;
               width: auto;
@@ -330,7 +438,9 @@ function printDocument(title, html) {
       </head>
       <body>
         ${html}
-        <script>window.onload = function(){ window.print(); };</script>
+        <script>
+          window.onload = function () { window.print(); };
+        </script>
       </body>
     </html>
   `);
@@ -376,40 +486,60 @@ function buildProformaHtml({ sale, me }) {
 
   return `
     <div class="page">
-      <div class="header">
-        <div class="brand">
-          <div class="logo-box">
-            ${
-              biz.logoUrl
-                ? `<img src="${esc(biz.logoUrl)}" alt="${esc(
-                    biz.branchLabel || biz.businessName,
-                  )} logo" />`
-                : `<div class="logo-fallback">${esc(
-                    biz.branchLabel || biz.businessName,
-                  )}</div>`
-            }
-          </div>
+      <div class="top-band"></div>
 
-          <div>
-            <h1 class="brand-name">${esc(biz.businessName)}</h1>
-            <div class="doc-type">Proforma Invoice</div>
-            <div class="brand-meta">
-              ${biz.branchLabel ? `<div><strong>Branch:</strong> ${esc(biz.branchLabel)}</div>` : ""}
-              ${biz.address ? `<div><strong>Address:</strong> ${esc(biz.address)}</div>` : ""}
-              ${biz.phone ? `<div><strong>Phone:</strong> ${esc(biz.phone)}</div>` : ""}
-              ${biz.email ? `<div><strong>Email:</strong> ${esc(biz.email)}</div>` : ""}
-              ${biz.website ? `<div><strong>Website:</strong> ${esc(biz.website)}</div>` : ""}
-              ${biz.tin ? `<div><strong>TIN:</strong> ${esc(biz.tin)}</div>` : ""}
-              ${biz.momoCode ? `<div><strong>MoMo Code:</strong> ${esc(biz.momoCode)}</div>` : ""}
+      <div class="header">
+        <div>
+          <div class="brand-wrap">
+            <div class="logo-shell">
+              ${
+                biz.logoUrl
+                  ? `<img src="${esc(biz.logoUrl)}" alt="${esc(
+                      biz.branchLabel,
+                    )} logo" />`
+                  : `<div class="logo-fallback">${esc(biz.branchLabel)}</div>`
+              }
+            </div>
+
+            <div class="brand-copy">
+              <div class="doc-kicker">Proforma Invoice</div>
+              <h1 class="branch-name">${esc(biz.branchLabel)}</h1>
+              <div class="company-name">${esc(biz.businessName)}</div>
+
+              <div class="contact-lines">
+                ${biz.address ? `<div><strong>Address:</strong> ${esc(biz.address)}</div>` : ""}
+                ${biz.phone ? `<div><strong>Phone:</strong> ${esc(biz.phone)}</div>` : ""}
+                ${biz.email ? `<div><strong>Email:</strong> ${esc(biz.email)}</div>` : ""}
+                ${biz.website ? `<div><strong>Website:</strong> ${esc(biz.website)}</div>` : ""}
+                ${biz.tin ? `<div><strong>TIN:</strong> ${esc(biz.tin)}</div>` : ""}
+                ${biz.momoCode ? `<div><strong>MoMo Code:</strong> ${esc(biz.momoCode)}</div>` : ""}
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="meta-card">
-          <div class="meta-row"><span><strong>Document No</strong></span><span>PF-${esc(sale?.id || "—")}</span></div>
-          <div class="meta-row"><span><strong>Sale Ref</strong></span><span>#${esc(sale?.id || "—")}</span></div>
-          <div class="meta-row"><span><strong>Date</strong></span><span>${esc(safeDate(createdAt))}</span></div>
-          <div class="meta-row"><span><strong>Status</strong></span><span>${esc(toStr(sale?.status || "").toUpperCase() || "—")}</span></div>
+        <div class="meta-stack">
+          <div class="meta-chip">
+            <div class="meta-chip-label">Doc No</div>
+            <div class="meta-chip-value">PF-${esc(sale?.id || "—")}</div>
+          </div>
+
+          <div class="meta-chip">
+            <div class="meta-chip-label">Sale Ref</div>
+            <div class="meta-chip-value">#${esc(sale?.id || "—")}</div>
+          </div>
+
+          <div class="meta-chip">
+            <div class="meta-chip-label">Date</div>
+            <div class="meta-chip-value">${esc(safeDate(createdAt))}</div>
+          </div>
+
+          <div class="meta-chip">
+            <div class="meta-chip-label">Status</div>
+            <div class="meta-chip-value">${esc(
+              toStr(sale?.status || "").toUpperCase() || "—",
+            )}</div>
+          </div>
         </div>
       </div>
 
@@ -421,12 +551,6 @@ function buildProformaHtml({ sale, me }) {
           <div class="line"><strong>TIN:</strong> ${esc(toStr(customerTin) || "—")}</div>
           <div class="line"><strong>Address:</strong> ${esc(toStr(customerAddress) || "—")}</div>
         </div>
-
-        <div class="card">
-          <div class="card-title">Prepared By</div>
-          <div class="line"><strong>Seller:</strong> ${esc(toStr(sellerName) || "—")}</div>
-          <div class="line"><strong>Branch:</strong> ${esc(biz.branchLabel || biz.businessName)}</div>
-        </div>
       </div>
 
       <table>
@@ -434,21 +558,31 @@ function buildProformaHtml({ sale, me }) {
           <tr>
             <th style="width:56px;">#</th>
             <th>Item</th>
-            <th style="width:160px;">SKU</th>
+            <th style="width:150px;">SKU</th>
             <th style="width:90px;" class="right">Qty</th>
             <th style="width:150px;" class="right">Unit Price</th>
             <th style="width:170px;" class="right">Line Total</th>
           </tr>
         </thead>
         <tbody>
-          ${rows || `<tr><td colspan="6">No items.</td></tr>`}
+          ${
+            rows ||
+            `<tr><td colspan="6" style="text-align:center;">No items.</td></tr>`
+          }
         </tbody>
       </table>
 
-      <div class="totals">
-        <div class="total-row grand">
-          <span>Total</span>
-          <span>${esc(moneyLine(total))}</span>
+      <div class="summary-row">
+        <div class="prepared">
+          <div class="title">Prepared By</div>
+          <div class="name">${esc(toStr(sellerName) || "—")}</div>
+        </div>
+
+        <div class="totals">
+          <div class="total-row grand">
+            <span>Total</span>
+            <span>${esc(moneyLine(total))}</span>
+          </div>
         </div>
       </div>
 
@@ -457,75 +591,8 @@ function buildProformaHtml({ sale, me }) {
           ? `<div class="note"><strong>Note</strong><br/>${esc(toStr(note))}</div>`
           : ""
       }
-
-      <div class="notice">
-        <strong>Important</strong><br/>
-        This proforma invoice is a quotation document only. It is not a final tax invoice. Prices, availability, and terms may change until payment is confirmed and goods are released.
-      </div>
     </div>
   `;
-}
-
-function PreviewHeader({ biz, title }) {
-  return (
-    <div className="flex items-start gap-4">
-      <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-3xl border border-[var(--border)] bg-white p-2">
-        {biz.logoUrl ? (
-          <img
-            src={biz.logoUrl}
-            alt={`${biz.branchLabel || biz.businessName} logo`}
-            className="h-full w-full object-contain"
-          />
-        ) : (
-          <div className="px-2 text-center text-[10px] font-black uppercase tracking-[0.14em] text-[var(--muted)]">
-            {biz.branchLabel || biz.businessName}
-          </div>
-        )}
-      </div>
-
-      <div className="min-w-0">
-        <div className="text-[28px] font-black tracking-[-0.02em] text-[var(--app-fg)]">
-          {biz.businessName}
-        </div>
-        <div className="mt-2 text-xs font-black uppercase tracking-[0.18em] app-muted">
-          {title}
-        </div>
-
-        <div className="mt-3 space-y-1 text-sm text-[var(--app-fg)]">
-          {biz.branchLabel ? (
-            <div>
-              <b>Branch:</b> {biz.branchLabel}
-            </div>
-          ) : null}
-          {biz.address ? (
-            <div>
-              <b>Address:</b> {biz.address}
-            </div>
-          ) : null}
-          {biz.phone ? (
-            <div>
-              <b>Phone:</b> {biz.phone}
-            </div>
-          ) : null}
-          {biz.email ? (
-            <div>
-              <b>Email:</b> {biz.email}
-            </div>
-          ) : null}
-          {biz.website ? (
-            <div>
-              <b>Website:</b> {biz.website}
-            </div>
-          ) : null}
-          {biz.tin ? (
-            <div>
-              <b>TIN:</b> {biz.tin}
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function InfoCard({ title, children }) {
@@ -536,6 +603,19 @@ function InfoCard({ title, children }) {
       </div>
       <div className="mt-3 space-y-2 text-sm text-[var(--app-fg)]">
         {children}
+      </div>
+    </div>
+  );
+}
+
+function MetaChip({ label, value }) {
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5">
+      <div className="text-[9px] font-black uppercase tracking-[0.14em] app-muted">
+        {label}
+      </div>
+      <div className="mt-1 break-words text-[12px] font-extrabold leading-5 text-[var(--app-fg)]">
+        {value}
       </div>
     </div>
   );
@@ -558,7 +638,7 @@ export default function SellerProformaModal({
   const sellerName = sale?.sellerName || sale?.createdByName || me?.name || "—";
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
 
       <div className="relative w-full max-w-6xl overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--card)] shadow-2xl">
@@ -603,35 +683,87 @@ export default function SellerProformaModal({
           ) : !sale ? (
             <div className="text-sm app-muted">No sale loaded.</div>
           ) : (
-            <div className="mx-auto max-w-5xl rounded-[28px] border border-[var(--border)] bg-[var(--card-2)] p-6">
+            <div className="mx-auto max-w-5xl rounded-[28px] border border-[var(--border)] bg-[var(--card-2)] p-4 sm:p-6">
               <div className="mb-6 h-2 rounded-full bg-[var(--app-fg)]" />
 
-              <div className="grid gap-5 border-b border-[var(--border)] pb-6 lg:grid-cols-[1.35fr_0.85fr]">
-                <PreviewHeader biz={biz} title="Proforma Invoice" />
+              <div className="grid gap-5 border-b border-[var(--border)] pb-6 lg:grid-cols-[minmax(0,1fr)_148px]">
+                <div>
+                  <div className="flex items-start gap-4">
+                    <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-[22px] border border-[var(--border)] bg-white p-2">
+                      {biz.logoUrl ? (
+                        <img
+                          src={biz.logoUrl}
+                          alt={`${biz.branchLabel} logo`}
+                          className="h-full w-full object-contain"
+                        />
+                      ) : (
+                        <div className="px-2 text-center text-[10px] font-black uppercase tracking-[0.14em] text-[var(--muted)]">
+                          {biz.branchLabel}
+                        </div>
+                      )}
+                    </div>
 
-                <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 text-sm text-[var(--app-fg)]">
-                  <div className="flex items-center justify-between py-2">
-                    <span className="font-semibold">Document No</span>
-                    <span>PF-{sale?.id || "—"}</span>
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-black uppercase tracking-[0.18em] app-muted">
+                        Proforma Invoice
+                      </div>
+
+                      <div className="mt-2 break-words text-[28px] font-black leading-[1.06] tracking-[-0.03em] text-[var(--app-fg)]">
+                        {biz.branchLabel}
+                      </div>
+
+                      {/* <div className="mt-2 text-sm font-semibold text-[var(--muted)]">
+                        {biz.businessName}
+                      </div> */}
+
+                      <div className="mt-4 space-y-1 text-sm text-[var(--app-fg)]">
+                        {biz.address ? (
+                          <div>
+                            <b>Address:</b> {biz.address}
+                          </div>
+                        ) : null}
+                        {biz.phone ? (
+                          <div>
+                            <b>Phone:</b> {biz.phone}
+                          </div>
+                        ) : null}
+                        {biz.email ? (
+                          <div>
+                            <b>Email:</b> {biz.email}
+                          </div>
+                        ) : null}
+                        {biz.website ? (
+                          <div>
+                            <b>Website:</b> {biz.website}
+                          </div>
+                        ) : null}
+                        {biz.tin ? (
+                          <div>
+                            <b>TIN:</b> {biz.tin}
+                          </div>
+                        ) : null}
+                        {biz.momoCode ? (
+                          <div>
+                            <b>MoMo Code:</b> {biz.momoCode}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between py-2">
-                    <span className="font-semibold">Sale Ref</span>
-                    <span>#{sale?.id || "—"}</span>
-                  </div>
-                  <div className="flex items-center justify-between py-2">
-                    <span className="font-semibold">Date</span>
-                    <span>{safeDate(createdAt)}</span>
-                  </div>
-                  <div className="flex items-center justify-between py-2">
-                    <span className="font-semibold">Status</span>
-                    <span>
-                      {toStr(sale?.status || "").toUpperCase() || "—"}
-                    </span>
-                  </div>
+                </div>
+
+                <div className="grid gap-2 self-start">
+                  <MetaChip label="Doc No" value={`PF-${sale?.id || "—"}`} />
+                  <MetaChip label="Sale Ref" value={`#${sale?.id || "—"}`} />
+                  <MetaChip label="Date" value={safeDate(createdAt)} />
+                  <MetaChip
+                    label="Status"
+                    value={toStr(sale?.status || "").toUpperCase() || "—"}
+                  />
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <div className="mt-5 grid gap-4">
                 <InfoCard title="Customer">
                   <div>
                     <b>Name:</b> {toStr(customerName) || "Walk-in"}
@@ -648,15 +780,6 @@ export default function SellerProformaModal({
                     <b>Address:</b>{" "}
                     {toStr(sale?.customerAddress || sale?.customer_address) ||
                       "—"}
-                  </div>
-                </InfoCard>
-
-                <InfoCard title="Prepared By">
-                  <div>
-                    <b>Seller:</b> {toStr(sellerName) || "—"}
-                  </div>
-                  <div>
-                    <b>Branch:</b> {biz.branchLabel || biz.businessName}
                   </div>
                 </InfoCard>
               </div>
@@ -740,10 +863,21 @@ export default function SellerProformaModal({
                 </table>
               </div>
 
-              <div className="mt-5 ml-auto w-full max-w-sm rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
-                <div className="flex items-center justify-between text-lg font-black text-[var(--app-fg)]">
-                  <span>Total</span>
-                  <span>{moneyLine(total)}</span>
+              <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
+                  <div className="text-[11px] font-black uppercase tracking-[0.14em] app-muted">
+                    Prepared By
+                  </div>
+                  <div className="mt-2 text-sm font-bold text-[var(--app-fg)]">
+                    {toStr(sellerName) || "—"}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
+                  <div className="flex items-center justify-between text-lg font-black text-[var(--app-fg)]">
+                    <span>Total</span>
+                    <span>{moneyLine(total)}</span>
+                  </div>
                 </div>
               </div>
 
@@ -757,17 +891,6 @@ export default function SellerProformaModal({
                   </div>
                 </div>
               ) : null}
-
-              <div className="mt-5 rounded-3xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-                <div className="text-[11px] font-black uppercase tracking-[0.14em]">
-                  Commercial Notice
-                </div>
-                <div className="mt-2 leading-6">
-                  This document is a quotation only and should not be treated as
-                  proof of final payment. Final invoice terms apply at payment
-                  and release.
-                </div>
-              </div>
             </div>
           )}
         </div>
