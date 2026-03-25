@@ -179,6 +179,7 @@ function printDocument(title, html) {
         <title>${esc(title)}</title>
         <style>
           * { box-sizing: border-box; }
+
           html, body {
             margin: 0;
             padding: 0;
@@ -207,7 +208,7 @@ function printDocument(title, html) {
 
           .header {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-columns: minmax(0, 1fr) 200px;
             gap: 18px;
             align-items: start;
             padding-bottom: 18px;
@@ -238,6 +239,7 @@ function printDocument(title, html) {
             width: 100%;
             height: 100%;
             object-fit: contain;
+            display: block;
           }
 
           .logo-fallback {
@@ -265,8 +267,8 @@ function printDocument(title, html) {
 
           .branch-name {
             margin: 8px 0 0;
-            font-size: 30px;
-            line-height: 1.06;
+            font-size: 22px;
+            line-height: 1.08;
             font-weight: 900;
             letter-spacing: -0.03em;
             color: #0f172a;
@@ -274,7 +276,7 @@ function printDocument(title, html) {
           }
 
           .company-name {
-            margin-top: 8px;
+            margin-top: 6px;
             font-size: 13px;
             line-height: 1.5;
             color: #475569;
@@ -290,35 +292,35 @@ function printDocument(title, html) {
             color: #334155;
           }
 
-          .meta-stack {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            min-width: 148px;
-          }
-
-          .meta-chip {
+          .meta-panel {
             border: 1px solid #dbe2ea;
-            border-radius: 14px;
+            border-radius: 18px;
             background: #f8fafc;
-            padding: 8px 10px;
+            overflow: hidden;
+            min-width: 200px;
           }
 
-          .meta-chip-label {
-            font-size: 9px;
-            line-height: 1.2;
-            font-weight: 900;
-            letter-spacing: 0.14em;
-            text-transform: uppercase;
-            color: #64748b;
-          }
-
-          .meta-chip-value {
-            margin-top: 4px;
+          .meta-row {
+            padding: 11px 13px;
+            border-bottom: 1px solid #e2e8f0;
             font-size: 12px;
-            line-height: 1.35;
-            font-weight: 800;
+            line-height: 1.45;
             color: #0f172a;
+          }
+
+          .meta-row:last-child {
+            border-bottom: 0;
+          }
+
+          .meta-row .label {
+            color: #64748b;
+            font-weight: 800;
+            margin-right: 6px;
+          }
+
+          .meta-row .value {
+            color: #0f172a;
+            font-weight: 900;
             word-break: break-word;
           }
 
@@ -397,29 +399,6 @@ function printDocument(title, html) {
             margin-top: 18px;
           }
 
-          .prepared {
-            border: 1px solid #dbe2ea;
-            border-radius: 18px;
-            background: #f8fafc;
-            padding: 14px 16px;
-          }
-
-          .prepared .title {
-            font-size: 11px;
-            font-weight: 900;
-            letter-spacing: 0.14em;
-            text-transform: uppercase;
-            color: #64748b;
-            margin-bottom: 8px;
-          }
-
-          .prepared .name {
-            font-size: 14px;
-            font-weight: 800;
-            color: #0f172a;
-            line-height: 1.5;
-          }
-
           .totals {
             width: 100%;
             border: 1px solid #dbe2ea;
@@ -462,7 +441,7 @@ function printDocument(title, html) {
           .signatures {
             margin-top: 22px;
             display: grid;
-            grid-template-columns: 1fr 1fr 220px;
+            grid-template-columns: minmax(0, 1fr) 220px;
             gap: 16px;
             align-items: stretch;
           }
@@ -472,7 +451,7 @@ function printDocument(title, html) {
             border-radius: 20px;
             background: #ffffff;
             padding: 16px;
-            min-height: 185px;
+            min-height: 150px;
             display: flex;
             flex-direction: column;
           }
@@ -530,7 +509,7 @@ function printDocument(title, html) {
             border: 1px dashed #94a3b8;
             border-radius: 20px;
             background: #f8fafc;
-            min-height: 185px;
+            min-height: 150px;
             padding: 16px;
             display: flex;
             flex-direction: column;
@@ -611,29 +590,25 @@ function buildInvoiceHtml({ sale, me }) {
 
   const rows = items
     .map((it, idx) => {
-      const qty = Number(it?.qty) || 0;
-      const unitPrice = Number(it?.unitPrice ?? it?.price) || 0;
-      const lineTotal = Number(it?.lineTotal ?? it?.total ?? qty * unitPrice);
-
-      const name = esc(
-        toStr(it?.productName || it?.name || `Item #${it?.productId || ""}`) ||
-          "—",
-      );
-      const sku = esc(toStr(it?.sku) || "—");
-
-      const unitPriceFmt = esc(moneyLine(unitPrice));
-      const lineTotalFmt = esc(moneyLine(lineTotal));
+      const qty = Number(it?.qty ?? 0) || 0;
+      const unitPrice = Number(it?.unitPrice ?? it?.price ?? 0) || 0;
+      const lineTotal =
+        Number(it?.lineTotal ?? it?.total ?? qty * unitPrice) || 0;
 
       return `
-      <tr>
-        <td>${idx + 1}</td>
-        <td>${name}</td>
-        <td>${sku}</td>
-        <td class="right">${qty}</td>
-        <td class="right">${unitPriceFmt}</td>
-        <td class="right">${lineTotalFmt}</td>
-      </tr>
-    `;
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${esc(
+            toStr(
+              it?.productName || it?.name || `Item #${it?.productId || ""}`,
+            ) || "—",
+          )}</td>
+          <td>${esc(toStr(it?.sku) || "—")}</td>
+          <td class="right">${qty}</td>
+          <td class="right">${esc(moneyLine(unitPrice))}</td>
+          <td class="right">${esc(moneyLine(lineTotal))}</td>
+        </tr>
+      `;
     })
     .join("");
 
@@ -678,31 +653,12 @@ function buildInvoiceHtml({ sale, me }) {
           </div>
         </div>
 
-        <div class="meta-stack">
-          <div class="meta-chip">
-            <div class="meta-chip-label">Invoice No</div>
-            <div class="meta-chip-value">INV-${esc(sale?.id || "—")}</div>
-          </div>
-
-          <div class="meta-chip">
-            <div class="meta-chip-label">Sale Ref</div>
-            <div class="meta-chip-value">#${esc(sale?.id || "—")}</div>
-          </div>
-
-          <div class="meta-chip">
-            <div class="meta-chip-label">Created</div>
-            <div class="meta-chip-value">${esc(safeDate(createdAt))}</div>
-          </div>
-
-          <div class="meta-chip">
-            <div class="meta-chip-label">Paid</div>
-            <div class="meta-chip-value">${esc(safeDate(paidAt))}</div>
-          </div>
-
-          <div class="meta-chip">
-            <div class="meta-chip-label">Method</div>
-            <div class="meta-chip-value">${esc(paymentMethod)}</div>
-          </div>
+        <div class="meta-panel">
+          <div class="meta-row"><span class="label">Invoice No:</span><span class="value">INV-${esc(sale?.id || "—")}</span></div>
+          <div class="meta-row"><span class="label">Sale Ref:</span><span class="value">#${esc(sale?.id || "—")}</span></div>
+          <div class="meta-row"><span class="label">Created:</span><span class="value">${esc(safeDate(createdAt))}</span></div>
+          <div class="meta-row"><span class="label">Paid:</span><span class="value">${esc(safeDate(paidAt))}</span></div>
+          <div class="meta-row"><span class="label">Method:</span><span class="value">${esc(paymentMethod)}</span></div>
         </div>
       </div>
 
@@ -736,10 +692,7 @@ function buildInvoiceHtml({ sale, me }) {
       </table>
 
       <div class="summary-row">
-        <div class="prepared">
-          <div class="title">Recorded By</div>
-          <div class="name">${esc(toStr(sellerName) || "—")}</div>
-        </div>
+        <div></div>
 
         <div class="totals">
           <div class="total-row grand">
@@ -763,24 +716,7 @@ function buildInvoiceHtml({ sale, me }) {
 
           <div class="signature-meta">
             <div class="signature-meta-row">
-              <div class="signature-meta-label">Date</div>
-              <div class="signature-meta-line"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="signature-card">
-          <div class="signature-title">Received By Customer</div>
-          <div class="signature-space"></div>
-          <div class="signature-line"></div>
-
-          <div class="signature-meta">
-            <div class="signature-meta-row">
-              <div class="signature-meta-label">Name</div>
-              <div class="signature-meta-line"></div>
-            </div>
-            <div class="signature-meta-row">
-              <div class="signature-meta-label">Date</div>
+             
               <div class="signature-meta-line"></div>
             </div>
           </div>
@@ -808,14 +744,32 @@ function InfoCard({ title, children }) {
   );
 }
 
-function MetaChip({ label, value }) {
+function MetaPanel({ saleId, createdAt, paidAt, paymentMethod }) {
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5">
-      <div className="text-[9px] font-black uppercase tracking-[0.14em] app-muted">
-        {label}
+    <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] min-w-[200px]">
+      <div className="border-b border-[var(--border)] px-3 py-3 text-sm font-semibold text-[var(--app-fg)]">
+        <span className="app-muted">Invoice No:</span>{" "}
+        <span className="font-extrabold">INV-{saleId || "—"}</span>
       </div>
-      <div className="mt-1 break-words text-[12px] font-extrabold leading-5 text-[var(--app-fg)]">
-        {value}
+
+      <div className="border-b border-[var(--border)] px-3 py-3 text-sm font-semibold text-[var(--app-fg)]">
+        <span className="app-muted">Sale Ref:</span>{" "}
+        <span className="font-extrabold">#{saleId || "—"}</span>
+      </div>
+
+      <div className="border-b border-[var(--border)] px-3 py-3 text-sm font-semibold text-[var(--app-fg)]">
+        <span className="app-muted">Created:</span>{" "}
+        <span className="font-extrabold">{safeDate(createdAt)}</span>
+      </div>
+
+      <div className="border-b border-[var(--border)] px-3 py-3 text-sm font-semibold text-[var(--app-fg)]">
+        <span className="app-muted">Paid:</span>{" "}
+        <span className="font-extrabold">{safeDate(paidAt)}</span>
+      </div>
+
+      <div className="px-3 py-3 text-sm font-semibold text-[var(--app-fg)]">
+        <span className="app-muted">Method:</span>{" "}
+        <span className="font-extrabold">{paymentMethod}</span>
       </div>
     </div>
   );
@@ -844,15 +798,6 @@ function SignatureCard({
           <div className="grid grid-cols-[52px_minmax(0,1fr)] items-end gap-3">
             <div className="text-[10px] font-black uppercase tracking-[0.1em] app-muted">
               Name
-            </div>
-            <div className="h-[18px] border-b border-[var(--border-strong)]" />
-          </div>
-        ) : null}
-
-        {showDateRow ? (
-          <div className="grid grid-cols-[52px_minmax(0,1fr)] items-end gap-3">
-            <div className="text-[10px] font-black uppercase tracking-[0.1em] app-muted">
-              Date
             </div>
             <div className="h-[18px] border-b border-[var(--border-strong)]" />
           </div>
@@ -952,7 +897,7 @@ export default function SellerInvoiceModal({
             <div className="mx-auto max-w-5xl rounded-[28px] border border-[var(--border)] bg-[var(--card-2)] p-4 sm:p-6">
               <div className="mb-6 h-2 rounded-full bg-[var(--app-fg)]" />
 
-              <div className="grid gap-5 border-b border-[var(--border)] pb-6 lg:grid-cols-[minmax(0,1fr)_148px]">
+              <div className="grid gap-5 border-b border-[var(--border)] pb-6 lg:grid-cols-[minmax(0,1fr)_200px]">
                 <div>
                   <div className="flex items-start gap-4">
                     <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-[22px] border border-[var(--border)] bg-white p-2">
@@ -974,13 +919,9 @@ export default function SellerInvoiceModal({
                         Invoice
                       </div>
 
-                      <div className="mt-2 break-words text-[28px] font-black leading-[1.06] tracking-[-0.03em] text-[var(--app-fg)]">
+                      <div className="mt-2 break-words text-[20px] font-black leading-[1.08] tracking-[-0.03em] text-[var(--app-fg)] sm:text-[22px]">
                         {biz.branchLabel}
                       </div>
-
-                      {/* <div className="mt-2 text-sm font-semibold text-[var(--muted)]">
-                        {biz.businessName}
-                      </div> */}
 
                       <div className="mt-4 space-y-1 text-sm text-[var(--app-fg)]">
                         {biz.address ? (
@@ -1023,16 +964,12 @@ export default function SellerInvoiceModal({
                   </div>
                 </div>
 
-                <div className="grid gap-2 self-start">
-                  <MetaChip
-                    label="Invoice No"
-                    value={`INV-${sale?.id || "—"}`}
-                  />
-                  <MetaChip label="Sale Ref" value={`#${sale?.id || "—"}`} />
-                  <MetaChip label="Created" value={safeDate(createdAt)} />
-                  <MetaChip label="Paid" value={safeDate(paidAt)} />
-                  <MetaChip label="Method" value={paymentMethod} />
-                </div>
+                <MetaPanel
+                  saleId={sale?.id}
+                  createdAt={createdAt}
+                  paidAt={paidAt}
+                  paymentMethod={paymentMethod}
+                />
               </div>
 
               <div className="mt-5 grid gap-4">
@@ -1136,14 +1073,7 @@ export default function SellerInvoiceModal({
               </div>
 
               <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-                <div className=" p-4">
-                  {/* <div className="text-[11px] font-black uppercase tracking-[0.14em] app-muted">
-                    Recorded By
-                  </div>
-                  <div className="mt-2 text-sm font-bold text-[var(--app-fg)]">
-                    {toStr(sellerName) || "—"}
-                  </div> */}
-                </div>
+                <div></div>
 
                 <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
                   <div className="flex items-center justify-between text-lg font-black text-[var(--app-fg)]">
@@ -1164,19 +1094,11 @@ export default function SellerInvoiceModal({
                 </div>
               ) : null}
 
-              <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_220px]">
+              <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
                 <SignatureCard
                   title="Prepared By"
                   lineValue={toStr(sellerName) || ""}
                   showNameRow={false}
-                  showDateRow={true}
-                />
-
-                <SignatureCard
-                  title="Received By Customer"
-                  lineValue=""
-                  showNameRow={true}
-                  showDateRow={true}
                 />
 
                 <StampCard />

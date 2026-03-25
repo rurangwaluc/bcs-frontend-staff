@@ -164,6 +164,7 @@ function printDocument(title, html) {
         <title>${esc(title)}</title>
         <style>
           * { box-sizing: border-box; }
+
           html, body {
             margin: 0;
             padding: 0;
@@ -192,7 +193,7 @@ function printDocument(title, html) {
 
           .header {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-columns: minmax(0, 1fr) 200px;
             gap: 18px;
             align-items: start;
             padding-bottom: 18px;
@@ -254,8 +255,8 @@ function printDocument(title, html) {
 
           .branch-name {
             margin: 8px 0 0;
-            font-size: 30px;
-            line-height: 1.06;
+            font-size: 22px;
+            line-height: 1.08;
             font-weight: 900;
             letter-spacing: -0.03em;
             color: #0f172a;
@@ -263,7 +264,7 @@ function printDocument(title, html) {
           }
 
           .company-name {
-            margin-top: 8px;
+            margin-top: 6px;
             font-size: 13px;
             line-height: 1.5;
             color: #475569;
@@ -279,35 +280,35 @@ function printDocument(title, html) {
             color: #334155;
           }
 
-          .meta-stack {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            min-width: 148px;
-          }
-
-          .meta-chip {
+          .meta-panel {
             border: 1px solid #dbe2ea;
-            border-radius: 14px;
+            border-radius: 18px;
             background: #f8fafc;
-            padding: 8px 10px;
+            overflow: hidden;
+            min-width: 200px;
           }
 
-          .meta-chip-label {
-            font-size: 9px;
-            line-height: 1.2;
-            font-weight: 900;
-            letter-spacing: 0.14em;
-            text-transform: uppercase;
-            color: #64748b;
-          }
-
-          .meta-chip-value {
-            margin-top: 4px;
+          .meta-row {
+            padding: 11px 13px;
+            border-bottom: 1px solid #e2e8f0;
             font-size: 12px;
-            line-height: 1.35;
-            font-weight: 800;
+            line-height: 1.45;
             color: #0f172a;
+          }
+
+          .meta-row:last-child {
+            border-bottom: 0;
+          }
+
+          .meta-row .label {
+            color: #64748b;
+            font-weight: 800;
+            margin-right: 6px;
+          }
+
+          .meta-row .value {
+            color: #0f172a;
+            font-weight: 900;
             word-break: break-word;
           }
 
@@ -378,30 +379,6 @@ function printDocument(title, html) {
             text-align: right;
           }
 
-          .prepared {
-            margin-top: 18px;
-            border: 1px solid #dbe2ea;
-            border-radius: 18px;
-            background: #f8fafc;
-            padding: 14px 16px;
-          }
-
-          .prepared .title {
-            font-size: 11px;
-            font-weight: 900;
-            letter-spacing: 0.14em;
-            text-transform: uppercase;
-            color: #64748b;
-            margin-bottom: 8px;
-          }
-
-          .prepared .name {
-            font-size: 14px;
-            font-weight: 800;
-            color: #0f172a;
-            line-height: 1.5;
-          }
-
           .note {
             margin-top: 18px;
             border: 1px solid #dbe2ea;
@@ -416,7 +393,7 @@ function printDocument(title, html) {
           .signatures {
             margin-top: 22px;
             display: grid;
-            grid-template-columns: 1fr 1fr 220px;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 220px;
             gap: 16px;
             align-items: stretch;
           }
@@ -426,7 +403,7 @@ function printDocument(title, html) {
             border-radius: 20px;
             background: #ffffff;
             padding: 16px;
-            min-height: 185px;
+            min-height: 150px;
             display: flex;
             flex-direction: column;
           }
@@ -484,7 +461,7 @@ function printDocument(title, html) {
             border: 1px dashed #94a3b8;
             border-radius: 20px;
             background: #f8fafc;
-            min-height: 185px;
+            min-height: 150px;
             padding: 16px;
             display: flex;
             flex-direction: column;
@@ -612,28 +589,13 @@ function buildDeliveryHtml({ sale, me }) {
           </div>
         </div>
 
-        <div class="meta-stack">
-          <div class="meta-chip">
-            <div class="meta-chip-label">Document No</div>
-            <div class="meta-chip-value">DN-${esc(sale?.id || "—")}</div>
-          </div>
-
-          <div class="meta-chip">
-            <div class="meta-chip-label">Sale Ref</div>
-            <div class="meta-chip-value">#${esc(sale?.id || "—")}</div>
-          </div>
-
-          <div class="meta-chip">
-            <div class="meta-chip-label">Date</div>
-            <div class="meta-chip-value">${esc(safeDate(deliveredAt))}</div>
-          </div>
-
-          <div class="meta-chip">
-            <div class="meta-chip-label">Status</div>
-            <div class="meta-chip-value">${esc(
-              formatDocumentStatus(sale?.status),
-            )}</div>
-          </div>
+        <div class="meta-panel">
+          <div class="meta-row"><span class="label">Document No:</span><span class="value">DN-${esc(sale?.id || "—")}</span></div>
+          <div class="meta-row"><span class="label">Sale Ref:</span><span class="value">#${esc(sale?.id || "—")}</span></div>
+          <div class="meta-row"><span class="label">Date:</span><span class="value">${esc(safeDate(deliveredAt))}</span></div>
+          <div class="meta-row"><span class="label">Status:</span><span class="value">${esc(
+            formatDocumentStatus(sale?.status),
+          )}</span></div>
         </div>
       </div>
 
@@ -662,11 +624,6 @@ function buildDeliveryHtml({ sale, me }) {
           }
         </tbody>
       </table>
-
-      <div class="prepared">
-        <div class="title">Prepared By</div>
-        <div class="name">${esc(toStr(sellerName) || "—")}</div>
-      </div>
 
       ${
         toStr(note)
@@ -727,14 +684,27 @@ function InfoCard({ title, children }) {
   );
 }
 
-function MetaChip({ label, value }) {
+function MetaPanel({ saleId, deliveredAt, status }) {
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5">
-      <div className="text-[9px] font-black uppercase tracking-[0.14em] app-muted">
-        {label}
+    <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] min-w-[200px]">
+      <div className="border-b border-[var(--border)] px-3 py-3 text-sm font-semibold text-[var(--app-fg)]">
+        <span className="app-muted">Document No:</span>{" "}
+        <span className="font-extrabold">DN-{saleId || "—"}</span>
       </div>
-      <div className="mt-1 break-words text-[12px] font-extrabold leading-5 text-[var(--app-fg)]">
-        {value}
+
+      <div className="border-b border-[var(--border)] px-3 py-3 text-sm font-semibold text-[var(--app-fg)]">
+        <span className="app-muted">Sale Ref:</span>{" "}
+        <span className="font-extrabold">#{saleId || "—"}</span>
+      </div>
+
+      <div className="border-b border-[var(--border)] px-3 py-3 text-sm font-semibold text-[var(--app-fg)]">
+        <span className="app-muted">Date:</span>{" "}
+        <span className="font-extrabold">{safeDate(deliveredAt)}</span>
+      </div>
+
+      <div className="px-3 py-3 text-sm font-semibold text-[var(--app-fg)]">
+        <span className="app-muted">Status:</span>{" "}
+        <span className="font-extrabold">{formatDocumentStatus(status)}</span>
       </div>
     </div>
   );
@@ -763,15 +733,6 @@ function SignatureCard({
           <div className="grid grid-cols-[52px_minmax(0,1fr)] items-end gap-3">
             <div className="text-[10px] font-black uppercase tracking-[0.1em] app-muted">
               Name
-            </div>
-            <div className="h-[18px] border-b border-[var(--border-strong)]" />
-          </div>
-        ) : null}
-
-        {showDateRow ? (
-          <div className="grid grid-cols-[52px_minmax(0,1fr)] items-end gap-3">
-            <div className="text-[10px] font-black uppercase tracking-[0.1em] app-muted">
-              Date
             </div>
             <div className="h-[18px] border-b border-[var(--border-strong)]" />
           </div>
@@ -866,7 +827,7 @@ export default function SellerDeliveryNoteModal({
             <div className="mx-auto max-w-5xl rounded-[28px] border border-[var(--border)] bg-[var(--card-2)] p-4 sm:p-6">
               <div className="mb-6 h-2 rounded-full bg-[var(--app-fg)]" />
 
-              <div className="grid gap-5 border-b border-[var(--border)] pb-6 lg:grid-cols-[minmax(0,1fr)_148px]">
+              <div className="grid gap-5 border-b border-[var(--border)] pb-6 lg:grid-cols-[minmax(0,1fr)_200px]">
                 <div>
                   <div className="flex items-start gap-4">
                     <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-[22px] border border-[var(--border)] bg-white p-2">
@@ -888,13 +849,9 @@ export default function SellerDeliveryNoteModal({
                         Delivery Note
                       </div>
 
-                      <div className="mt-2 break-words text-[28px] font-black leading-[1.06] tracking-[-0.03em] text-[var(--app-fg)]">
+                      <div className="mt-2 break-words text-[20px] font-black leading-[1.08] tracking-[-0.03em] text-[var(--app-fg)] sm:text-[22px]">
                         {biz.branchLabel}
                       </div>
-
-                      {/* <div className="mt-2 text-sm font-semibold text-[var(--muted)]">
-                        {biz.businessName}
-                      </div> */}
 
                       <div className="mt-4 space-y-1 text-sm text-[var(--app-fg)]">
                         {biz.address ? (
@@ -927,18 +884,11 @@ export default function SellerDeliveryNoteModal({
                   </div>
                 </div>
 
-                <div className="grid gap-2 self-start">
-                  <MetaChip
-                    label="Document No"
-                    value={`DN-${sale?.id || "—"}`}
-                  />
-                  <MetaChip label="Sale Ref" value={`#${sale?.id || "—"}`} />
-                  <MetaChip label="Date" value={safeDate(deliveredAt)} />
-                  <MetaChip
-                    label="Status"
-                    value={formatDocumentStatus(sale?.status)}
-                  />
-                </div>
+                <MetaPanel
+                  saleId={sale?.id}
+                  deliveredAt={deliveredAt}
+                  status={sale?.status}
+                />
               </div>
 
               <div className="mt-5 grid gap-4">
@@ -1021,8 +971,6 @@ export default function SellerDeliveryNoteModal({
                   </tbody>
                 </table>
               </div>
-
-              <div className="p-4"></div>
 
               {toStr(sale?.note) ? (
                 <div className="mt-5 rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">

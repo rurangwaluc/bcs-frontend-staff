@@ -51,7 +51,7 @@ export default function RoleBar({
 
   const defaultLinks = useMemo(
     () => [
-      { href: "/comms", label: "Comms" },
+      { href: "/comms", label: "Messages" },
       { href: "/customers", label: "Customers" },
     ],
     [],
