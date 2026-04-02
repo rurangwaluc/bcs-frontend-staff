@@ -1,6 +1,9 @@
 "use client";
 
+import { useMemo, useState } from "react";
+
 import AsyncButton from "../../../components/AsyncButton";
+import StoreKeeperProductPickerModal from "./StoreKeeperProductPickerModal";
 
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
@@ -14,6 +17,17 @@ function toStr(v) {
 function toNum(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function safeDate(v) {
+  if (!v) return "—";
+  try {
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return String(v);
+    return d.toLocaleString();
+  } catch {
+    return String(v);
+  }
 }
 
 function qtyText(v) {
@@ -32,10 +46,6 @@ function inputBase(className = "") {
 
 function Input({ className = "", ...props }) {
   return <input {...props} className={inputBase(className)} />;
-}
-
-function Select({ className = "", ...props }) {
-  return <select {...props} className={inputBase(className)} />;
 }
 
 function TextArea({ className = "", ...props }) {
@@ -279,6 +289,95 @@ function ArrivalChecklist({
   );
 }
 
+function ArrivalHistoryRow({ row }) {
+  const qty =
+    Number(
+      row?.qtyReceived ?? row?.qty_received ?? row?.qty ?? row?.quantity ?? 0,
+    ) || 0;
+
+  const productLabel =
+    toStr(row?.productDisplayName) ||
+    toStr(row?.productName) ||
+    toStr(row?.name) ||
+    "Unknown product";
+
+  const createdAt =
+    row?.createdAt ?? row?.created_at ?? row?.receivedAt ?? row?.received_at;
+
+  const note =
+    toStr(row?.notes) || toStr(row?.note) || toStr(row?.description) || "—";
+
+  const filesCount = Array.isArray(row?.documentUrls)
+    ? row.documentUrls.length
+    : Array.isArray(row?.documents)
+      ? row.documents.length
+      : 0;
+
+  return (
+    <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-sm font-black text-[var(--app-fg)] sm:text-base">
+              {productLabel}
+            </div>
+            <InfoPill tone="success">Arrival</InfoPill>
+            {row?.productId ? (
+              <InfoPill>Product #{row.productId}</InfoPill>
+            ) : null}
+            {toStr(row?.sku) ? <InfoPill>SKU: {row.sku}</InfoPill> : null}
+          </div>
+        </div>
+
+        <div className="text-right">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+            Qty received
+          </div>
+          <div className="mt-1 text-lg font-black text-[var(--success-fg)]">
+            +{qtyText(qty)}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Saved" value={safeDate(createdAt)} />
+        <StatCard
+          label="Branch"
+          value={
+            toStr(row?.locationName) ||
+            toStr(row?.branchName) ||
+            "Current branch"
+          }
+        />
+        <StatCard
+          label="Documents"
+          value={String(filesCount)}
+          sub={filesCount > 0 ? "Attached proof" : "No files"}
+          tone={filesCount > 0 ? "success" : "default"}
+        />
+        <StatCard
+          label="Recorded by"
+          value={
+            toStr(row?.createdByName) ||
+            toStr(row?.userName) ||
+            toStr(row?.receivedByName) ||
+            "—"
+          }
+        />
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+          Note
+        </div>
+        <div className="mt-1 whitespace-pre-wrap break-words text-sm text-[var(--app-fg)]">
+          {note}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function StoreKeeperArrivalsSection({
   products = [],
   productsLoading = false,
@@ -298,14 +397,25 @@ export default function StoreKeeperArrivalsSection({
   setArrFiles,
   createArrival,
   arrivalBtn,
+
+  arrivalHistory = [],
+  arrivalHistoryLoading = false,
+  loadArrivalHistory,
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+
   const productRows = Array.isArray(products) ? products : [];
   const inventoryRows = Array.isArray(inventory) ? inventory : [];
+  const arrivalRows = Array.isArray(arrivalHistory) ? arrivalHistory : [];
 
-  const mergedProducts = productRows.map((p) => {
-    const inv = inventoryRows.find((x) => Number(x?.id) === Number(p?.id));
-    return inv ? { ...p, ...inv } : p;
-  });
+  const mergedProducts = useMemo(
+    () =>
+      productRows.map((p) => {
+        const inv = inventoryRows.find((x) => Number(x?.id) === Number(p?.id));
+        return inv ? { ...p, ...inv } : p;
+      }),
+    [productRows, inventoryRows],
+  );
 
   const selectedProduct =
     mergedProducts.find((p) => String(p?.id) === String(arrProductId)) || null;
@@ -318,293 +428,410 @@ export default function StoreKeeperArrivalsSection({
 
   const topProducts = mergedProducts.slice(0, 24);
 
+  const todayArrivals = arrivalRows.filter((row) => {
+    const raw =
+      row?.createdAt ?? row?.created_at ?? row?.receivedAt ?? row?.received_at;
+    if (!raw) return false;
+    const d = new Date(raw);
+    const now = new Date();
+    return (
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate()
+    );
+  }).length;
+
   return (
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.92fr_1.08fr]">
-      <SectionShell
-        title="Record stock arrival"
-        hint="Receive stock cleanly for one branch at a time, attach supplier proof, and keep hardware inventory traceable."
-        right={
-          <div className="flex flex-wrap gap-2">
-            <AsyncButton
-              variant="secondary"
-              size="sm"
-              state={productsLoading ? "loading" : "idle"}
-              text="Refresh products"
-              loadingText="Refreshing…"
-              successText="Done"
-              onClick={loadProducts}
+    <>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.92fr_1.08fr]">
+        <SectionShell
+          title="Record stock arrival"
+          hint="Receive stock cleanly for one branch at a time, attach supplier proof, and keep hardware inventory traceable."
+          right={
+            <div className="flex flex-wrap gap-2">
+              <AsyncButton
+                variant="secondary"
+                size="sm"
+                state={productsLoading ? "loading" : "idle"}
+                text="Refresh products"
+                loadingText="Refreshing…"
+                successText="Done"
+                onClick={loadProducts}
+              />
+              <AsyncButton
+                variant="secondary"
+                size="sm"
+                state={inventoryLoading ? "loading" : "idle"}
+                text="Refresh stock"
+                loadingText="Refreshing…"
+                successText="Done"
+                onClick={loadInventory}
+              />
+              {loadArrivalHistory ? (
+                <AsyncButton
+                  variant="secondary"
+                  size="sm"
+                  state={arrivalHistoryLoading ? "loading" : "idle"}
+                  text="Refresh history"
+                  loadingText="Refreshing…"
+                  successText="Done"
+                  onClick={loadArrivalHistory}
+                />
+              ) : null}
+            </div>
+          }
+        >
+          <form onSubmit={createArrival} className="grid gap-4">
+            <ArrivalChecklist
+              arrProductId={arrProductId}
+              arrQty={arrQty}
+              arrFiles={arrFiles}
+              arrNotes={arrNotes}
+              selectedProduct={selectedProduct}
             />
-            <AsyncButton
-              variant="secondary"
-              size="sm"
-              state={inventoryLoading ? "loading" : "idle"}
-              text="Refresh stock"
-              loadingText="Refreshing…"
-              successText="Done"
-              onClick={loadInventory}
-            />
-          </div>
-        }
-      >
-        <form onSubmit={createArrival} className="grid gap-4">
-          <ArrivalChecklist
-            arrProductId={arrProductId}
-            arrQty={arrQty}
-            arrFiles={arrFiles}
-            arrNotes={arrNotes}
-            selectedProduct={selectedProduct}
-          />
 
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
-                  Product
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
+                    Product
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <Input
+                      value={
+                        selectedProduct
+                          ? `#${selectedProduct.id} • ${
+                              toStr(selectedProduct.displayName) ||
+                              toStr(selectedProduct.name) ||
+                              "Unnamed product"
+                            }${toStr(selectedProduct.sku) ? ` • ${selectedProduct.sku}` : ""}`
+                          : ""
+                      }
+                      readOnly
+                      placeholder="No product selected"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => setPickerOpen(true)}
+                      className="app-focus inline-flex items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+                    >
+                      Search product
+                    </button>
+                  </div>
                 </div>
-                <Select
-                  value={arrProductId}
-                  onChange={(e) => setArrProductId?.(e.target.value)}
+
+                <div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
+                    Qty received
+                  </div>
+                  <Input
+                    type="number"
+                    min="1"
+                    placeholder="Example: 20"
+                    value={arrQty}
+                    onChange={(e) => setArrQty?.(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
+                    Unit reference
+                  </div>
+                  <Input
+                    value={toStr(
+                      selectedProduct?.stockUnit ||
+                        selectedProduct?.unit ||
+                        "pcs",
+                    )}
+                    readOnly
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
+                    Arrival note
+                  </div>
+                  <TextArea
+                    rows={3}
+                    placeholder="Invoice reference, supplier, delivery note, bundle details, quality observation…"
+                    value={arrNotes}
+                    onChange={(e) => setArrNotes?.(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-base font-black text-[var(--app-fg)]">
+                    Documents
+                  </div>
+                  <div className="mt-1 text-sm app-muted">
+                    Upload invoice, delivery note, receipt, or arrival photos.
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <InfoPill>{totalFiles} file(s)</InfoPill>
+                  <InfoPill>
+                    {Math.max(
+                      0,
+                      Math.round(totalFileBytes / 1024),
+                    ).toLocaleString()}{" "}
+                    KB
+                  </InfoPill>
+                </div>
+              </div>
+
+              <input
+                id="storekeeper-arrival-files"
+                type="file"
+                multiple
+                accept=".pdf,image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  setArrFiles?.(files);
+                }}
+              />
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <label
+                  htmlFor="storekeeper-arrival-files"
+                  className="app-focus inline-flex cursor-pointer items-center rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
                 >
-                  <option value="">Select product…</option>
-                  {mergedProducts.map((p) => {
-                    const displayName =
-                      toStr(p?.displayName) ||
-                      [
-                        toStr(p?.name),
-                        toStr(p?.brand),
-                        toStr(p?.model),
-                        toStr(p?.size),
-                      ]
-                        .filter(Boolean)
-                        .join(" ");
-                    const sku = toStr(p?.sku);
+                  Choose files
+                </label>
 
-                    return (
-                      <option key={p?.id} value={p?.id}>
-                        #{p?.id} • {displayName || p?.name || "Unnamed"}
-                        {sku ? ` • ${sku}` : ""}
-                      </option>
-                    );
-                  })}
-                </Select>
+                <button
+                  type="button"
+                  className="app-focus rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+                  onClick={() => setArrFiles?.([])}
+                >
+                  Clear files
+                </button>
               </div>
 
-              <div>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
-                  Qty received
-                </div>
-                <Input
-                  type="number"
-                  min="1"
-                  placeholder="Example: 20"
-                  value={arrQty}
-                  onChange={(e) => setArrQty?.(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
-                  Unit reference
-                </div>
-                <Input
-                  value={toStr(
-                    selectedProduct?.stockUnit ||
-                      selectedProduct?.unit ||
-                      "pcs",
-                  )}
-                  readOnly
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
-                  Arrival note
-                </div>
-                <TextArea
-                  rows={3}
-                  placeholder="Invoice reference, supplier, delivery note, bundle details, quality observation…"
-                  value={arrNotes}
-                  onChange={(e) => setArrNotes?.(e.target.value)}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-base font-black text-[var(--app-fg)]">
-                  Documents
-                </div>
-                <div className="mt-1 text-sm app-muted">
-                  Upload invoice, delivery note, receipt, or arrival photos.
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <InfoPill>{totalFiles} file(s)</InfoPill>
-                <InfoPill>
-                  {Math.max(
-                    0,
-                    Math.round(totalFileBytes / 1024),
-                  ).toLocaleString()}{" "}
-                  KB
-                </InfoPill>
+              <div className="mt-4 grid gap-2">
+                {arrFiles.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-[var(--border-strong)] bg-[var(--card)] p-4 text-sm app-muted">
+                    No files selected yet.
+                  </div>
+                ) : (
+                  arrFiles.map((f, i) => (
+                    <FileRow
+                      key={`${f?.name || "file"}-${i}`}
+                      file={f}
+                      onRemove={() =>
+                        setArrFiles?.((prev) =>
+                          (Array.isArray(prev) ? prev : []).filter(
+                            (_, idx) => idx !== i,
+                          ),
+                        )
+                      }
+                    />
+                  ))
+                )}
               </div>
             </div>
 
-            <input
-              id="storekeeper-arrival-files"
-              type="file"
-              multiple
-              accept=".pdf,image/*"
-              className="hidden"
-              onChange={(e) => {
-                const files = Array.from(e.target.files || []);
-                setArrFiles?.(files);
-              }}
-            />
-
-            <div className="mt-4 flex flex-wrap gap-2">
-              <label
-                htmlFor="storekeeper-arrival-files"
-                className="app-focus inline-flex cursor-pointer items-center rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
-              >
-                Choose files
-              </label>
+            <div className="flex flex-wrap items-center gap-3">
+              <AsyncButton
+                type="submit"
+                variant="primary"
+                state={arrivalBtn}
+                text="Save arrival"
+                loadingText="Saving…"
+                successText="Saved"
+              />
 
               <button
                 type="button"
                 className="app-focus rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
-                onClick={() => setArrFiles?.([])}
+                onClick={() => {
+                  setArrQty?.("");
+                  setArrNotes?.("");
+                  setArrFiles?.([]);
+                }}
               >
-                Clear files
+                Clear form
               </button>
-            </div>
 
-            <div className="mt-4 grid gap-2">
-              {arrFiles.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-[var(--border-strong)] bg-[var(--card)] p-4 text-sm app-muted">
-                  No files selected yet.
+              <div className="text-xs app-muted">
+                Saving an arrival should increase stock for the selected branch
+                product.
+              </div>
+            </div>
+          </form>
+        </SectionShell>
+
+        <div className="grid gap-4">
+          <SectionShell
+            title="Quick product picker"
+            hint="Choose the exact branch product before receiving stock. Built for fast operational picking."
+          >
+            <div className="grid gap-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <StatCard
+                  label="Products loaded"
+                  value={String(mergedProducts.length)}
+                  sub="Available for arrivals"
+                />
+                <StatCard
+                  label="Selected product"
+                  value={arrProductId ? `#${arrProductId}` : "None"}
+                  sub={
+                    toStr(
+                      selectedProduct?.name || selectedProduct?.displayName,
+                    ) || "Pick one below"
+                  }
+                  tone={arrProductId ? "success" : "default"}
+                />
+                <StatCard
+                  label="Current stock"
+                  value={qtyText(
+                    selectedProduct?.qtyOnHand ??
+                      selectedProduct?.qty_on_hand ??
+                      0,
+                  )}
+                  sub={toStr(
+                    selectedProduct?.stockUnit ||
+                      selectedProduct?.unit ||
+                      "pcs",
+                  )}
+                />
+                <StatCard
+                  label="Incoming"
+                  value={qtyText(arrQty || 0)}
+                  sub="Planned arrival"
+                  tone={toNum(arrQty, 0) > 0 ? "success" : "default"}
+                />
+              </div>
+
+              {productsLoading || inventoryLoading ? (
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <Skeleton className="h-28 w-full rounded-3xl" />
+                  <Skeleton className="h-28 w-full rounded-3xl" />
+                  <Skeleton className="h-28 w-full rounded-3xl" />
+                  <Skeleton className="h-28 w-full rounded-3xl" />
+                </div>
+              ) : topProducts.length === 0 ? (
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-6 text-sm app-muted">
+                  No products available yet. Create products first, then record
+                  arrivals.
                 </div>
               ) : (
-                arrFiles.map((f, i) => (
-                  <FileRow
-                    key={`${f?.name || "file"}-${i}`}
-                    file={f}
-                    onRemove={() =>
-                      setArrFiles?.((prev) =>
-                        (Array.isArray(prev) ? prev : []).filter(
-                          (_, idx) => idx !== i,
-                        ),
-                      )
-                    }
-                  />
-                ))
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  {topProducts.map((p) => (
+                    <ProductQuickCard
+                      key={String(p?.id)}
+                      product={p}
+                      selected={String(arrProductId) === String(p?.id)}
+                      onSelect={setArrProductId}
+                    />
+                  ))}
+                </div>
               )}
+
+              {mergedProducts.length > 24 ? (
+                <div className="text-xs app-muted">
+                  Showing the first 24 products here for fast picking. Use
+                  search product for the full list.
+                </div>
+              ) : null}
             </div>
-          </div>
+          </SectionShell>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <AsyncButton
-              type="submit"
-              variant="primary"
-              state={arrivalBtn}
-              text="Save arrival"
-              loadingText="Saving…"
-              successText="Saved"
-            />
-
-            <button
-              type="button"
-              className="app-focus rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
-              onClick={() => {
-                setArrQty?.("");
-                setArrNotes?.("");
-                setArrFiles?.([]);
-              }}
-            >
-              Clear form
-            </button>
-
-            <div className="text-xs app-muted">
-              Saving an arrival should increase stock for the selected branch
-              product.
-            </div>
-          </div>
-        </form>
-      </SectionShell>
-
-      <SectionShell
-        title="Quick product picker"
-        hint="Choose the exact branch product before receiving stock. Built for fast operational picking."
-      >
-        <div className="grid gap-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard
-              label="Products loaded"
-              value={String(mergedProducts.length)}
-              sub="Available for arrivals"
-            />
-            <StatCard
-              label="Selected product"
-              value={arrProductId ? `#${arrProductId}` : "None"}
-              sub={
-                toStr(selectedProduct?.name || selectedProduct?.displayName) ||
-                "Pick one below"
-              }
-              tone={arrProductId ? "success" : "default"}
-            />
-            <StatCard
-              label="Current stock"
-              value={qtyText(
-                selectedProduct?.qtyOnHand ?? selectedProduct?.qty_on_hand ?? 0,
-              )}
-              sub={toStr(
-                selectedProduct?.stockUnit || selectedProduct?.unit || "pcs",
-              )}
-            />
-            <StatCard
-              label="Incoming"
-              value={qtyText(arrQty || 0)}
-              sub="Planned arrival"
-              tone={toNum(arrQty, 0) > 0 ? "success" : "default"}
-            />
-          </div>
-
-          {productsLoading || inventoryLoading ? (
-            <div className="grid gap-3 lg:grid-cols-2">
-              <Skeleton className="h-28 w-full rounded-3xl" />
-              <Skeleton className="h-28 w-full rounded-3xl" />
-              <Skeleton className="h-28 w-full rounded-3xl" />
-              <Skeleton className="h-28 w-full rounded-3xl" />
-            </div>
-          ) : topProducts.length === 0 ? (
-            <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-6 text-sm app-muted">
-              No products available yet. Create products first, then record
-              arrivals.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {topProducts.map((p) => (
-                <ProductQuickCard
-                  key={String(p?.id)}
-                  product={p}
-                  selected={String(arrProductId) === String(p?.id)}
-                  onSelect={setArrProductId}
+          <SectionShell
+            title="Arrival history"
+            hint="Recent stock arrivals recorded in this branch."
+            right={
+              loadArrivalHistory ? (
+                <AsyncButton
+                  variant="secondary"
+                  size="sm"
+                  state={arrivalHistoryLoading ? "loading" : "idle"}
+                  text="Refresh"
+                  loadingText="Refreshing…"
+                  successText="Done"
+                  onClick={loadArrivalHistory}
                 />
-              ))}
+              ) : null
+            }
+          >
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard
+                label="Rows"
+                value={String(arrivalRows.length)}
+                sub="Loaded history rows"
+              />
+              <StatCard
+                label="Today"
+                value={String(todayArrivals)}
+                sub="Saved today"
+                tone={todayArrivals > 0 ? "success" : "default"}
+              />
+              <StatCard
+                label="Files ready"
+                value={String(totalFiles)}
+                sub="Current form attachments"
+              />
+              <StatCard
+                label="Selected"
+                value={arrProductId ? `#${arrProductId}` : "None"}
+                sub="Current form product"
+                tone={arrProductId ? "success" : "default"}
+              />
             </div>
-          )}
 
-          {mergedProducts.length > 24 ? (
-            <div className="text-xs app-muted">
-              Showing the first 24 products here for fast picking. Use the
-              dropdown on the left for the full list.
+            <div className="mt-4">
+              {arrivalHistoryLoading ? (
+                <div className="grid gap-3">
+                  <Skeleton className="h-40 w-full rounded-3xl" />
+                  <Skeleton className="h-40 w-full rounded-3xl" />
+                  <Skeleton className="h-40 w-full rounded-3xl" />
+                </div>
+              ) : !loadArrivalHistory ? (
+                <div className="rounded-3xl border border-dashed border-[var(--border-strong)] bg-[var(--card-2)] p-6 text-sm app-muted">
+                  Arrival history UI is ready. Connect `arrivalHistory`,
+                  `arrivalHistoryLoading`, and `loadArrivalHistory` from the
+                  page to show real history rows.
+                </div>
+              ) : arrivalRows.length === 0 ? (
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-6 text-sm app-muted">
+                  No arrival history yet.
+                </div>
+              ) : (
+                <div className="grid gap-3">
+                  {arrivalRows.map((row, idx) => (
+                    <ArrivalHistoryRow
+                      key={String(
+                        row?.id || `${row?.productId || "arrival"}-${idx}`,
+                      )}
+                      row={row}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
-          ) : null}
+          </SectionShell>
         </div>
-      </SectionShell>
-    </div>
+      </div>
+
+      <StoreKeeperProductPickerModal
+        open={pickerOpen}
+        title="Pick product for stock arrival"
+        products={mergedProducts}
+        selectedProductId={arrProductId}
+        onSelect={(id) => {
+          setArrProductId?.(id);
+          setPickerOpen(false);
+        }}
+        onClose={() => setPickerOpen(false)}
+      />
+    </>
   );
 }

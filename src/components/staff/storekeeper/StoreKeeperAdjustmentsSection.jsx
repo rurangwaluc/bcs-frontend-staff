@@ -1,6 +1,9 @@
 "use client";
 
+import { useMemo, useState } from "react";
+
 import AsyncButton from "../../../components/AsyncButton";
+import StoreKeeperProductPickerModal from "./StoreKeeperProductPickerModal";
 
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
@@ -36,7 +39,7 @@ function inputBase(className = "") {
   return cx(
     "app-focus w-full rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3.5 py-3 text-sm text-[var(--app-fg)] outline-none transition",
     "placeholder:text-[var(--muted)]",
-    "hover:border-[var(--border-strong)]",
+    "hover:border-[var(--border-strong)] focus:border-[var(--border-strong)]",
     className,
   );
 }
@@ -181,11 +184,9 @@ function ProductQuickCard({
     toStr(product?.category) || toStr(product?.subcategory) || "Hardware";
 
   const qty = toNum(currentQty, 0);
-
   const effectiveAbsQty = selected ? toNum(adjQtyAbs, 0) : 0;
   const signed = adjDirection === "REMOVE" ? -effectiveAbsQty : effectiveAbsQty;
   const projected = qty + signed;
-
   const unit = toStr(product?.stockUnit || product?.unit || "pcs");
 
   return (
@@ -195,7 +196,7 @@ function ProductQuickCard({
       className={cx(
         "app-focus w-full rounded-3xl border p-4 text-left transition",
         selected
-          ? "border-[var(--app-fg)] bg-[var(--card)] shadow-sm"
+          ? "border-[var(--app-fg)] bg-[var(--card)] shadow-sm ring-1 ring-[var(--app-fg)]"
           : "border-[var(--border)] bg-[var(--card-2)] hover:bg-[var(--hover)]",
       )}
     >
@@ -217,7 +218,6 @@ function ProductQuickCard({
 
       <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-3">
         <StatCard label="Current" value={qtyText(qty)} sub={unit} />
-
         <StatCard
           label="Requested"
           value={
@@ -232,7 +232,6 @@ function ProductQuickCard({
             effectiveAbsQty > 0 ? (signed > 0 ? "success" : "warn") : "default"
           }
         />
-
         <StatCard
           label="After approval"
           value={projected < 0 ? "Below zero" : qtyText(projected)}
@@ -392,6 +391,8 @@ export default function StoreKeeperAdjustmentsSection({
   createAdjustRequest,
   adjBtn,
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+
   const productRows = Array.isArray(products) ? products : [];
   const requestRows = Array.isArray(myAdjRequests) ? myAdjRequests : [];
 
@@ -418,310 +419,361 @@ export default function StoreKeeperAdjustmentsSection({
     (r) => String(r?.status || "").toUpperCase() === "REJECTED",
   ).length;
 
+  const increaseCount = requestRows.filter(
+    (r) => Number(r?.qtyChange ?? r?.qty_change ?? 0) > 0,
+  ).length;
+
+  const decreaseCount = requestRows.filter(
+    (r) => Number(r?.qtyChange ?? r?.qty_change ?? 0) < 0,
+  ).length;
+
   const topProducts = productRows.slice(0, 24);
 
   return (
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.92fr_1.08fr]">
-      <SectionShell
-        title="Request stock correction"
-        hint="Store keepers do not change stock directly here. Send a controlled correction request for recount issues, damage, found items, or branch mistakes."
-      >
-        <form onSubmit={createAdjustRequest} className="grid gap-4">
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4">
-            <div className="text-sm font-black text-[var(--app-fg)]">
-              Correction preview
-            </div>
+    <>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.92fr_1.08fr]">
+        <SectionShell
+          title="Request stock correction"
+          hint="Store keepers do not change stock directly here. Send a controlled correction request for recount issues, damage, found items, or branch mistakes."
+        >
+          <form onSubmit={createAdjustRequest} className="grid gap-4">
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+              <div className="text-sm font-black text-[var(--app-fg)]">
+                Correction preview
+              </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard
-                label="Selected product"
-                value={adjProductId ? `#${adjProductId}` : "None"}
-                sub={
-                  toStr(
-                    selectedProduct?.name || selectedProduct?.displayName,
-                  ) || "Pick a product"
-                }
-                tone={adjProductId ? "success" : "default"}
-              />
-              <StatCard
-                label="Current stock"
-                value={currentQty == null ? "—" : qtyText(currentQty)}
-                sub={toStr(
-                  selectedProduct?.stockUnit || selectedProduct?.unit || "pcs",
-                )}
-              />
-              <StatCard
-                label="Requested change"
-                value={
-                  absQty > 0
-                    ? signedQty > 0
-                      ? `+${qtyText(absQty)}`
-                      : `-${qtyText(absQty)}`
-                    : "0"
-                }
-                sub={adjDirection === "REMOVE" ? "Decrease" : "Increase"}
-                tone={
-                  absQty > 0
-                    ? adjDirection === "REMOVE"
-                      ? "warn"
-                      : "success"
-                    : "default"
-                }
-              />
-              <StatCard
-                label="After approval"
-                value={
-                  projectedQty == null
-                    ? "—"
-                    : projectedQty < 0
-                      ? "Below zero"
-                      : qtyText(projectedQty)
-                }
-                sub="Expected only after approval"
-                tone={
-                  projectedQty == null
-                    ? "default"
-                    : projectedQty < 0
-                      ? "danger"
-                      : adjDirection === "REMOVE"
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <StatCard
+                  label="Selected product"
+                  value={adjProductId ? `#${adjProductId}` : "None"}
+                  sub={
+                    toStr(
+                      selectedProduct?.name || selectedProduct?.displayName,
+                    ) || "Pick a product"
+                  }
+                  tone={adjProductId ? "success" : "default"}
+                />
+                <StatCard
+                  label="Current stock"
+                  value={currentQty == null ? "—" : qtyText(currentQty)}
+                  sub={toStr(
+                    selectedProduct?.stockUnit ||
+                      selectedProduct?.unit ||
+                      "pcs",
+                  )}
+                />
+                <StatCard
+                  label="Requested change"
+                  value={
+                    absQty > 0
+                      ? signedQty > 0
+                        ? `+${qtyText(absQty)}`
+                        : `-${qtyText(absQty)}`
+                      : "0"
+                  }
+                  sub={adjDirection === "REMOVE" ? "Decrease" : "Increase"}
+                  tone={
+                    absQty > 0
+                      ? adjDirection === "REMOVE"
                         ? "warn"
                         : "success"
-                }
-              />
+                      : "default"
+                  }
+                />
+                <StatCard
+                  label="After approval"
+                  value={
+                    projectedQty == null
+                      ? "—"
+                      : projectedQty < 0
+                        ? "Below zero"
+                        : qtyText(projectedQty)
+                  }
+                  sub="Expected only after approval"
+                  tone={
+                    projectedQty == null
+                      ? "default"
+                      : projectedQty < 0
+                        ? "danger"
+                        : adjDirection === "REMOVE"
+                          ? "warn"
+                          : "success"
+                  }
+                />
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <InfoPill tone={adjProductId ? "success" : "default"}>
+                  {adjProductId ? "Product selected" : "Pick a product"}
+                </InfoPill>
+                <InfoPill
+                  tone={
+                    absQty > 0
+                      ? adjDirection === "REMOVE"
+                        ? "warn"
+                        : "success"
+                      : "warn"
+                  }
+                >
+                  {absQty > 0
+                    ? adjDirection === "REMOVE"
+                      ? "Decrease request"
+                      : "Increase request"
+                    : "Enter qty"}
+                </InfoPill>
+                <InfoPill tone={toStr(adjReason) ? "success" : "warn"}>
+                  {toStr(adjReason) ? "Reason added" : "Reason required"}
+                </InfoPill>
+                {projectedQty != null && projectedQty < 0 ? (
+                  <InfoPill tone="danger">Would go below zero</InfoPill>
+                ) : null}
+              </div>
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              <InfoPill tone={adjProductId ? "success" : "default"}>
-                {adjProductId ? "Product selected" : "Pick a product"}
-              </InfoPill>
-              <InfoPill
-                tone={
-                  absQty > 0
-                    ? adjDirection === "REMOVE"
-                      ? "warn"
-                      : "success"
-                    : "warn"
-                }
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
+                    Product
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <Input
+                      value={
+                        selectedProduct
+                          ? `#${selectedProduct.id} • ${
+                              toStr(selectedProduct.displayName) ||
+                              toStr(selectedProduct.name) ||
+                              "Unnamed product"
+                            }${toStr(selectedProduct.sku) ? ` • ${selectedProduct.sku}` : ""}`
+                          : ""
+                      }
+                      readOnly
+                      placeholder="No product selected"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => setPickerOpen(true)}
+                      className="app-focus inline-flex items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+                    >
+                      Search product
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
+                    Direction
+                  </div>
+                  <Select
+                    value={adjDirection}
+                    onChange={(e) => setAdjDirection?.(e.target.value)}
+                  >
+                    <option value="ADD">Increase (+)</option>
+                    <option value="REMOVE">Decrease (-)</option>
+                  </Select>
+                </div>
+
+                <div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
+                    Qty
+                  </div>
+                  <Input
+                    type="number"
+                    min="1"
+                    placeholder="Example: 3"
+                    value={adjQtyAbs}
+                    onChange={(e) => setAdjQtyAbs?.(e.target.value)}
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
+                    Reason
+                  </div>
+                  <TextArea
+                    rows={4}
+                    placeholder="Explain clearly: recount mismatch, damaged stock, broken pack, found stock, wrong branch receipt, return not captured…"
+                    value={adjReason}
+                    onChange={(e) => setAdjReason?.(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <AsyncButton
+                type="submit"
+                variant="primary"
+                state={adjBtn}
+                text="Send request"
+                loadingText="Sending…"
+                successText="Sent"
+              />
+
+              <button
+                type="button"
+                className="app-focus rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+                onClick={() => {
+                  setAdjProductId?.("");
+                  setAdjDirection?.("ADD");
+                  setAdjQtyAbs?.("");
+                  setAdjReason?.("");
+                }}
               >
-                {absQty > 0
-                  ? adjDirection === "REMOVE"
-                    ? "Decrease request"
-                    : "Increase request"
-                  : "Enter qty"}
-              </InfoPill>
-              <InfoPill tone={toStr(adjReason) ? "success" : "warn"}>
-                {toStr(adjReason) ? "Reason added" : "Reason required"}
-              </InfoPill>
-              {projectedQty != null && projectedQty < 0 ? (
-                <InfoPill tone="danger">Would go below zero</InfoPill>
+                Clear form
+              </button>
+
+              <div className="text-xs app-muted">
+                Approval is required before inventory changes.
+              </div>
+            </div>
+          </form>
+        </SectionShell>
+
+        <div className="grid gap-4">
+          <SectionShell
+            title="Quick product picker"
+            hint="Pick the exact quincaillerie item and review the requested stock effect before sending."
+          >
+            <div className="grid gap-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <StatCard
+                  label="Products loaded"
+                  value={String(productRows.length)}
+                  sub="Available in this branch"
+                />
+                <StatCard
+                  label="Pending requests"
+                  value={String(pendingCount)}
+                  sub="Waiting approval"
+                  tone={pendingCount > 0 ? "warn" : "default"}
+                />
+                <StatCard
+                  label="Approved"
+                  value={String(approvedCount)}
+                  sub="Completed decisions"
+                  tone={approvedCount > 0 ? "success" : "default"}
+                />
+                <StatCard
+                  label="Rejected"
+                  value={String(rejectedCount)}
+                  sub="Needs review"
+                  tone={rejectedCount > 0 ? "danger" : "default"}
+                />
+              </div>
+
+              {topProducts.length === 0 ? (
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-6 text-sm app-muted">
+                  No products available yet.
+                </div>
+              ) : (
+                <div className="grid gap-3">
+                  {topProducts.map((p) => (
+                    <ProductQuickCard
+                      key={String(p?.id)}
+                      product={p}
+                      selected={String(adjProductId) === String(p?.id)}
+                      onSelect={setAdjProductId}
+                      currentQty={getQtyOnHandForProduct(inventory, p?.id)}
+                      adjDirection={
+                        String(adjProductId) === String(p?.id)
+                          ? adjDirection
+                          : "ADD"
+                      }
+                      adjQtyAbs={
+                        String(adjProductId) === String(p?.id) ? adjQtyAbs : ""
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+
+              {productRows.length > 24 ? (
+                <div className="text-xs app-muted">
+                  Showing the first 24 products here for fast picking. Use
+                  search product for the full list.
+                </div>
               ) : null}
             </div>
-          </div>
+          </SectionShell>
 
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
-                  Product
-                </div>
-                <Select
-                  value={adjProductId}
-                  onChange={(e) => setAdjProductId?.(e.target.value)}
-                >
-                  <option value="">Select product…</option>
-                  {productRows.map((p) => {
-                    const displayName =
-                      toStr(p?.displayName) ||
-                      [
-                        toStr(p?.name),
-                        toStr(p?.brand),
-                        toStr(p?.model),
-                        toStr(p?.size),
-                      ]
-                        .filter(Boolean)
-                        .join(" ");
-                    const sku = toStr(p?.sku);
-                    return (
-                      <option key={p?.id} value={p?.id}>
-                        #{p?.id} • {displayName || p?.name || "Unnamed"}
-                        {sku ? ` • ${sku}` : ""}
-                      </option>
-                    );
-                  })}
-                </Select>
-              </div>
-
-              <div>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
-                  Direction
-                </div>
-                <Select
-                  value={adjDirection}
-                  onChange={(e) => setAdjDirection?.(e.target.value)}
-                >
-                  <option value="ADD">Increase (+)</option>
-                  <option value="REMOVE">Decrease (-)</option>
-                </Select>
-              </div>
-
-              <div>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
-                  Qty
-                </div>
-                <Input
-                  type="number"
-                  min="1"
-                  placeholder="Example: 3"
-                  value={adjQtyAbs}
-                  onChange={(e) => setAdjQtyAbs?.(e.target.value)}
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
-                  Reason
-                </div>
-                <TextArea
-                  rows={4}
-                  placeholder="Explain clearly: recount mismatch, damaged stock, broken pack, found stock, wrong branch receipt, return not captured…"
-                  value={adjReason}
-                  onChange={(e) => setAdjReason?.(e.target.value)}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <AsyncButton
-              type="submit"
-              variant="primary"
-              state={adjBtn}
-              text="Send request"
-              loadingText="Sending…"
-              successText="Sent"
-            />
-
-            <button
-              type="button"
-              className="app-focus rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
-              onClick={() => {
-                setAdjProductId?.("");
-                setAdjDirection?.("ADD");
-                setAdjQtyAbs?.("");
-                setAdjReason?.("");
-              }}
-            >
-              Clear form
-            </button>
-
-            <div className="text-xs app-muted">
-              Approval is required before inventory changes.
-            </div>
-          </div>
-        </form>
-      </SectionShell>
-
-      <div className="grid gap-4">
-        <SectionShell
-          title="Quick product picker"
-          hint="Pick the exact quincaillerie item and review the requested stock effect before sending."
-        >
-          <div className="grid gap-4">
+          <SectionShell
+            title="My correction requests"
+            hint="Every request stays traceable by product, quantity, reason, and decision."
+            right={
+              <AsyncButton
+                variant="secondary"
+                size="sm"
+                state={myAdjLoading ? "loading" : "idle"}
+                text="Refresh"
+                loadingText="Refreshing…"
+                successText="Done"
+                onClick={loadMyAdjustRequests}
+              />
+            }
+          >
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <StatCard
-                label="Products loaded"
-                value={String(productRows.length)}
-                sub="Available in this branch"
+                label="All requests"
+                value={String(requestRows.length)}
+                sub="Loaded rows"
               />
               <StatCard
-                label="Pending requests"
+                label="Increase"
+                value={String(increaseCount)}
+                sub="Stock increase requests"
+                tone={increaseCount > 0 ? "success" : "default"}
+              />
+              <StatCard
+                label="Decrease"
+                value={String(decreaseCount)}
+                sub="Stock decrease requests"
+                tone={decreaseCount > 0 ? "warn" : "default"}
+              />
+              <StatCard
+                label="Pending"
                 value={String(pendingCount)}
-                sub="Waiting approval"
+                sub="Waiting decision"
                 tone={pendingCount > 0 ? "warn" : "default"}
               />
-              <StatCard
-                label="Approved"
-                value={String(approvedCount)}
-                sub="Completed decisions"
-                tone={approvedCount > 0 ? "success" : "default"}
-              />
-              <StatCard
-                label="Rejected"
-                value={String(rejectedCount)}
-                sub="Needs review"
-                tone={rejectedCount > 0 ? "danger" : "default"}
-              />
             </div>
 
-            {topProducts.length === 0 ? (
-              <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-6 text-sm app-muted">
-                No products available yet.
-              </div>
-            ) : (
-              <div className="grid gap-3">
-                {topProducts.map((p) => (
-                  <ProductQuickCard
-                    key={String(p?.id)}
-                    product={p}
-                    selected={String(adjProductId) === String(p?.id)}
-                    onSelect={setAdjProductId}
-                    currentQty={getQtyOnHandForProduct(inventory, p?.id)}
-                    adjDirection={
-                      String(adjProductId) === String(p?.id)
-                        ? adjDirection
-                        : "ADD"
-                    }
-                    adjQtyAbs={
-                      String(adjProductId) === String(p?.id) ? adjQtyAbs : ""
-                    }
-                  />
-                ))}
-              </div>
-            )}
-
-            {productRows.length > 24 ? (
-              <div className="text-xs app-muted">
-                Showing the first 24 products here for fast picking. Use the
-                product dropdown on the left for the full list.
-              </div>
-            ) : null}
-          </div>
-        </SectionShell>
-
-        <SectionShell
-          title="My correction requests"
-          hint="Every request stays traceable by product, quantity, reason, and decision."
-          right={
-            <AsyncButton
-              variant="secondary"
-              size="sm"
-              state={myAdjLoading ? "loading" : "idle"}
-              text="Refresh"
-              loadingText="Refreshing…"
-              successText="Done"
-              onClick={loadMyAdjustRequests}
-            />
-          }
-        >
-          {myAdjLoading ? (
-            <div className="grid gap-3">
-              <Skeleton className="h-40 w-full rounded-3xl" />
-              <Skeleton className="h-40 w-full rounded-3xl" />
-              <Skeleton className="h-40 w-full rounded-3xl" />
+            <div className="mt-4">
+              {myAdjLoading ? (
+                <div className="grid gap-3">
+                  <Skeleton className="h-40 w-full rounded-3xl" />
+                  <Skeleton className="h-40 w-full rounded-3xl" />
+                  <Skeleton className="h-40 w-full rounded-3xl" />
+                </div>
+              ) : requestRows.length === 0 ? (
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-6 text-sm app-muted">
+                  No correction requests yet.
+                </div>
+              ) : (
+                <div className="grid gap-3">
+                  {requestRows.map((r) => (
+                    <RequestCard key={String(r?.id)} request={r} />
+                  ))}
+                </div>
+              )}
             </div>
-          ) : requestRows.length === 0 ? (
-            <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-6 text-sm app-muted">
-              No correction requests yet.
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              {requestRows.map((r) => (
-                <RequestCard key={String(r?.id)} request={r} />
-              ))}
-            </div>
-          )}
-        </SectionShell>
+          </SectionShell>
+        </div>
       </div>
-    </div>
+
+      <StoreKeeperProductPickerModal
+        open={pickerOpen}
+        title="Pick product for correction request"
+        products={productRows}
+        selectedProductId={adjProductId}
+        onSelect={(id) => {
+          setAdjProductId?.(id);
+          setPickerOpen(false);
+        }}
+        onClose={() => setPickerOpen(false)}
+      />
+    </>
   );
 }
