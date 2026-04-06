@@ -14,13 +14,18 @@ function toStr(v) {
   return String(v).trim();
 }
 
-function money(n) {
-  const x = Number(n ?? 0);
-  if (!Number.isFinite(x)) return "0";
-  return Math.round(x).toLocaleString();
+function toInt(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : fallback;
 }
 
-function fmt(v) {
+function toMoney(v) {
+  const n = Number(v ?? 0);
+  if (!Number.isFinite(n)) return "0";
+  return Math.round(n).toLocaleString();
+}
+
+function fmtDate(v) {
   if (!v) return "—";
   try {
     const d = new Date(v);
@@ -32,13 +37,90 @@ function fmt(v) {
 }
 
 function normalizeList(data, keys = []) {
-  for (const k of keys) {
-    const v = data?.[k];
-    if (Array.isArray(v)) return v;
+  for (const key of keys) {
+    if (Array.isArray(data?.[key])) return data[key];
   }
   if (Array.isArray(data?.items)) return data.items;
   if (Array.isArray(data?.rows)) return data.rows;
   return [];
+}
+
+function normalizeSupplier(row) {
+  if (!row) return null;
+
+  return {
+    id: row.id ?? null,
+    name: row.name ?? "",
+    contactName: row.contactName ?? row.contact_name ?? "",
+    phone: row.phone ?? "",
+    email: row.email ?? "",
+    sourceType: row.sourceType ?? row.source_type ?? "LOCAL",
+    country: row.country ?? "",
+    city: row.city ?? "",
+    notes: row.notes ?? "",
+    isActive:
+      row.isActive === undefined || row.isActive === null
+        ? row.is_active !== false
+        : row.isActive !== false,
+    createdAt: row.createdAt ?? row.created_at ?? null,
+    updatedAt: row.updatedAt ?? row.updated_at ?? null,
+    billsCount: toInt(row.billsCount ?? row.bills_count ?? 0),
+    totalAmount: toInt(row.totalAmount ?? row.total_amount ?? 0),
+    paidAmount: toInt(row.paidAmount ?? row.paid_amount ?? 0),
+    balance: toInt(row.balance ?? row.balance_due ?? row.balanceDue ?? 0),
+  };
+}
+
+function normalizeBill(row, defaultCurrency = "RWF") {
+  if (!row) return null;
+
+  const totalAmount = toInt(row.totalAmount ?? row.total_amount ?? 0);
+  const paidAmount = toInt(row.paidAmount ?? row.paid_amount ?? 0);
+
+  return {
+    id: row.id ?? null,
+    supplierId: row.supplierId ?? row.supplier_id ?? null,
+    supplierName:
+      row.supplierName ?? row.supplier_name ?? row.name ?? row.supplier ?? "—",
+    billNo: row.billNo ?? row.bill_no ?? "",
+    currency: row.currency ?? defaultCurrency,
+    totalAmount,
+    paidAmount,
+    balance: toInt(
+      row.balance ??
+        row.balance_due ??
+        row.balanceDue ??
+        Math.max(0, totalAmount - paidAmount),
+    ),
+    status: row.status ?? "OPEN",
+    note: row.note ?? "",
+    issuedDate:
+      row.issuedDate ??
+      row.issued_date ??
+      row.createdAt ??
+      row.created_at ??
+      null,
+    dueDate: row.dueDate ?? row.due_date ?? null,
+    createdAt: row.createdAt ?? row.created_at ?? null,
+    updatedAt: row.updatedAt ?? row.updated_at ?? null,
+  };
+}
+
+function Banner({ kind = "info", children }) {
+  const cls =
+    kind === "success"
+      ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
+      : kind === "warn"
+        ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
+        : kind === "danger"
+          ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
+          : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]";
+
+  return (
+    <div className={cx("rounded-[24px] border px-4 py-3 text-sm", cls)}>
+      {children}
+    </div>
+  );
 }
 
 function Pill({ tone = "neutral", children }) {
@@ -68,9 +150,19 @@ function Pill({ tone = "neutral", children }) {
 function statusTone(status) {
   const s = String(status || "").toUpperCase();
   if (s === "PAID" || s === "COMPLETED") return "success";
-  if (s === "OPEN" || s === "PENDING") return "warn";
-  if (s === "VOID" || s === "CANCELLED") return "danger";
+  if (s === "OPEN" || s === "PENDING" || s === "DRAFT") return "warn";
+  if (s === "VOID" || s === "CANCELLED" || s === "OVERDUE") return "danger";
   return "neutral";
+}
+
+function supplierSourceTone(sourceType) {
+  return String(sourceType || "").toUpperCase() === "ABROAD"
+    ? "info"
+    : "neutral";
+}
+
+function supplierActiveTone(isActive) {
+  return isActive === false ? "danger" : "success";
 }
 
 function Input({ className = "", ...props }) {
@@ -93,6 +185,19 @@ function Select({ className = "", ...props }) {
       className={cx(
         "app-focus w-full rounded-[18px] border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--app-fg)] outline-none transition",
         "hover:border-[var(--border-strong)]",
+        className,
+      )}
+    />
+  );
+}
+
+function TextArea({ className = "", ...props }) {
+  return (
+    <textarea
+      {...props}
+      className={cx(
+        "app-focus w-full rounded-[18px] border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--app-fg)] outline-none transition",
+        "placeholder:text-[var(--muted)] hover:border-[var(--border-strong)]",
         className,
       )}
     />
@@ -131,6 +236,76 @@ function Surface({ children, className = "" }) {
   );
 }
 
+function MetricCard({ label, value, sub, tone = "default" }) {
+  const toneCls =
+    tone === "success"
+      ? "border-[var(--success-border)] bg-[var(--success-bg)]"
+      : tone === "warn"
+        ? "border-[var(--warn-border)] bg-[var(--warn-bg)]"
+        : tone === "danger"
+          ? "border-[var(--danger-border)] bg-[var(--danger-bg)]"
+          : "border-[var(--border)] bg-[var(--card-2)]";
+
+  return (
+    <div className={cx("rounded-[22px] border p-4", toneCls)}>
+      <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+        {label}
+      </div>
+      <div className="mt-2 text-lg font-black text-[var(--app-fg)]">
+        {value}
+      </div>
+      {sub ? (
+        <div className="mt-1 text-xs text-[var(--muted)]">{sub}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function InfoTile({ label, value }) {
+  return (
+    <div className="rounded-[20px] border border-[var(--border)] bg-[var(--card-2)] p-4">
+      <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+        {label}
+      </div>
+      <div className="mt-2 break-words text-sm font-semibold text-[var(--app-fg)]">
+        {value || "—"}
+      </div>
+    </div>
+  );
+}
+
+function ModalShell({ title, subtitle, onClose, children }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]">
+      <div className="w-full max-w-2xl overflow-hidden rounded-[30px] border border-[var(--border)] bg-[var(--card)] shadow-[0_30px_80px_rgba(2,6,23,0.22)]">
+        <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] p-5">
+          <div className="min-w-0">
+            <div className="text-base font-black text-[var(--app-fg)]">
+              {title}
+            </div>
+            {subtitle ? (
+              <div className="mt-1 text-sm text-[var(--muted)]">{subtitle}</div>
+            ) : null}
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-[18px] border border-[var(--border)] px-4 py-2.5 text-sm font-bold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="p-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+const SUPPLIER_PAGE_SIZE = 24;
+const BILL_PAGE_SIZE = 40;
+
 export default function SuppliersPanel({
   title = "Suppliers",
   subtitle = "",
@@ -158,11 +333,6 @@ export default function SuppliersPanel({
   const [msg, setMsg] = useState("");
   const [msgKind, setMsgKind] = useState("info");
 
-  function toast(kind, text) {
-    setMsgKind(kind || "info");
-    setMsg(text || "");
-  }
-
   const [suppliers, setSuppliers] = useState([]);
   const [supLoading, setSupLoading] = useState(false);
   const [supQ, setSupQ] = useState("");
@@ -175,6 +345,10 @@ export default function SuppliersPanel({
   const [billsLoading, setBillsLoading] = useState(false);
   const [billQ, setBillQ] = useState("");
   const [billStatus, setBillStatus] = useState("");
+
+  const [suppliersVisibleCount, setSuppliersVisibleCount] =
+    useState(SUPPLIER_PAGE_SIZE);
+  const [billsVisibleCount, setBillsVisibleCount] = useState(BILL_PAGE_SIZE);
 
   const [supCreateOpen, setSupCreateOpen] = useState(false);
   const [supCreateState, setSupCreateState] = useState("idle");
@@ -200,20 +374,30 @@ export default function SuppliersPanel({
     note: "",
   });
 
+  function toast(kind, text) {
+    setMsgKind(kind || "info");
+    setMsg(text || "");
+  }
+
   const loadSuppliers = useCallback(async () => {
     setSupLoading(true);
     setMsg("");
+
     try {
       const qs = new URLSearchParams();
       if (toStr(supQ)) qs.set("q", toStr(supQ));
-      qs.set("limit", "80");
+      qs.set("limit", "200");
 
       const data = await apiFetch(
         `${ENDPOINTS.SUPPLIERS_LIST}?${qs.toString()}`,
         { method: "GET" },
       );
 
-      setSuppliers(normalizeList(data, ["suppliers"]));
+      const rows = normalizeList(data, ["suppliers"])
+        .map(normalizeSupplier)
+        .filter(Boolean);
+
+      setSuppliers(rows);
     } catch (e) {
       setSuppliers([]);
       toast("danger", e?.data?.error || e?.message || "Cannot load suppliers");
@@ -256,7 +440,7 @@ export default function SuppliersPanel({
 
     try {
       const qs = new URLSearchParams();
-      qs.set("limit", "120");
+      qs.set("limit", "200");
 
       if (toStr(billQ)) qs.set("q", toStr(billQ));
       if (toStr(billStatus)) qs.set("status", toStr(billStatus).toUpperCase());
@@ -269,18 +453,11 @@ export default function SuppliersPanel({
         { method: "GET" },
       );
 
-      const raw = normalizeList(data, ["bills"]);
-      const mapped = (Array.isArray(raw) ? raw : []).map((b) => ({
-        ...b,
-        supplierName:
-          b?.supplierName ??
-          b?.name ??
-          b?.supplier_name ??
-          b?.supplier ??
-          undefined,
-      }));
+      const rows = normalizeList(data, ["bills"])
+        .map((row) => normalizeBill(row, defaultCurrency))
+        .filter(Boolean);
 
-      setBills(mapped);
+      setBills(rows);
     } catch (e) {
       setBills([]);
       toast(
@@ -290,20 +467,38 @@ export default function SuppliersPanel({
     } finally {
       setBillsLoading(false);
     }
-  }, [ENDPOINTS.SUPPLIER_BILLS_LIST, billQ, billStatus, selectedSupplierId]);
+  }, [
+    ENDPOINTS.SUPPLIER_BILLS_LIST,
+    billQ,
+    billStatus,
+    selectedSupplierId,
+    defaultCurrency,
+  ]);
 
   useEffect(() => {
     loadSuppliers();
+  }, [loadSuppliers]);
+
+  useEffect(() => {
     loadBills();
-  }, [loadSuppliers, loadBills]);
+  }, [loadBills]);
 
   useEffect(() => {
     loadSupplierSummary(selectedSupplierId);
   }, [selectedSupplierId, loadSupplierSummary]);
 
+  useEffect(() => {
+    setSuppliersVisibleCount(SUPPLIER_PAGE_SIZE);
+  }, [supQ]);
+
+  useEffect(() => {
+    setBillsVisibleCount(BILL_PAGE_SIZE);
+  }, [billQ, billStatus, selectedSupplierId]);
+
   const suppliersFiltered = useMemo(() => {
     const qq = toStr(supQ).toLowerCase();
     const list = Array.isArray(suppliers) ? suppliers : [];
+
     if (!qq) return list;
 
     return list.filter((s) => {
@@ -311,10 +506,10 @@ export default function SuppliersPanel({
         s?.name,
         s?.phone,
         s?.email,
-        s?.contactName ?? s?.contact_name,
+        s?.contactName,
         s?.country,
         s?.city,
-        s?.sourceType ?? s?.source_type,
+        s?.sourceType,
       ]
         .map((x) => String(x ?? ""))
         .join(" ")
@@ -331,24 +526,21 @@ export default function SuppliersPanel({
 
     const list = Array.isArray(bills) ? bills : [];
     return list.filter((b) => {
-      if (sid && String(b?.supplierId ?? b?.supplier_id ?? "") !== sid) {
-        return false;
-      }
-
-      if (st && String(b?.status || "").toUpperCase() !== st) {
-        return false;
-      }
+      if (sid && String(b?.supplierId ?? "") !== sid) return false;
+      if (st && String(b?.status || "").toUpperCase() !== st) return false;
 
       if (!qq) return true;
 
       const hay = [
         b?.id,
-        b?.billNo ?? b?.bill_no,
-        b?.supplierName ?? b?.name,
+        b?.billNo,
+        b?.supplierName,
         b?.currency,
         b?.status,
-        b?.totalAmount ?? b?.total_amount,
-        b?.paidAmount ?? b?.paid_amount,
+        b?.totalAmount,
+        b?.paidAmount,
+        b?.balance,
+        b?.note,
       ]
         .map((x) => String(x ?? ""))
         .join(" ")
@@ -357,6 +549,44 @@ export default function SuppliersPanel({
       return hay.includes(qq);
     });
   }, [bills, billQ, billStatus, selectedSupplierId]);
+
+  const selectedSupplier =
+    suppliers.find((s) => String(s?.id) === String(selectedSupplierId)) || null;
+
+  const visibleSuppliers = suppliersFiltered.slice(0, suppliersVisibleCount);
+  const visibleBills = billsFiltered.slice(0, billsVisibleCount);
+
+  const overview = useMemo(() => {
+    const supplierCount = suppliers.length;
+    const activeSuppliers = suppliers.filter(
+      (s) => s?.isActive !== false,
+    ).length;
+    const abroadSuppliers = suppliers.filter(
+      (s) => String(s?.sourceType || "").toUpperCase() === "ABROAD",
+    ).length;
+    const localSuppliers = Math.max(0, supplierCount - abroadSuppliers);
+
+    const openBills = bills.filter((b) =>
+      ["OPEN", "PENDING", "DRAFT"].includes(
+        String(b?.status || "").toUpperCase(),
+      ),
+    ).length;
+
+    const outstandingBalance = bills.reduce(
+      (sum, b) => sum + toInt(b?.balance ?? 0),
+      0,
+    );
+
+    return {
+      supplierCount,
+      activeSuppliers,
+      localSuppliers,
+      abroadSuppliers,
+      billsCount: bills.length,
+      openBills,
+      outstandingBalance,
+    };
+  }, [suppliers, bills]);
 
   async function submitSupplierCreate(e) {
     e.preventDefault();
@@ -463,6 +693,7 @@ export default function SuppliersPanel({
       });
 
       await Promise.all([loadBills(), loadSupplierSummary(String(supplierId))]);
+      setSelectedSupplierId(String(supplierId));
     } catch (err) {
       setBillCreateState("idle");
       toast("danger", err?.data?.error || err?.message || "Create bill failed");
@@ -515,29 +746,130 @@ export default function SuppliersPanel({
 
   return (
     <div className="grid gap-4">
-      {msg ? (
-        <div
-          className={cx(
-            "rounded-[24px] border px-4 py-3 text-sm",
-            msgKind === "success"
-              ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
-              : msgKind === "warn"
-                ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
-                : msgKind === "danger"
-                  ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
-                  : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]",
-          )}
-        >
-          {msg}
-        </div>
-      ) : null}
+      {msg ? <Banner kind={msgKind}>{msg}</Banner> : null}
 
       <SectionCard
         title={title}
         hint={subtitle || "Suppliers and supplier bills."}
         right={headerRight}
       >
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+          <Surface className="bg-[var(--card-2)]">
+            <div className="text-sm font-black text-[var(--app-fg)]">
+              Supplier overview
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <MetricCard
+                label="Suppliers"
+                value={String(overview.supplierCount)}
+                sub="All loaded suppliers"
+              />
+              <MetricCard
+                label="Active"
+                value={String(overview.activeSuppliers)}
+                sub="Currently active"
+                tone={overview.activeSuppliers > 0 ? "success" : "default"}
+              />
+              <MetricCard
+                label="Local"
+                value={String(overview.localSuppliers)}
+                sub="Local suppliers"
+              />
+              <MetricCard
+                label="Abroad"
+                value={String(overview.abroadSuppliers)}
+                sub="Foreign suppliers"
+                tone={overview.abroadSuppliers > 0 ? "info" : "default"}
+              />
+              <MetricCard
+                label="Bills"
+                value={String(overview.billsCount)}
+                sub="Loaded bills"
+              />
+              <MetricCard
+                label={`Outstanding (${defaultCurrency})`}
+                value={toMoney(overview.outstandingBalance)}
+                sub="Current unpaid balance"
+                tone={overview.outstandingBalance > 0 ? "warn" : "default"}
+              />
+            </div>
+          </Surface>
+
+          <Surface className="bg-[var(--card-2)]">
+            <div className="text-sm font-black text-[var(--app-fg)]">
+              Current supplier
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-3">
+              <Select
+                value={selectedSupplierId}
+                onChange={(e) => setSelectedSupplierId(e.target.value)}
+              >
+                <option value="">All suppliers</option>
+                {suppliersFiltered
+                  .slice()
+                  .sort((a, b) =>
+                    String(a?.name || "").localeCompare(String(b?.name || "")),
+                  )
+                  .map((s) => (
+                    <option key={s.id} value={String(s.id)}>
+                      {toStr(s?.name) || `Supplier #${s.id}`}
+                    </option>
+                  ))}
+              </Select>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <MetricCard
+                  label="Bills"
+                  value={
+                    supSummaryLoading
+                      ? "…"
+                      : String(toInt(supplierSummary?.billsCount ?? 0))
+                  }
+                  sub="For selected supplier"
+                />
+                <MetricCard
+                  label={`Total (${defaultCurrency})`}
+                  value={
+                    supSummaryLoading
+                      ? "…"
+                      : toMoney(supplierSummary?.totalAmount ?? 0)
+                  }
+                  sub="Loaded summary"
+                />
+                <MetricCard
+                  label={`Balance (${defaultCurrency})`}
+                  value={
+                    supSummaryLoading
+                      ? "…"
+                      : toMoney(
+                          supplierSummary?.balance ??
+                            supplierSummary?.balanceDue ??
+                            0,
+                        )
+                  }
+                  sub="Outstanding amount"
+                  tone={
+                    toInt(
+                      supplierSummary?.balance ??
+                        supplierSummary?.balanceDue ??
+                        0,
+                    ) > 0
+                      ? "warn"
+                      : "default"
+                  }
+                />
+              </div>
+
+              <div className="text-xs text-[var(--muted)]">
+                Choose one supplier to focus the summary and bill list.
+              </div>
+            </div>
+          </Surface>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[0.95fr_1.05fr]">
           <div className="overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--card)]">
             <div className="border-b border-[var(--border)] p-4">
               <div className="text-sm font-black text-[var(--app-fg)]">
@@ -550,74 +882,6 @@ export default function SuppliersPanel({
                   value={supQ}
                   onChange={(e) => setSupQ(e.target.value)}
                 />
-
-                <div className="rounded-[22px] border border-[var(--border)] bg-[var(--card-2)] p-3">
-                  <div className="text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                    Current supplier
-                  </div>
-
-                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <Select
-                      value={selectedSupplierId}
-                      onChange={(e) => setSelectedSupplierId(e.target.value)}
-                    >
-                      <option value="">All suppliers</option>
-                      {suppliersFiltered
-                        .slice()
-                        .sort((a, b) =>
-                          String(a?.name || "").localeCompare(
-                            String(b?.name || ""),
-                          ),
-                        )
-                        .map((s) => (
-                          <option key={s.id} value={String(s.id)}>
-                            {toStr(s?.name) || `Supplier #${s.id}`}
-                          </option>
-                        ))}
-                    </Select>
-
-                    <div className="rounded-[18px] border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-sm text-[var(--app-fg)]">
-                      Balance:{" "}
-                      <b>
-                        {supSummaryLoading
-                          ? "…"
-                          : supplierSummary
-                            ? money(supplierSummary.balance || 0)
-                            : "—"}
-                      </b>{" "}
-                      <span className="text-xs text-[var(--muted)]">
-                        {defaultCurrency}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="mt-2 text-[11px] text-[var(--muted)]">
-                    Bills:{" "}
-                    <b>
-                      {supSummaryLoading
-                        ? "…"
-                        : supplierSummary
-                          ? String(supplierSummary.billsCount || 0)
-                          : "—"}
-                    </b>{" "}
-                    • Total:{" "}
-                    <b>
-                      {supSummaryLoading
-                        ? "…"
-                        : supplierSummary
-                          ? money(supplierSummary.totalAmount || 0)
-                          : "—"}
-                    </b>{" "}
-                    • Paid:{" "}
-                    <b>
-                      {supSummaryLoading
-                        ? "…"
-                        : supplierSummary
-                          ? money(supplierSummary.paidAmount || 0)
-                          : "—"}
-                    </b>
-                  </div>
-                </div>
               </div>
             </div>
 
@@ -633,20 +897,18 @@ export default function SuppliersPanel({
                   No suppliers found.
                 </div>
               ) : (
-                <div className="grid gap-2">
-                  {suppliersFiltered.slice(0, 24).map((s) => {
+                <div className="grid gap-3">
+                  {visibleSuppliers.map((s) => {
                     const id = s?.id;
                     const name = toStr(s?.name) || "—";
                     const phone = toStr(s?.phone);
                     const email = toStr(s?.email);
                     const sourceType = String(
-                      s?.sourceType ?? s?.source_type ?? "LOCAL",
+                      s?.sourceType || "LOCAL",
                     ).toUpperCase();
                     const loc = [toStr(s?.city), toStr(s?.country)]
                       .filter(Boolean)
                       .join(", ");
-                    const active = s?.isActive ?? s?.is_active;
-                    const activeTone = active === false ? "danger" : "success";
 
                     return (
                       <button
@@ -666,49 +928,42 @@ export default function SuppliersPanel({
                               <div className="truncate text-sm font-black text-[var(--app-fg)]">
                                 {name}
                               </div>
-                              <Pill
-                                tone={
-                                  sourceType === "ABROAD" ? "info" : "neutral"
-                                }
-                              >
+                              <Pill tone={supplierSourceTone(sourceType)}>
                                 {sourceType}
                               </Pill>
-                              <Pill tone={activeTone}>
-                                {active === false ? "INACTIVE" : "ACTIVE"}
+                              <Pill tone={supplierActiveTone(s?.isActive)}>
+                                {s?.isActive === false ? "INACTIVE" : "ACTIVE"}
                               </Pill>
                             </div>
 
                             <div className="mt-2 text-xs text-[var(--muted)]">
-                              {phone ? (
-                                <span>
-                                  Phone:{" "}
-                                  <b className="text-[var(--app-fg)]">
-                                    {phone}
-                                  </b>
-                                </span>
-                              ) : (
-                                <span>Phone: —</span>
-                              )}
+                              Contact:{" "}
+                              <b className="text-[var(--app-fg)]">
+                                {toStr(s?.contactName) || "—"}
+                              </b>
+                            </div>
+
+                            <div className="mt-1 text-xs text-[var(--muted)]">
+                              Phone:{" "}
+                              <b className="text-[var(--app-fg)]">
+                                {phone || "—"}
+                              </b>
                               {email ? (
-                                <span>
+                                <>
                                   {" "}
                                   • Email:{" "}
                                   <b className="text-[var(--app-fg)]">
                                     {email}
                                   </b>
-                                </span>
+                                </>
                               ) : null}
                             </div>
 
                             <div className="mt-1 text-xs text-[var(--muted)]">
-                              {loc ? (
-                                <span>
-                                  Location:{" "}
-                                  <b className="text-[var(--app-fg)]">{loc}</b>
-                                </span>
-                              ) : (
-                                <span>Location: —</span>
-                              )}
+                              Location:{" "}
+                              <b className="text-[var(--app-fg)]">
+                                {loc || "—"}
+                              </b>
                             </div>
 
                             {toStr(s?.notes) ? (
@@ -721,7 +976,7 @@ export default function SuppliersPanel({
 
                           <div className="shrink-0 text-right">
                             <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                              ID
+                              Supplier ID
                             </div>
                             <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
                               #{id ?? "—"}
@@ -732,9 +987,19 @@ export default function SuppliersPanel({
                     );
                   })}
 
-                  {suppliersFiltered.length > 24 ? (
-                    <div className="text-xs text-[var(--muted)]">
-                      Showing first 24 suppliers. Use search to narrow.
+                  {suppliersVisibleCount < suppliersFiltered.length ? (
+                    <div className="flex justify-center pt-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSuppliersVisibleCount(
+                            (prev) => prev + SUPPLIER_PAGE_SIZE,
+                          )
+                        }
+                        className="rounded-[18px] border border-[var(--border)] px-4 py-2.5 text-sm font-bold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+                      >
+                        Load more suppliers
+                      </button>
                     </div>
                   ) : null}
                 </div>
@@ -742,461 +1007,550 @@ export default function SuppliersPanel({
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--card)]">
-            <div className="border-b border-[var(--border)] p-4">
-              <div className="text-sm font-black text-[var(--app-fg)]">
-                Supplier bills
-              </div>
-
-              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                <Input
-                  placeholder="Search bills: bill no, supplier"
-                  value={billQ}
-                  onChange={(e) => setBillQ(e.target.value)}
-                />
-                <Select
-                  value={billStatus}
-                  onChange={(e) => setBillStatus(e.target.value)}
-                >
-                  <option value="">All statuses</option>
-                  <option value="OPEN">OPEN</option>
-                  <option value="PAID">PAID</option>
-                  <option value="DRAFT">DRAFT</option>
-                  <option value="VOID">VOID</option>
-                </Select>
-                <Select
-                  value={String(selectedSupplierId || "")}
-                  onChange={(e) => setSelectedSupplierId(e.target.value)}
-                >
-                  <option value="">All suppliers</option>
-                  {suppliers
-                    .slice()
-                    .sort((a, b) =>
-                      String(a?.name || "").localeCompare(
-                        String(b?.name || ""),
-                      ),
-                    )
-                    .map((s) => (
-                      <option key={s.id} value={String(s.id)}>
-                        {toStr(s?.name) || `Supplier #${s.id}`}
-                      </option>
-                    ))}
-                </Select>
-              </div>
-            </div>
-
-            <div className="p-4">
-              {billsLoading ? (
-                <div className="grid gap-2">
-                  <div className="h-28 animate-pulse rounded-[20px] bg-slate-200/70 dark:bg-slate-800/70" />
-                  <div className="h-28 animate-pulse rounded-[20px] bg-slate-200/70 dark:bg-slate-800/70" />
-                  <div className="h-28 animate-pulse rounded-[20px] bg-slate-200/70 dark:bg-slate-800/70" />
+          <div className="grid gap-4">
+            <Surface className="bg-[var(--card-2)]">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-black text-[var(--app-fg)]">
+                    Selected supplier detail
+                  </div>
+                  <div className="mt-1 text-sm text-[var(--muted)]">
+                    Focused supplier identity and liability view.
+                  </div>
                 </div>
-              ) : billsFiltered.length === 0 ? (
-                <div className="rounded-[24px] border border-dashed border-[var(--border-strong)] bg-[var(--card-2)] px-4 py-8 text-center text-sm text-[var(--muted)]">
-                  No supplier bills found.
-                </div>
-              ) : (
-                <div className="grid gap-3">
-                  {billsFiltered.slice(0, 40).map((b) => {
-                    const id = b?.id;
-                    const st = String(b?.status || "—").toUpperCase();
-                    const total =
-                      Number(b?.totalAmount ?? b?.total_amount ?? 0) || 0;
-                    const paid =
-                      Number(b?.paidAmount ?? b?.paid_amount ?? 0) || 0;
-                    const balance = total - paid;
 
-                    const supplierName =
-                      toStr(b?.supplierName ?? b?.name) || "—";
-                    const billNo = toStr(b?.billNo ?? b?.bill_no) || "—";
-                    const currency = toStr(b?.currency) || defaultCurrency;
-                    const due = b?.dueDate || b?.due_date;
-
-                    return (
-                      <Surface key={id}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="text-sm font-black text-[var(--app-fg)]">
-                                Bill #{id ?? "—"}
-                              </div>
-                              <Pill tone={statusTone(st)}>{st}</Pill>
-                            </div>
-
-                            <div className="mt-2 text-xs text-[var(--muted)]">
-                              Supplier:{" "}
-                              <b className="text-[var(--app-fg)]">
-                                {supplierName}
-                              </b>{" "}
-                              • Bill no:{" "}
-                              <b className="text-[var(--app-fg)]">{billNo}</b>
-                            </div>
-
-                            <div className="mt-1 text-xs text-[var(--muted)]">
-                              Issued:{" "}
-                              <b className="text-[var(--app-fg)]">
-                                {fmt(
-                                  b?.issuedDate ||
-                                    b?.issued_date ||
-                                    b?.createdAt ||
-                                    b?.created_at,
-                                )}
-                              </b>
-                              {due ? (
-                                <span>
-                                  {" "}
-                                  • Due:{" "}
-                                  <b className="text-[var(--app-fg)]">
-                                    {String(due)}
-                                  </b>
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-
-                          <div className="shrink-0 text-right">
-                            <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                              Balance
-                            </div>
-                            <div className="mt-1 text-2xl font-black text-[var(--app-fg)]">
-                              {money(balance)}
-                            </div>
-                            <div className="text-[11px] text-[var(--muted)]">
-                              {currency}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                          <div className="rounded-[20px] border border-[var(--border)] bg-[var(--card-2)] p-3">
-                            <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                              Total
-                            </div>
-                            <div className="mt-2 text-sm font-bold text-[var(--app-fg)]">
-                              {money(total)} {currency}
-                            </div>
-                          </div>
-                          <div className="rounded-[20px] border border-[var(--border)] bg-[var(--card-2)] p-3">
-                            <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                              Paid
-                            </div>
-                            <div className="mt-2 text-sm font-bold text-[var(--app-fg)]">
-                              {money(paid)} {currency}
-                            </div>
-                          </div>
-                          <div className="rounded-[20px] border border-[var(--border)] bg-[var(--card-2)] p-3">
-                            <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                              Balance
-                            </div>
-                            <div className="mt-2 text-sm font-bold text-[var(--app-fg)]">
-                              {money(balance)} {currency}
-                            </div>
-                          </div>
-                        </div>
-
-                        {toStr(b?.note) ? (
-                          <div className="mt-3 rounded-[18px] border border-[var(--border)] bg-[var(--card-2)] p-3 text-sm text-[var(--app-fg)]">
-                            <b>Note:</b> {toStr(b.note)}
-                          </div>
-                        ) : null}
-
-                        {!caps.canRecordBillPayment ? (
-                          <div className="mt-3 text-[11px] text-[var(--muted)]">
-                            Payments are handled by Owner or Admin.
-                          </div>
-                        ) : null}
-                      </Surface>
-                    );
-                  })}
-
-                  {billsFiltered.length > 40 ? (
-                    <div className="text-xs text-[var(--muted)]">
-                      Showing first 40 bills. Use filters to narrow.
-                    </div>
+                <div className="flex flex-wrap gap-2">
+                  {selectedSupplier ? (
+                    <>
+                      <Pill
+                        tone={supplierSourceTone(selectedSupplier.sourceType)}
+                      >
+                        {toStr(selectedSupplier.sourceType) || "LOCAL"}
+                      </Pill>
+                      <Pill
+                        tone={supplierActiveTone(selectedSupplier.isActive)}
+                      >
+                        {selectedSupplier.isActive === false
+                          ? "INACTIVE"
+                          : "ACTIVE"}
+                      </Pill>
+                    </>
                   ) : null}
                 </div>
+              </div>
+
+              {selectedSupplier ? (
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <InfoTile
+                    label="Supplier"
+                    value={toStr(selectedSupplier.name) || "—"}
+                  />
+                  <InfoTile
+                    label="Contact person"
+                    value={toStr(selectedSupplier.contactName) || "—"}
+                  />
+                  <InfoTile
+                    label="Phone"
+                    value={toStr(selectedSupplier.phone) || "—"}
+                  />
+                  <InfoTile
+                    label="Email"
+                    value={toStr(selectedSupplier.email) || "—"}
+                  />
+                  <InfoTile
+                    label="Country / City"
+                    value={
+                      [
+                        toStr(selectedSupplier.country),
+                        toStr(selectedSupplier.city),
+                      ]
+                        .filter(Boolean)
+                        .join(" / ") || "—"
+                    }
+                  />
+                  <InfoTile
+                    label="Created"
+                    value={fmtDate(selectedSupplier.createdAt)}
+                  />
+                  <InfoTile
+                    label="Updated"
+                    value={fmtDate(selectedSupplier.updatedAt)}
+                  />
+                  <InfoTile
+                    label={`Balance (${defaultCurrency})`}
+                    value={
+                      supSummaryLoading
+                        ? "…"
+                        : toMoney(
+                            supplierSummary?.balance ??
+                              supplierSummary?.balanceDue ??
+                              selectedSupplier?.balance ??
+                              0,
+                          )
+                    }
+                  />
+                  <div className="sm:col-span-2">
+                    <InfoTile
+                      label="Notes"
+                      value={toStr(selectedSupplier.notes) || "No notes"}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 rounded-[24px] border border-dashed border-[var(--border-strong)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--muted)]">
+                  Select a supplier to inspect details.
+                </div>
               )}
+            </Surface>
+
+            <div className="overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--card)]">
+              <div className="border-b border-[var(--border)] p-4">
+                <div className="text-sm font-black text-[var(--app-fg)]">
+                  Supplier bills
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <Input
+                    placeholder="Search bills: bill no, supplier"
+                    value={billQ}
+                    onChange={(e) => setBillQ(e.target.value)}
+                  />
+                  <Select
+                    value={billStatus}
+                    onChange={(e) => setBillStatus(e.target.value)}
+                  >
+                    <option value="">All statuses</option>
+                    <option value="OPEN">OPEN</option>
+                    <option value="PAID">PAID</option>
+                    <option value="DRAFT">DRAFT</option>
+                    <option value="VOID">VOID</option>
+                  </Select>
+                  <Select
+                    value={String(selectedSupplierId || "")}
+                    onChange={(e) => setSelectedSupplierId(e.target.value)}
+                  >
+                    <option value="">All suppliers</option>
+                    {suppliers
+                      .slice()
+                      .sort((a, b) =>
+                        String(a?.name || "").localeCompare(
+                          String(b?.name || ""),
+                        ),
+                      )
+                      .map((s) => (
+                        <option key={s.id} value={String(s.id)}>
+                          {toStr(s?.name) || `Supplier #${s.id}`}
+                        </option>
+                      ))}
+                  </Select>
+                </div>
+              </div>
+
+              <div className="p-4">
+                {billsLoading ? (
+                  <div className="grid gap-2">
+                    <div className="h-28 animate-pulse rounded-[20px] bg-slate-200/70 dark:bg-slate-800/70" />
+                    <div className="h-28 animate-pulse rounded-[20px] bg-slate-200/70 dark:bg-slate-800/70" />
+                    <div className="h-28 animate-pulse rounded-[20px] bg-slate-200/70 dark:bg-slate-800/70" />
+                  </div>
+                ) : billsFiltered.length === 0 ? (
+                  <div className="rounded-[24px] border border-dashed border-[var(--border-strong)] bg-[var(--card-2)] px-4 py-8 text-center text-sm text-[var(--muted)]">
+                    No supplier bills found.
+                  </div>
+                ) : (
+                  <div className="grid gap-3">
+                    {visibleBills.map((b) => {
+                      const st = String(b?.status || "—").toUpperCase();
+
+                      return (
+                        <Surface key={b?.id}>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="text-sm font-black text-[var(--app-fg)]">
+                                  Bill #{b?.id ?? "—"}
+                                </div>
+                                <Pill tone={statusTone(st)}>{st}</Pill>
+                              </div>
+
+                              <div className="mt-2 text-xs text-[var(--muted)]">
+                                Supplier:{" "}
+                                <b className="text-[var(--app-fg)]">
+                                  {toStr(b?.supplierName) || "—"}
+                                </b>{" "}
+                                • Bill no:{" "}
+                                <b className="text-[var(--app-fg)]">
+                                  {toStr(b?.billNo) || "—"}
+                                </b>
+                              </div>
+
+                              <div className="mt-1 text-xs text-[var(--muted)]">
+                                Issued:{" "}
+                                <b className="text-[var(--app-fg)]">
+                                  {fmtDate(b?.issuedDate)}
+                                </b>
+                                {b?.dueDate ? (
+                                  <>
+                                    {" "}
+                                    • Due:{" "}
+                                    <b className="text-[var(--app-fg)]">
+                                      {String(b.dueDate)}
+                                    </b>
+                                  </>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="shrink-0 text-right">
+                              <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                                Balance
+                              </div>
+                              <div className="mt-1 text-2xl font-black text-[var(--app-fg)]">
+                                {toMoney(b?.balance)}
+                              </div>
+                              <div className="text-[11px] text-[var(--muted)]">
+                                {toStr(b?.currency) || defaultCurrency}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                            <div className="rounded-[20px] border border-[var(--border)] bg-[var(--card-2)] p-3">
+                              <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                                Total
+                              </div>
+                              <div className="mt-2 text-sm font-bold text-[var(--app-fg)]">
+                                {toMoney(b?.totalAmount)} {b?.currency}
+                              </div>
+                            </div>
+                            <div className="rounded-[20px] border border-[var(--border)] bg-[var(--card-2)] p-3">
+                              <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                                Paid
+                              </div>
+                              <div className="mt-2 text-sm font-bold text-[var(--app-fg)]">
+                                {toMoney(b?.paidAmount)} {b?.currency}
+                              </div>
+                            </div>
+                            <div className="rounded-[20px] border border-[var(--border)] bg-[var(--card-2)] p-3">
+                              <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                                Balance
+                              </div>
+                              <div className="mt-2 text-sm font-bold text-[var(--app-fg)]">
+                                {toMoney(b?.balance)} {b?.currency}
+                              </div>
+                            </div>
+                          </div>
+
+                          {toStr(b?.note) ? (
+                            <div className="mt-3 rounded-[18px] border border-[var(--border)] bg-[var(--card-2)] p-3 text-sm text-[var(--app-fg)]">
+                              <b>Note:</b> {toStr(b.note)}
+                            </div>
+                          ) : null}
+
+                          {!caps.canRecordBillPayment ? (
+                            <div className="mt-3 text-[11px] text-[var(--muted)]">
+                              Payments are handled by Owner or Admin.
+                            </div>
+                          ) : null}
+                        </Surface>
+                      );
+                    })}
+
+                    {billsVisibleCount < billsFiltered.length ? (
+                      <div className="flex justify-center pt-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setBillsVisibleCount(
+                              (prev) => prev + BILL_PAGE_SIZE,
+                            )
+                          }
+                          className="rounded-[18px] border border-[var(--border)] px-4 py-2.5 text-sm font-bold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+                        >
+                          Load more bills
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </SectionCard>
 
       {caps.canCreateSupplier && supCreateOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]">
-          <div className="w-full max-w-lg overflow-hidden rounded-[30px] border border-[var(--border)] bg-[var(--card)] shadow-[0_30px_80px_rgba(2,6,23,0.22)]">
-            <div className="border-b border-[var(--border)] p-5">
-              <div className="text-base font-black text-[var(--app-fg)]">
-                Add supplier
-              </div>
-              <div className="mt-1 text-sm text-[var(--muted)]">
-                Keep it simple: name and contact.
-              </div>
-            </div>
-
-            <form className="grid gap-3 p-5" onSubmit={submitSupplierCreate}>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                    Supplier name *
-                  </div>
-                  <Input
-                    value={supForm.name}
-                    onChange={(e) =>
-                      setSupForm((p) => ({ ...p, name: e.target.value }))
-                    }
-                  />
-                </div>
-                <div>
-                  <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                    Source
-                  </div>
-                  <Select
-                    value={supForm.sourceType}
-                    onChange={(e) =>
-                      setSupForm((p) => ({ ...p, sourceType: e.target.value }))
-                    }
-                  >
-                    <option value="LOCAL">LOCAL</option>
-                    <option value="ABROAD">ABROAD</option>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                    Contact name
-                  </div>
-                  <Input
-                    value={supForm.contactName}
-                    onChange={(e) =>
-                      setSupForm((p) => ({ ...p, contactName: e.target.value }))
-                    }
-                  />
-                </div>
-                <div>
-                  <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                    Phone
-                  </div>
-                  <Input
-                    value={supForm.phone}
-                    onChange={(e) =>
-                      setSupForm((p) => ({ ...p, phone: e.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                    Email
-                  </div>
-                  <Input
-                    value={supForm.email}
-                    onChange={(e) =>
-                      setSupForm((p) => ({ ...p, email: e.target.value }))
-                    }
-                  />
-                </div>
-                <div>
-                  <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                    Country / City
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input
-                      value={supForm.country}
-                      placeholder="Country"
-                      onChange={(e) =>
-                        setSupForm((p) => ({ ...p, country: e.target.value }))
-                      }
-                    />
-                    <Input
-                      value={supForm.city}
-                      placeholder="City"
-                      onChange={(e) =>
-                        setSupForm((p) => ({ ...p, city: e.target.value }))
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
-
+        <ModalShell
+          title="Add supplier"
+          subtitle="Keep it simple: name and contact."
+          onClose={() => {
+            setSupCreateOpen(false);
+            setSupCreateState("idle");
+          }}
+        >
+          <form className="grid gap-3" onSubmit={submitSupplierCreate}>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                  Notes
+                  Supplier name *
                 </div>
                 <Input
-                  value={supForm.notes}
+                  value={supForm.name}
                   onChange={(e) =>
-                    setSupForm((p) => ({ ...p, notes: e.target.value }))
+                    setSupForm((p) => ({ ...p, name: e.target.value }))
                   }
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSupCreateOpen(false);
-                    setSupCreateState("idle");
-                  }}
-                  className="rounded-[18px] border border-[var(--border)] px-4 py-2.5 text-sm font-bold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
-                  disabled={supCreateState === "loading"}
+              <div>
+                <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                  Source
+                </div>
+                <Select
+                  value={supForm.sourceType}
+                  onChange={(e) =>
+                    setSupForm((p) => ({ ...p, sourceType: e.target.value }))
+                  }
                 >
-                  Close
-                </button>
+                  <option value="LOCAL">LOCAL</option>
+                  <option value="ABROAD">ABROAD</option>
+                </Select>
+              </div>
+            </div>
 
-                <AsyncButton
-                  type="submit"
-                  variant="primary"
-                  state={supCreateState}
-                  text="Create supplier"
-                  loadingText="Creating…"
-                  successText="Created"
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                  Contact name
+                </div>
+                <Input
+                  value={supForm.contactName}
+                  onChange={(e) =>
+                    setSupForm((p) => ({ ...p, contactName: e.target.value }))
+                  }
                 />
               </div>
-            </form>
-          </div>
-        </div>
+
+              <div>
+                <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                  Phone
+                </div>
+                <Input
+                  value={supForm.phone}
+                  onChange={(e) =>
+                    setSupForm((p) => ({ ...p, phone: e.target.value }))
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                  Email
+                </div>
+                <Input
+                  value={supForm.email}
+                  onChange={(e) =>
+                    setSupForm((p) => ({ ...p, email: e.target.value }))
+                  }
+                />
+              </div>
+
+              <div>
+                <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                  Country / City
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    value={supForm.country}
+                    placeholder="Country"
+                    onChange={(e) =>
+                      setSupForm((p) => ({ ...p, country: e.target.value }))
+                    }
+                  />
+                  <Input
+                    value={supForm.city}
+                    placeholder="City"
+                    onChange={(e) =>
+                      setSupForm((p) => ({ ...p, city: e.target.value }))
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                Notes
+              </div>
+              <TextArea
+                rows={4}
+                value={supForm.notes}
+                onChange={(e) =>
+                  setSupForm((p) => ({ ...p, notes: e.target.value }))
+                }
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSupCreateOpen(false);
+                  setSupCreateState("idle");
+                }}
+                className="rounded-[18px] border border-[var(--border)] px-4 py-2.5 text-sm font-bold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+                disabled={supCreateState === "loading"}
+              >
+                Close
+              </button>
+
+              <AsyncButton
+                type="submit"
+                variant="primary"
+                state={supCreateState}
+                text="Create supplier"
+                loadingText="Creating…"
+                successText="Created"
+              />
+            </div>
+          </form>
+        </ModalShell>
       ) : null}
 
       {caps.canCreateBill && billCreateOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]">
-          <div className="w-full max-w-lg overflow-hidden rounded-[30px] border border-[var(--border)] bg-[var(--card)] shadow-[0_30px_80px_rgba(2,6,23,0.22)]">
-            <div className="border-b border-[var(--border)] p-5">
-              <div className="text-base font-black text-[var(--app-fg)]">
-                New supplier bill
+        <ModalShell
+          title="New supplier bill"
+          subtitle="Bills are payable or credit; payments may be restricted by role."
+          onClose={() => {
+            setBillCreateOpen(false);
+            setBillCreateState("idle");
+          }}
+        >
+          <form className="grid gap-3" onSubmit={submitBillCreate}>
+            <div>
+              <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                Supplier *
               </div>
-              <div className="mt-1 text-sm text-[var(--muted)]">
-                Bills are payable or credit; payments may be restricted by role.
+              <Select
+                value={billForm.supplierId || selectedSupplierId}
+                onChange={(e) =>
+                  setBillForm((p) => ({ ...p, supplierId: e.target.value }))
+                }
+              >
+                <option value="">Select supplier…</option>
+                {suppliers
+                  .slice()
+                  .sort((a, b) =>
+                    String(a?.name || "").localeCompare(String(b?.name || "")),
+                  )
+                  .map((s) => (
+                    <option key={s.id} value={String(s.id)}>
+                      {toStr(s?.name) || `Supplier #${s.id}`}
+                    </option>
+                  ))}
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                  Bill number
+                </div>
+                <Input
+                  value={billForm.billNo}
+                  onChange={(e) =>
+                    setBillForm((p) => ({ ...p, billNo: e.target.value }))
+                  }
+                />
+              </div>
+
+              <div>
+                <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                  Currency
+                </div>
+                <Select
+                  value={billForm.currency}
+                  onChange={(e) =>
+                    setBillForm((p) => ({ ...p, currency: e.target.value }))
+                  }
+                >
+                  <option value={defaultCurrency}>{defaultCurrency}</option>
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                </Select>
               </div>
             </div>
 
-            <form className="grid gap-3 p-5" onSubmit={submitBillCreate}>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                  Supplier *
-                </div>
-                <Select
-                  value={billForm.supplierId || selectedSupplierId}
-                  onChange={(e) =>
-                    setBillForm((p) => ({ ...p, supplierId: e.target.value }))
-                  }
-                >
-                  <option value="">Select supplier…</option>
-                  {suppliers
-                    .slice()
-                    .sort((a, b) =>
-                      String(a?.name || "").localeCompare(
-                        String(b?.name || ""),
-                      ),
-                    )
-                    .map((s) => (
-                      <option key={s.id} value={String(s.id)}>
-                        {toStr(s?.name) || `Supplier #${s.id}`}
-                      </option>
-                    ))}
-                </Select>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                    Bill number
-                  </div>
-                  <Input
-                    value={billForm.billNo}
-                    onChange={(e) =>
-                      setBillForm((p) => ({ ...p, billNo: e.target.value }))
-                    }
-                  />
-                </div>
-                <div>
-                  <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                    Currency
-                  </div>
-                  <Select
-                    value={billForm.currency}
-                    onChange={(e) =>
-                      setBillForm((p) => ({ ...p, currency: e.target.value }))
-                    }
-                  >
-                    <option value={defaultCurrency}>{defaultCurrency}</option>
-                    <option value="USD">USD</option>
-                    <option value="EUR">EUR</option>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                    Total amount *
-                  </div>
-                  <Input
-                    value={billForm.totalAmount}
-                    onChange={(e) =>
-                      setBillForm((p) => ({
-                        ...p,
-                        totalAmount: e.target.value,
-                      }))
-                    }
-                    placeholder="Example: 250000"
-                  />
-                </div>
-                <div>
-                  <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                    Due date
-                  </div>
-                  <Input
-                    type="date"
-                    value={billForm.dueDate}
-                    onChange={(e) =>
-                      setBillForm((p) => ({ ...p, dueDate: e.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-
-              <div>
-                <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                  Note
+                  Total amount *
                 </div>
                 <Input
-                  value={billForm.note}
+                  value={billForm.totalAmount}
                   onChange={(e) =>
-                    setBillForm((p) => ({ ...p, note: e.target.value }))
+                    setBillForm((p) => ({
+                      ...p,
+                      totalAmount: e.target.value,
+                    }))
+                  }
+                  placeholder="Example: 250000"
+                />
+              </div>
+
+              <div>
+                <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                  Due date
+                </div>
+                <Input
+                  type="date"
+                  value={billForm.dueDate}
+                  onChange={(e) =>
+                    setBillForm((p) => ({ ...p, dueDate: e.target.value }))
                   }
                 />
               </div>
+            </div>
 
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBillCreateOpen(false);
-                    setBillCreateState("idle");
-                  }}
-                  className="rounded-[18px] border border-[var(--border)] px-4 py-2.5 text-sm font-bold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
-                  disabled={billCreateState === "loading"}
-                >
-                  Close
-                </button>
-
-                <AsyncButton
-                  type="submit"
-                  variant="primary"
-                  state={billCreateState}
-                  text="Create bill"
-                  loadingText="Creating…"
-                  successText="Created"
-                />
+            <div>
+              <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                Note
               </div>
-            </form>
-          </div>
-        </div>
+              <TextArea
+                rows={4}
+                value={billForm.note}
+                onChange={(e) =>
+                  setBillForm((p) => ({ ...p, note: e.target.value }))
+                }
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setBillCreateOpen(false);
+                  setBillCreateState("idle");
+                }}
+                className="rounded-[18px] border border-[var(--border)] px-4 py-2.5 text-sm font-bold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+                disabled={billCreateState === "loading"}
+              >
+                Close
+              </button>
+
+              <AsyncButton
+                type="submit"
+                variant="primary"
+                state={billCreateState}
+                text="Create bill"
+                loadingText="Creating…"
+                successText="Created"
+              />
+            </div>
+          </form>
+        </ModalShell>
       ) : null}
     </div>
   );

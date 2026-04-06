@@ -39,14 +39,14 @@ export const METHODS = [
 ];
 
 export const SECTIONS = [
-  { key: "dashboard", label: "Dashboard" },
-  { key: "payments", label: "Payments" },
-  { key: "sessions", label: "Cash sessions" },
-  { key: "ledger", label: "Cash ledger" },
-  { key: "credits", label: "Credits" },
-  { key: "deposits", label: "Deposits" },
-  { key: "expenses", label: "Expenses" },
-  { key: "reconcile", label: "Reconcile" },
+  { key: "dashboard", label: "Overview" },
+  { key: "payments", label: "Record payment" },
+  { key: "sessions", label: "Cash drawer" },
+  { key: "ledger", label: "Money movement" },
+  { key: "credits", label: "Credit collections" },
+  { key: "deposits", label: "Bank deposits" },
+  { key: "expenses", label: "Cash expenses" },
+  { key: "reconcile", label: "Count cash" },
   { key: "refunds", label: "Refunds" },
-  { key: "notifications", label: "Notifications" },
+  { key: "notifications", label: "Alerts" },
 ];

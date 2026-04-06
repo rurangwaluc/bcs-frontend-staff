@@ -7,7 +7,7 @@ import {
 import {
   ENDPOINTS,
   METHODS,
-  SECTIONS,
+  SECTIONS as RAW_SECTIONS,
 } from "../../components/staff/cashier/cashier-constants";
 import {
   getSellerPaymentMethodFromSale,
@@ -59,6 +59,33 @@ function dedupeNotifications(list) {
 
   return out;
 }
+
+const SECTIONS = RAW_SECTIONS.map((section) => {
+  switch (section.key) {
+    case "dashboard":
+      return { ...section, label: "Overview" };
+    case "payments":
+      return { ...section, label: "Receive payment" };
+    case "sessions":
+      return { ...section, label: "Cash session" };
+    case "ledger":
+      return { ...section, label: "Cash movement" };
+    case "credits":
+      return { ...section, label: "Credit collections" };
+    case "deposits":
+      return { ...section, label: "Bank deposits" };
+    case "expenses":
+      return { ...section, label: "Cash expenses" };
+    case "reconcile":
+      return { ...section, label: "Count cash" };
+    case "refunds":
+      return { ...section, label: "Refunds" };
+    case "notifications":
+      return { ...section, label: "Alerts" };
+    default:
+      return section;
+  }
+});
 
 export default function CashierPage() {
   const router = useRouter();
@@ -259,7 +286,10 @@ export default function CashierPage() {
         : data?.items || data?.rows || [];
       setSessions(Array.isArray(list) ? list : []);
     } catch (e) {
-      toast("danger", e?.data?.error || e?.message || "Cannot load sessions");
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Could not load cash sessions.",
+      );
       setSessions([]);
     } finally {
       setSessionsLoading(false);
@@ -275,7 +305,7 @@ export default function CashierPage() {
         : data?.items || data?.rows || [];
       setSales(Array.isArray(list) ? list : []);
     } catch (e) {
-      toast("danger", e?.data?.error || e?.message || "Cannot load sales");
+      toast("danger", e?.data?.error || e?.message || "Could not load sales.");
       setSales([]);
     } finally {
       setSalesLoading(false);
@@ -292,7 +322,8 @@ export default function CashierPage() {
       setPayments(Array.isArray(list) ? list : []);
       setCanReadPayments(true);
     } catch (e) {
-      const errText = e?.data?.error || e?.message || "Cannot load payments";
+      const errText =
+        e?.data?.error || e?.message || "Could not load payments.";
       if (String(errText).toLowerCase().includes("forbidden")) {
         setCanReadPayments(false);
         setPayments([]);
@@ -328,7 +359,8 @@ export default function CashierPage() {
       });
       setCanReadPayments(true);
     } catch (e) {
-      const errText = e?.data?.error || e?.message || "Cannot load money info";
+      const errText =
+        e?.data?.error || e?.message || "Could not load payment summary.";
       if (String(errText).toLowerCase().includes("forbidden")) {
         setCanReadPayments(false);
         return;
@@ -350,7 +382,10 @@ export default function CashierPage() {
         : data?.items || data?.rows || [];
       setDeposits(Array.isArray(list) ? list : []);
     } catch (e) {
-      toast("danger", e?.data?.error || e?.message || "Cannot load deposits");
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Could not load bank deposits.",
+      );
       setDeposits([]);
     } finally {
       setDepositsLoading(false);
@@ -366,7 +401,10 @@ export default function CashierPage() {
         : data?.items || data?.rows || [];
       setExpenses(Array.isArray(list) ? list : []);
     } catch (e) {
-      toast("danger", e?.data?.error || e?.message || "Cannot load expenses");
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Could not load cash expenses.",
+      );
       setExpenses([]);
     } finally {
       setExpensesLoading(false);
@@ -384,7 +422,10 @@ export default function CashierPage() {
         : data?.items || data?.rows || [];
       setReconciles(Array.isArray(list) ? list : []);
     } catch (e) {
-      toast("danger", e?.data?.error || e?.message || "Cannot load reconciles");
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Could not load cash counts.",
+      );
       setReconciles([]);
     } finally {
       setReconcilesLoading(false);
@@ -400,7 +441,10 @@ export default function CashierPage() {
         : data?.items || data?.rows || [];
       setRefunds(Array.isArray(list) ? list : []);
     } catch (e) {
-      toast("danger", e?.data?.error || e?.message || "Cannot load refunds");
+      toast(
+        "danger",
+        e?.data?.error || e?.message || "Could not load refunds.",
+      );
       setRefunds([]);
     } finally {
       setRefundsLoading(false);
@@ -419,7 +463,8 @@ export default function CashierPage() {
       setLedger(Array.isArray(list) ? list : []);
       setCanReadLedger(true);
     } catch (e) {
-      const errText = e?.data?.error || e?.message || "Cannot load ledger";
+      const errText =
+        e?.data?.error || e?.message || "Could not load cash movement.";
       if (String(errText).toLowerCase().includes("forbidden")) {
         setCanReadLedger(false);
         setLedger([]);
@@ -446,7 +491,7 @@ export default function CashierPage() {
       setCanReadLedger(true);
     } catch (e) {
       const errText =
-        e?.data?.error || e?.message || "Cannot load ledger today";
+        e?.data?.error || e?.message || "Could not load today's cash movement.";
       if (String(errText).toLowerCase().includes("forbidden")) {
         setCanReadLedger(false);
         return;
@@ -482,9 +527,7 @@ export default function CashierPage() {
       setNotifs(dedupeNotifications(raw));
     } catch (e) {
       setNotifs([]);
-      setNotifsErr(
-        e?.data?.error || e?.message || "Notifications list not available.",
-      );
+      setNotifsErr(e?.data?.error || e?.message || "Could not load alerts.");
     } finally {
       setNotifsLoading(false);
     }
@@ -628,7 +671,7 @@ export default function CashierPage() {
     if (!selectedSale?.id) {
       return {
         tone: "neutral",
-        message: "Pick a sale to record payment.",
+        message: "Choose a sale first.",
         isValid: false,
       };
     }
@@ -654,7 +697,7 @@ export default function CashierPage() {
     ) {
       return {
         tone: "warn",
-        message: `Amount is below expected total of ${money(selectedSaleExpectedAmount)} RWF.`,
+        message: `Amount is lower than the sale total of ${money(selectedSaleExpectedAmount)} RWF.`,
         isValid: false,
       };
     }
@@ -664,14 +707,14 @@ export default function CashierPage() {
     ) {
       return {
         tone: "warn",
-        message: `Amount is above expected total of ${money(selectedSaleExpectedAmount)} RWF.`,
+        message: `Amount is higher than the sale total of ${money(selectedSaleExpectedAmount)} RWF.`,
         isValid: false,
       };
     }
 
     return {
       tone: "success",
-      message: `Amount matches expected total: ${money(selectedSaleExpectedAmount)} RWF.`,
+      message: `Amount matches the sale total: ${money(selectedSaleExpectedAmount)} RWF.`,
       isValid: true,
     };
   }, [selectedSale, paymentAmountNumber, selectedSaleExpectedAmount]);
@@ -685,7 +728,7 @@ export default function CashierPage() {
     }
 
     if (!selectedSale?.id) {
-      return toast("warn", "Pick a sale first.");
+      return toast("warn", "Choose a sale first.");
     }
 
     const expected =
@@ -713,7 +756,7 @@ export default function CashierPage() {
         },
       });
 
-      toast("success", `Payment saved for sale #${selectedSale.id}`);
+      toast("success", `Payment recorded for sale #${selectedSale.id}.`);
       setSelectedSale(null);
       setAmount("");
       setMethod("CASH");
@@ -729,7 +772,10 @@ export default function CashierPage() {
       setTimeout(() => setPaymentBtnState("idle"), 900);
     } catch (e2) {
       setPaymentBtnState("idle");
-      toast("danger", e2?.data?.error || e2?.message || "Payment failed");
+      toast(
+        "danger",
+        e2?.data?.error || e2?.message || "Could not save payment.",
+      );
     }
   }
 
@@ -749,7 +795,7 @@ export default function CashierPage() {
         body: { openingBalance: Math.round(n) },
       });
 
-      toast("success", "Session opened.");
+      toast("success", "Cash session opened.");
       setOpeningBalance("");
       await loadSessions();
       await loadUnread();
@@ -758,7 +804,10 @@ export default function CashierPage() {
       setTimeout(() => setOpenBtnState("idle"), 900);
     } catch (e2) {
       setOpenBtnState("idle");
-      toast("danger", e2?.data?.error || e2?.message || "Open session failed");
+      toast(
+        "danger",
+        e2?.data?.error || e2?.message || "Could not open cash session.",
+      );
     }
   }
 
@@ -767,7 +816,7 @@ export default function CashierPage() {
     if (closeBtnState === "loading") return;
 
     if (!currentOpenSession?.id) {
-      return toast("warn", "No open session.");
+      return toast("warn", "There is no open cash session.");
     }
 
     setCloseBtnState("loading");
@@ -779,7 +828,7 @@ export default function CashierPage() {
         },
       });
 
-      toast("success", "Session closed.");
+      toast("success", "Cash session closed.");
       setCloseNote("");
       await loadSessions();
       await loadUnread();
@@ -788,7 +837,10 @@ export default function CashierPage() {
       setTimeout(() => setCloseBtnState("idle"), 900);
     } catch (e2) {
       setCloseBtnState("idle");
-      toast("danger", e2?.data?.error || e2?.message || "Close session failed");
+      toast(
+        "danger",
+        e2?.data?.error || e2?.message || "Could not close cash session.",
+      );
     }
   }
 
@@ -822,7 +874,7 @@ export default function CashierPage() {
         },
       });
 
-      toast("success", "Deposit created.");
+      toast("success", "Bank deposit saved.");
       setDepositAmount("");
       setDepositMethod("BANK");
       setDepositReference("");
@@ -835,7 +887,10 @@ export default function CashierPage() {
       setTimeout(() => setDepositBtnState("idle"), 900);
     } catch (e2) {
       setDepositBtnState("idle");
-      toast("danger", e2?.data?.error || e2?.message || "Deposit failed");
+      toast(
+        "danger",
+        e2?.data?.error || e2?.message || "Could not save bank deposit.",
+      );
     }
   }
 
@@ -869,7 +924,7 @@ export default function CashierPage() {
         },
       });
 
-      toast("success", "Expense created.");
+      toast("success", "Cash expense saved.");
       setExpenseAmount("");
       setExpenseCategory("GENERAL");
       setExpenseRef("");
@@ -882,7 +937,10 @@ export default function CashierPage() {
       setTimeout(() => setExpenseBtnState("idle"), 900);
     } catch (e2) {
       setExpenseBtnState("idle");
-      toast("danger", e2?.data?.error || e2?.message || "Expense failed");
+      toast(
+        "danger",
+        e2?.data?.error || e2?.message || "Could not save cash expense.",
+      );
     }
   }
 
@@ -892,7 +950,7 @@ export default function CashierPage() {
 
     const sid = Number(selectedClosedSessionId);
     if (!Number.isInteger(sid) || sid <= 0) {
-      return toast("warn", "Pick a closed session.");
+      return toast("warn", "Choose a closed cash session.");
     }
 
     const n = numOrNull(reconcileCountedCash);
@@ -913,7 +971,7 @@ export default function CashierPage() {
         },
       });
 
-      toast("success", "Reconcile saved.");
+      toast("success", "Cash count saved.");
       setReconcileCountedCash("");
       setReconcileNote("");
       await loadReconciles();
@@ -923,7 +981,10 @@ export default function CashierPage() {
       setTimeout(() => setReconcileBtnState("idle"), 900);
     } catch (e2) {
       setReconcileBtnState("idle");
-      toast("danger", e2?.data?.error || e2?.message || "Reconcile failed");
+      toast(
+        "danger",
+        e2?.data?.error || e2?.message || "Could not save cash count.",
+      );
     }
   }
 
@@ -940,7 +1001,7 @@ export default function CashierPage() {
       String(refundMethod || "").toUpperCase() === "CASH" &&
       !currentOpenSession?.id
     ) {
-      return toast("warn", "Open a cash session for CASH refund.");
+      return toast("warn", "Open a cash session before making a cash refund.");
     }
 
     setRefundBtnState("loading");
@@ -959,7 +1020,7 @@ export default function CashierPage() {
         },
       });
 
-      toast("success", `Refund saved for sale #${sid}`);
+      toast("success", `Refund saved for sale #${sid}.`);
       setRefundSaleId("");
       setRefundReason("");
       setRefundMethod("CASH");
@@ -972,7 +1033,10 @@ export default function CashierPage() {
       setTimeout(() => setRefundBtnState("idle"), 900);
     } catch (e2) {
       setRefundBtnState("idle");
-      toast("danger", e2?.data?.error || e2?.message || "Refund failed");
+      toast(
+        "danger",
+        e2?.data?.error || e2?.message || "Could not save refund.",
+      );
     }
   }
 
@@ -1133,17 +1197,17 @@ export default function CashierPage() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <div className="text-sm font-black text-[var(--app-fg)]">
-                Cashier Control Strip
+                Cashier workspace
               </div>
               <div className="mt-1 text-xs app-muted">
-                Monitor session state, payment queue, live notifications and
-                drawer expectation.
+                Follow the simple order: open session, receive payments, control
+                cash movement, then count and close.
               </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-3 py-2 text-xs text-[var(--app-fg)]">
-                Session:{" "}
+                Cash session:{" "}
                 <b>
                   {currentOpenSession
                     ? `OPEN #${currentOpenSession.id}`
@@ -1151,13 +1215,13 @@ export default function CashierPage() {
                 </b>
               </div>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-3 py-2 text-xs text-[var(--app-fg)]">
-                Awaiting payments: <b>{awaitingCount}</b>
+                Waiting for payment: <b>{awaitingCount}</b>
               </div>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-3 py-2 text-xs text-[var(--app-fg)]">
                 Unread alerts: <b>{unread}</b>
               </div>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-3 py-2 text-xs text-[var(--app-fg)]">
-                Expected drawer cash: <b>{money(expectedDrawerCash)}</b>
+                Expected cash in drawer: <b>{money(expectedDrawerCash)}</b>
               </div>
             </div>
           </div>
@@ -1167,14 +1231,14 @@ export default function CashierPage() {
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-5">
         <div className="mb-4">
           {sessionsLoading ? (
-            <Banner>Loading session…</Banner>
+            <Banner>Loading cash session…</Banner>
           ) : currentOpenSession ? (
             <Banner kind="success">
               <div className="flex flex-wrap items-center gap-2">
-                <b>Session OPEN</b>
+                <b>Cash session is open</b>
                 <span>#{currentOpenSession.id}</span>
                 <span>
-                  Opening: <b>{money(opening)}</b>
+                  Opening cash: <b>{money(opening)}</b>
                 </span>
                 <span>
                   Expected cash now: <b>{money(expectedDrawerCash)}</b>
@@ -1183,8 +1247,8 @@ export default function CashierPage() {
             </Banner>
           ) : (
             <Banner kind="warn">
-              <b>No open session.</b> Open one in <b>Cash sessions</b> before
-              you do cash work.
+              <b>No open cash session.</b> Open one in <b>Cash session</b>{" "}
+              before recording cash work.
             </Banner>
           )}
         </div>
@@ -1317,7 +1381,9 @@ export default function CashierPage() {
               />
             ) : null}
 
-            {section === "credits" ? <CashierCreditsSection /> : null}
+            {section === "credits" ? (
+              <CashierCreditsSection currentOpenSession={currentOpenSession} />
+            ) : null}
 
             {section === "deposits" ? (
               <CashierDepositsSection
@@ -1370,6 +1436,7 @@ export default function CashierPage() {
 
             {section === "reconcile" ? (
               <CashierReconcileSection
+                currentOpenSession={currentOpenSession}
                 closedSessions={closedSessions}
                 reconciles={reconciles}
                 reconcilesLoading={reconcilesLoading}
@@ -1383,7 +1450,6 @@ export default function CashierPage() {
                 setReconcileNote={setReconcileNote}
                 reconcileBtnState={reconcileBtnState}
                 loadReconciles={loadReconciles}
-                loadSessions={loadSessions}
                 money={money}
                 safeDate={safeDate}
                 onCreateReconcile={handleCreateReconcile}

@@ -12,6 +12,96 @@ import {
 
 import AsyncButton from "../../../components/AsyncButton";
 
+function safeRows(rows) {
+  return Array.isArray(rows) ? rows : [];
+}
+
+function text(v) {
+  if (v === undefined || v === null) return "";
+  return String(v).trim();
+}
+
+function amountText(money, value) {
+  if (typeof money === "function") return money(value);
+  const n = Number(value || 0);
+  return Number.isFinite(n) ? Math.round(n).toLocaleString() : "0";
+}
+
+function dateText(safeDate, value) {
+  if (typeof safeDate === "function") return safeDate(value);
+  if (!value) return "—";
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return d.toLocaleString();
+  } catch {
+    return String(value);
+  }
+}
+
+function RefundMethodPill({ method }) {
+  const value = text(method).toUpperCase() || "—";
+  const tone =
+    value === "CASH"
+      ? "warn"
+      : value === "MOMO" || value === "CARD" || value === "BANK"
+        ? "info"
+        : "neutral";
+
+  return <TinyPill tone={tone}>{value}</TinyPill>;
+}
+
+function RefundRow({ refund, money, safeDate }) {
+  const saleId = refund?.saleId ?? refund?.sale_id ?? "—";
+  const amount = refund?.amount ?? 0;
+  const reason = text(refund?.reason) || "No reason written";
+  const reference = text(refund?.reference);
+
+  return (
+    <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-sm font-extrabold text-[var(--app-fg)] sm:text-base">
+              Refund #{refund?.id ?? "—"}
+            </div>
+            <RefundMethodPill method={refund?.method} />
+          </div>
+
+          <div className="mt-2 text-sm text-[var(--app-fg)]">
+            Sale <b>#{saleId}</b>
+          </div>
+
+          <div className="mt-1 text-xs app-muted">
+            Time:{" "}
+            <b>{dateText(safeDate, refund?.createdAt || refund?.created_at)}</b>
+          </div>
+
+          <div className="mt-2 text-xs app-muted break-words">
+            <span className="font-semibold">Reason:</span> {reason}
+          </div>
+
+          {reference ? (
+            <div className="mt-1 text-xs app-muted break-words">
+              <span className="font-semibold">Reference:</span> {reference}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="shrink-0 text-right">
+          <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
+            Refunded
+          </div>
+          <div className="mt-1 text-lg font-extrabold text-[var(--app-fg)]">
+            {amountText(money, amount)}
+          </div>
+          <div className="text-[11px] app-muted">RWF</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CashierRefundsSection({
   currentOpenSession,
   refunds,
@@ -33,43 +123,95 @@ export default function CashierRefundsSection({
   safeDate,
   onCreateRefund,
 }) {
+  const refundRows = safeRows(refunds);
+  const methodRows = safeRows(methods);
+
+  const filteredRefunds = refundRows.filter((row) => {
+    const q = text(refundQ).toLowerCase();
+    if (!q) return true;
+
+    const hay = [
+      row?.id,
+      row?.saleId ?? row?.sale_id,
+      row?.amount,
+      row?.method,
+      row?.reason,
+      row?.reference,
+    ]
+      .map((v) => String(v ?? ""))
+      .join(" ")
+      .toLowerCase();
+
+    return hay.includes(q);
+  });
+
   return (
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+    <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
       <SectionCard
         title="Create refund"
-        hint="Refund a completed sale. Cash refund needs open session."
+        hint="Use this when money must go back to the customer after a completed sale."
       >
-        <form
-          className="grid max-w-md grid-cols-1 gap-3 md:grid-cols-2"
-          onSubmit={onCreateRefund}
-        >
-          <Input
-            placeholder="Sale ID"
-            value={refundSaleId}
-            onChange={(e) => setRefundSaleId(e.target.value)}
-          />
-          <Select
-            value={refundMethod}
-            onChange={(e) => setRefundMethod(e.target.value)}
-          >
-            {methods.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </Select>
-          <Input
-            placeholder="Reference (optional)"
-            value={refundReference}
-            onChange={(e) => setRefundReference(e.target.value)}
-          />
-          <Input
-            placeholder="Reason (optional)"
-            value={refundReason}
-            onChange={(e) => setRefundReason(e.target.value)}
-          />
+        <div className="grid gap-4">
+          <Banner kind="info">
+            Write the sale number, choose how the refund was given, and add a
+            short reason the team can understand later.
+          </Banner>
 
-          <div className="md:col-span-2">
+          <form onSubmit={onCreateRefund} className="grid gap-3">
+            <Input
+              placeholder="Sale number"
+              value={refundSaleId}
+              onChange={(e) => setRefundSaleId?.(e.target.value)}
+            />
+
+            <Select
+              value={refundMethod}
+              onChange={(e) => setRefundMethod?.(e.target.value)}
+            >
+              {methodRows.length === 0 ? (
+                <option value="CASH">Cash</option>
+              ) : (
+                methodRows.map((m, idx) => (
+                  <option
+                    key={m?.value || m?.label || idx}
+                    value={m?.value || "CASH"}
+                  >
+                    {m?.label || m?.value || "Cash"}
+                  </option>
+                ))
+              )}
+            </Select>
+
+            <Input
+              placeholder="Reference (optional)"
+              value={refundReference}
+              onChange={(e) => setRefundReference?.(e.target.value)}
+            />
+
+            <Input
+              placeholder="Reason"
+              value={refundReason}
+              onChange={(e) => setRefundReason?.(e.target.value)}
+            />
+
+            <div className="flex flex-wrap gap-2">
+              <TinyPill tone={text(refundSaleId) ? "success" : "neutral"}>
+                {text(refundSaleId)
+                  ? `Sale #${text(refundSaleId)}`
+                  : "Sale not chosen"}
+              </TinyPill>
+
+              <TinyPill tone={text(refundReason) ? "success" : "warn"}>
+                {text(refundReason) ? "Reason added" : "Reason needed"}
+              </TinyPill>
+
+              <TinyPill tone={currentOpenSession?.id ? "success" : "neutral"}>
+                {currentOpenSession?.id
+                  ? `Money session open #${currentOpenSession.id}`
+                  : "No money session open"}
+              </TinyPill>
+            </div>
+
             <AsyncButton
               type="submit"
               variant="primary"
@@ -77,97 +219,55 @@ export default function CashierRefundsSection({
               text="Save refund"
               loadingText="Saving…"
               successText="Saved"
-              className="w-full"
+              className="w-full sm:w-auto"
             />
-          </div>
-        </form>
-
-        {!currentOpenSession ? (
-          <div className="mt-3">
-            <Banner kind="warn">
-              If you refund by cash, open a cash session first.
-            </Banner>
-          </div>
-        ) : null}
+          </form>
+        </div>
       </SectionCard>
 
       <SectionCard
-        title="Refunds"
-        hint="Latest refund records"
-        right={<RefreshButton loading={refundsLoading} onClick={loadRefunds} />}
+        title="Refund history"
+        hint="See the latest refunds and search by sale, method, amount, or reason."
+        right={
+          <RefreshButton
+            loading={refundsLoading}
+            onClick={loadRefunds}
+            text="Refresh refunds"
+          />
+        }
       >
-        <Input
-          placeholder="Search"
-          value={refundQ}
-          onChange={(e) => setRefundQ(e.target.value)}
-        />
+        <div className="grid gap-4">
+          <Input
+            placeholder="Search by refund number, sale number, method, amount or reason"
+            value={refundQ}
+            onChange={(e) => setRefundQ?.(e.target.value)}
+          />
 
-        <div className="mt-3">
           {refundsLoading ? (
             <div className="grid gap-3">
               <Skeleton className="h-24 w-full" />
               <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          ) : filteredRefunds.length === 0 ? (
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-6 text-sm app-muted">
+              No refunds found.
             </div>
           ) : (
-            <div className="grid gap-2">
-              {(Array.isArray(refunds) ? refunds : [])
-                .filter((r) => {
-                  const q = String(refundQ || "")
-                    .trim()
-                    .toLowerCase();
-                  if (!q) return true;
-                  const hay = [
-                    r?.id,
-                    r?.saleId ?? r?.sale_id,
-                    r?.amount,
-                    r?.method,
-                    r?.reason,
-                  ]
-                    .map((v) => String(v ?? ""))
-                    .join(" ")
-                    .toLowerCase();
-                  return hay.includes(q);
-                })
-                .slice(0, 60)
-                .map((r, idx) => (
-                  <div
-                    key={r?.id || idx}
-                    className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-extrabold text-[var(--app-fg)]">
-                          Refund #{r?.id ?? "—"}
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2 text-xs app-muted">
-                          <TinyPill tone="info">
-                            {String(r?.method ?? "—").toUpperCase()}
-                          </TinyPill>
-                          <span>
-                            Sale: <b>#{r?.saleId ?? r?.sale_id ?? "—"}</b>
-                          </span>
-                        </div>
-                        <div className="mt-1 text-xs app-muted">
-                          Time: <b>{safeDate(r?.createdAt || r?.created_at)}</b>
-                        </div>
-                        <div className="mt-2 break-words text-xs app-muted">
-                          Reason: <b>{r?.reason ?? "—"}</b>
-                        </div>
-                      </div>
+            <div className="grid gap-3">
+              {filteredRefunds.slice(0, 60).map((refund, idx) => (
+                <RefundRow
+                  key={refund?.id || idx}
+                  refund={refund}
+                  money={money}
+                  safeDate={safeDate}
+                />
+              ))}
 
-                      <div className="shrink-0 text-right">
-                        <div className="text-xs app-muted">Amount</div>
-                        <div className="text-lg font-extrabold text-[var(--app-fg)]">
-                          {money(r?.amount ?? 0)}
-                        </div>
-                        <div className="text-[11px] app-muted">RWF</div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-
-              {(Array.isArray(refunds) ? refunds : []).length === 0 ? (
-                <div className="text-sm app-muted">No refunds yet.</div>
+              {filteredRefunds.length > 60 ? (
+                <div className="text-xs app-muted">
+                  Showing first 60 refunds. Use search to narrow the list.
+                </div>
               ) : null}
             </div>
           )}

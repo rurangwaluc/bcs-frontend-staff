@@ -2,14 +2,41 @@
 
 import { cx, locationLabel } from "./cashier-utils";
 
+function labelMeta(key, fallbackLabel) {
+  switch (key) {
+    case "dashboard":
+      return "Overview";
+    case "payments":
+      return "Take payment";
+    case "sessions":
+      return "Start / end day";
+    case "ledger":
+      return "Money movement";
+    case "credits":
+      return "Credit payments";
+    case "deposits":
+      return "Money taken out";
+    case "expenses":
+      return "Cash expenses";
+    case "reconcile":
+      return "Cash check";
+    case "refunds":
+      return "Refunds";
+    case "notifications":
+      return "Alerts";
+    default:
+      return fallbackLabel || "Section";
+  }
+}
+
 export default function CashierTopSectionSwitcher({
   me,
   section,
   setSection,
-  sections,
-  awaitingCount,
-  unread,
-  hasOpenSession,
+  sections = [],
+  awaitingCount = 0,
+  unread = 0,
+  hasOpenSession = false,
 }) {
   return (
     <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
@@ -22,12 +49,12 @@ export default function CashierTopSectionSwitcher({
             <div className="mt-1 text-sm app-muted">{locationLabel(me)}</div>
           </div>
 
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] px-4 py-3 text-sm app-muted">
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] px-4 py-3 text-sm app-muted dark:bg-slate-900">
             <span className="font-semibold text-[var(--app-fg)]">
-              Cashier rule:
+              Work order:
             </span>{" "}
-            open session, record payments, control drawer movement, close and
-            reconcile professionally.
+            start the day, take payments, track money going in or out, then end
+            the day and check cash.
           </div>
         </div>
 
@@ -58,10 +85,10 @@ export default function CashierTopSectionSwitcher({
                   "app-focus inline-flex items-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-semibold transition",
                   active
                     ? "border-[var(--app-fg)] bg-[var(--app-fg)] text-[var(--app-bg)] shadow-sm"
-                    : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)] hover:bg-[var(--hover)]",
+                    : "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)] hover:bg-[var(--hover)] dark:bg-slate-900",
                 )}
               >
-                <span>{s.label}</span>
+                <span>{labelMeta(s.key, s.label)}</span>
 
                 {badge ? (
                   <span

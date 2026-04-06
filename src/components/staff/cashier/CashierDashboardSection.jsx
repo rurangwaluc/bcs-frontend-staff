@@ -25,78 +25,88 @@ export default function CashierDashboardSection({
   loadUnread,
   setSection,
 }) {
+  const todayPaymentsCount = Number(summary?.today?.count ?? 0);
+  const todayPaymentsTotal = Number(summary?.today?.total ?? 0);
+  const todayMoneyIn = Number(ledgerToday?.totalIn ?? 0);
+  const todayMoneyOut = Number(ledgerToday?.totalOut ?? 0);
+
   return (
     <div className="grid gap-4">
       <SectionCard
         title="What to do now"
-        hint="Use this order to keep cashier operations clean."
+        hint="Use this order so cashier work stays clean and easy to follow."
         right={
           <RefreshButton
             loading={summaryLoading || salesLoading || sessionsLoading}
             onClick={() => {
-              loadSessions();
-              loadSummary();
-              loadSales();
-              loadPayments();
-              loadUnread();
+              loadSessions?.();
+              loadSummary?.();
+              loadSales?.();
+              loadPayments?.();
+              loadUnread?.();
             }}
           />
         }
       >
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4 dark:bg-slate-900">
             <div className="text-sm font-black text-[var(--app-fg)]">
-              1) Open session
+              1) Start the day
             </div>
-            <div className="mt-1 text-xs app-muted">
-              You need an open session before cash work starts.
+            <div className="mt-1 text-sm app-muted">
+              Open your cashier day before you receive or move cash.
             </div>
-            <div className="mt-3">
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <TinyPill tone="info">Start here</TinyPill>
               <button
                 type="button"
                 className="rounded-2xl bg-[var(--app-fg)] px-4 py-2.5 text-sm font-bold text-[var(--app-bg)]"
-                onClick={() => setSection("sessions")}
+                onClick={() => setSection?.("sessions")}
               >
-                Go
+                Open day controls
               </button>
             </div>
           </div>
 
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4 dark:bg-slate-900">
             <div className="text-sm font-black text-[var(--app-fg)]">
-              2) Record payments
+              2) Take customer payments
             </div>
-            <div className="mt-1 text-xs app-muted">
-              Finish all sales that are waiting for cashier action.
+            <div className="mt-1 text-sm app-muted">
+              Finish every sale that is still waiting for cashier action.
             </div>
-            <div className="mt-3 flex items-center gap-2">
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               <TinyPill tone={awaitingCount > 0 ? "warn" : "neutral"}>
                 Waiting: {awaitingCount}
               </TinyPill>
               <button
                 type="button"
-                className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-bold text-[var(--app-fg)]"
-                onClick={() => setSection("payments")}
+                className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-bold text-[var(--app-fg)] hover:bg-[var(--hover)] dark:bg-slate-900"
+                onClick={() => setSection?.("payments")}
               >
-                Go
+                Go to payments
               </button>
             </div>
           </div>
 
-          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4 dark:bg-slate-900">
             <div className="text-sm font-black text-[var(--app-fg)]">
-              3) Close & reconcile
+              3) End the day and check cash
             </div>
-            <div className="mt-1 text-xs app-muted">
-              Finish the day with control, not guesswork.
+            <div className="mt-1 text-sm app-muted">
+              Close the day properly and compare real cash with system cash.
             </div>
-            <div className="mt-3">
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <TinyPill tone="info">End of day</TinyPill>
               <button
                 type="button"
-                className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-bold text-[var(--app-fg)]"
-                onClick={() => setSection("reconcile")}
+                className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-bold text-[var(--app-fg)] hover:bg-[var(--hover)] dark:bg-slate-900"
+                onClick={() => setSection?.("reconcile")}
               >
-                Go
+                Go to cash check
               </button>
             </div>
           </div>
@@ -105,46 +115,44 @@ export default function CashierDashboardSection({
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card
-          label="Today payments"
-          value={summaryLoading ? "…" : String(summary?.today?.count ?? 0)}
-          sub={`Total: ${Number(summary?.today?.total ?? 0).toLocaleString()}`}
+          label="Payments recorded today"
+          value={summaryLoading ? "…" : String(todayPaymentsCount)}
+          sub={`Total: ${todayPaymentsTotal.toLocaleString()} RWF`}
         />
         <Card
-          label="Today money IN"
-          value={
-            ledgerTodayLoading
-              ? "…"
-              : Number(ledgerToday?.totalIn ?? 0).toLocaleString()
-          }
-          sub="All methods"
+          label="Money in today"
+          value={ledgerTodayLoading ? "…" : todayMoneyIn.toLocaleString()}
+          sub="All payment methods"
         />
         <Card
-          label="Today money OUT"
-          value={
-            ledgerTodayLoading
-              ? "…"
-              : Number(ledgerToday?.totalOut ?? 0).toLocaleString()
-          }
-          sub="All methods"
+          label="Money out today"
+          value={ledgerTodayLoading ? "…" : todayMoneyOut.toLocaleString()}
+          sub="Deposits, refunds, expenses"
         />
         <Card
-          label="Unread notifications"
+          label="Unread alerts"
           value={String(unread ?? 0)}
           sub={
             streamStatus === "live"
-              ? "Live ON"
+              ? "Live updates on"
               : streamStatus === "error"
-                ? "Live OFF"
-                : "—"
+                ? "Live updates off"
+                : "Checking live updates"
           }
         />
       </div>
 
       {awaitingCount > 0 ? (
         <Banner kind="warn">
-          There are <b>{awaitingCount}</b> sales waiting for payment recording.
+          There {awaitingCount === 1 ? "is" : "are"} <b>{awaitingCount}</b>{" "}
+          {awaitingCount === 1 ? "sale" : "sales"} still waiting for payment
+          recording.
         </Banner>
-      ) : null}
+      ) : (
+        <Banner kind="success">
+          No sales are waiting for payment right now.
+        </Banner>
+      )}
     </div>
   );
 }
