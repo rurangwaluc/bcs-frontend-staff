@@ -20,16 +20,53 @@ function sessionStatusTone(status) {
   return "warn";
 }
 
+function varianceTone(type) {
+  const value = String(type || "")
+    .trim()
+    .toUpperCase();
+  if (value === "MATCH") return "success";
+  if (value === "SHORTAGE") return "danger";
+  if (value === "SURPLUS") return "warn";
+  return "neutral";
+}
+
+function varianceLabel(type) {
+  const value = String(type || "")
+    .trim()
+    .toUpperCase();
+  if (value === "MATCH") return "Matches last close";
+  if (value === "SHORTAGE") return "Less than last close";
+  if (value === "SURPLUS") return "More than last close";
+  return value || "Unknown";
+}
+
+function closingVarianceLabel(type) {
+  const value = String(type || "")
+    .trim()
+    .toUpperCase();
+  if (value === "MATCH") return "Matches expected cash";
+  if (value === "SHORTAGE") return "Less than expected";
+  if (value === "SURPLUS") return "More than expected";
+  return value || "Unknown";
+}
+
 export default function CashierSessionsSection({
   currentOpenSession,
   sessions,
   sessionsLoading,
   openingBalance,
   setOpeningBalance,
+  openingVarianceReason,
+  setOpeningVarianceReason,
   openBtnState,
+  countedClosingCash,
+  setCountedClosingCash,
+  closingVarianceReason,
+  setClosingVarianceReason,
   closeNote,
   setCloseNote,
   closeBtnState,
+  expectedDrawerCash,
   loadSessions,
   money,
   safeDate,
@@ -39,11 +76,52 @@ export default function CashierSessionsSection({
   const rows = Array.isArray(sessions) ? sessions : [];
   const hasOpenSession = !!currentOpenSession?.id;
 
+  const lastClosedSession = rows.find(
+    (session) => String(session?.status || "").toUpperCase() === "CLOSED",
+  );
+
+  const expectedOpeningBalance = Number(
+    lastClosedSession?.closingBalance ??
+      lastClosedSession?.closing_balance ??
+      0,
+  );
+
+  const typedOpeningBalance = Number(openingBalance || 0);
+  const openingVarianceAmount = typedOpeningBalance - expectedOpeningBalance;
+
+  const openingVarianceType =
+    openingVarianceAmount === 0
+      ? "MATCH"
+      : openingVarianceAmount < 0
+        ? "SHORTAGE"
+        : "SURPLUS";
+
+  const needsVarianceReason =
+    !hasOpenSession &&
+    String(openingBalance || "").trim() !== "" &&
+    openingVarianceAmount !== 0;
+
+  const typedCountedClosingCash = Number(countedClosingCash || 0);
+  const closingVarianceAmount =
+    typedCountedClosingCash - Number(expectedDrawerCash || 0);
+
+  const closingVarianceType =
+    closingVarianceAmount === 0
+      ? "MATCH"
+      : closingVarianceAmount < 0
+        ? "SHORTAGE"
+        : "SURPLUS";
+
+  const needsClosingVarianceReason =
+    hasOpenSession &&
+    String(countedClosingCash || "").trim() !== "" &&
+    closingVarianceAmount !== 0;
+
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.95fr_1.05fr]">
       <SectionCard
-        title="Start or end your cashier day"
-        hint="Open your cashier day before taking payments. End it when your shift is finished."
+        title="Your cashier day"
+        hint="Start your day before taking payments. End it when your shift is finished."
       >
         <div className="grid gap-4">
           {hasOpenSession ? (
@@ -72,17 +150,112 @@ export default function CashierSessionsSection({
               </div>
 
               <div className="mt-2 text-sm app-muted">
-                Enter the money you are starting with at the beginning of your
-                shift.
+                Enter the cash you actually have in hand at the beginning of
+                your shift.
               </div>
+
+              {!hasOpenSession ? (
+                <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 dark:bg-slate-950">
+                  <div className="text-xs uppercase tracking-[0.08em] app-muted">
+                    Last confirmed closing cash
+                  </div>
+                  <div className="mt-1 text-lg font-extrabold text-[var(--app-fg)]">
+                    {money?.(expectedOpeningBalance)}
+                  </div>
+                  <div className="mt-1 text-xs app-muted">
+                    {lastClosedSession?.id ? (
+                      <>
+                        From cashier day <b>#{lastClosedSession.id}</b>, closed
+                        on{" "}
+                        <b>
+                          {safeDate?.(
+                            lastClosedSession?.closedAt ||
+                              lastClosedSession?.closed_at,
+                          )}
+                        </b>
+                        .
+                      </>
+                    ) : (
+                      <>No previous closed cashier day found.</>
+                    )}
+                  </div>
+                </div>
+              ) : null}
 
               <form onSubmit={onOpenSession} className="mt-4 grid gap-3">
                 <Input
-                  placeholder="Starting amount in hand (RWF)"
+                  placeholder="Cash now in hand (RWF)"
                   value={openingBalance}
                   onChange={(e) => setOpeningBalance?.(e.target.value)}
                   disabled={hasOpenSession}
                 />
+
+                {!hasOpenSession &&
+                String(openingBalance || "").trim() !== "" ? (
+                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 dark:bg-slate-950">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-sm font-semibold text-[var(--app-fg)]">
+                        Difference from last close
+                      </div>
+                      <TinyPill tone={varianceTone(openingVarianceType)}>
+                        {varianceLabel(openingVarianceType)}
+                      </TinyPill>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
+                          Expected
+                        </div>
+                        <div className="mt-1 text-base font-extrabold text-[var(--app-fg)]">
+                          {money?.(expectedOpeningBalance)}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
+                          Entered now
+                        </div>
+                        <div className="mt-1 text-base font-extrabold text-[var(--app-fg)]">
+                          {money?.(typedOpeningBalance)}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
+                          Difference
+                        </div>
+                        <div className="mt-1 text-base font-extrabold text-[var(--app-fg)]">
+                          {openingVarianceAmount > 0 ? "+" : ""}
+                          {money?.(openingVarianceAmount)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {openingVarianceType === "SHORTAGE" ? (
+                      <div className="mt-3 text-xs text-rose-700 dark:text-rose-300">
+                        The cash entered is lower than the last confirmed
+                        closing cash. Explain why before starting the day.
+                      </div>
+                    ) : null}
+
+                    {openingVarianceType === "SURPLUS" ? (
+                      <div className="mt-3 text-xs text-amber-700 dark:text-amber-300">
+                        The cash entered is higher than the last confirmed
+                        closing cash. Explain why before starting the day.
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {needsVarianceReason ? (
+                  <Input
+                    placeholder="Why is the cash different from the last close?"
+                    value={openingVarianceReason}
+                    onChange={(e) => setOpeningVarianceReason?.(e.target.value)}
+                    disabled={hasOpenSession}
+                  />
+                ) : null}
 
                 <AsyncButton
                   type="submit"
@@ -126,8 +299,94 @@ export default function CashierSessionsSection({
                 </div>
               ) : (
                 <form onSubmit={onCloseSession} className="mt-4 grid gap-3">
+                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 dark:bg-slate-950">
+                    <div className="text-xs uppercase tracking-[0.08em] app-muted">
+                      Expected cash now
+                    </div>
+                    <div className="mt-1 text-lg font-extrabold text-[var(--app-fg)]">
+                      {money?.(expectedDrawerCash || 0)}
+                    </div>
+                    <div className="mt-1 text-xs app-muted">
+                      This is the cash the system expects to still be in the
+                      drawer.
+                    </div>
+                  </div>
+
                   <Input
-                    placeholder="Closing note (optional)"
+                    placeholder="Cash counted now (RWF)"
+                    value={countedClosingCash}
+                    onChange={(e) => setCountedClosingCash?.(e.target.value)}
+                  />
+
+                  {String(countedClosingCash || "").trim() !== "" ? (
+                    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 dark:bg-slate-950">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-sm font-semibold text-[var(--app-fg)]">
+                          Difference from expected cash
+                        </div>
+                        <TinyPill tone={varianceTone(closingVarianceType)}>
+                          {closingVarianceLabel(closingVarianceType)}
+                        </TinyPill>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
+                            Expected
+                          </div>
+                          <div className="mt-1 text-base font-extrabold text-[var(--app-fg)]">
+                            {money?.(expectedDrawerCash || 0)}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
+                            Counted now
+                          </div>
+                          <div className="mt-1 text-base font-extrabold text-[var(--app-fg)]">
+                            {money?.(typedCountedClosingCash)}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
+                            Difference
+                          </div>
+                          <div className="mt-1 text-base font-extrabold text-[var(--app-fg)]">
+                            {closingVarianceAmount > 0 ? "+" : ""}
+                            {money?.(closingVarianceAmount)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {closingVarianceType === "SHORTAGE" ? (
+                        <div className="mt-3 text-xs text-rose-700 dark:text-rose-300">
+                          The counted cash is lower than what the system
+                          expected. Explain why before ending the day.
+                        </div>
+                      ) : null}
+
+                      {closingVarianceType === "SURPLUS" ? (
+                        <div className="mt-3 text-xs text-amber-700 dark:text-amber-300">
+                          The counted cash is higher than what the system
+                          expected. Explain why before ending the day.
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {needsClosingVarianceReason ? (
+                    <Input
+                      placeholder="Why is the counted cash different from the expected cash?"
+                      value={closingVarianceReason}
+                      onChange={(e) =>
+                        setClosingVarianceReason?.(e.target.value)
+                      }
+                    />
+                  ) : null}
+
+                  <Input
+                    placeholder="Extra note (optional)"
                     value={closeNote}
                     onChange={(e) => setCloseNote?.(e.target.value)}
                   />
@@ -161,7 +420,7 @@ export default function CashierSessionsSection({
       </SectionCard>
 
       <SectionCard
-        title="My cashier day history"
+        title="My recent cashier days"
         hint="See your recent open and closed cashier days."
         right={
           <RefreshButton loading={sessionsLoading} onClick={loadSessions} />
@@ -182,9 +441,62 @@ export default function CashierSessionsSection({
             {rows.map((session) => {
               const status = String(session?.status || "—").toUpperCase();
               const sessionId = session?.id ?? "—";
+
               const opening = money?.(
                 session?.openingBalance ?? session?.opening_balance ?? 0,
               );
+
+              const expectedOpening = money?.(
+                session?.expectedOpeningBalance ??
+                  session?.expected_opening_balance ??
+                  0,
+              );
+
+              const openingVarianceAmountValue =
+                session?.openingVarianceAmount ??
+                session?.opening_variance_amount ??
+                0;
+
+              const openingVariance = money?.(openingVarianceAmountValue);
+
+              const openingVarianceTypeValue =
+                session?.openingVarianceType ??
+                session?.opening_variance_type ??
+                "MATCH";
+
+              const openingVarianceReasonValue =
+                session?.openingVarianceReason ??
+                session?.opening_variance_reason;
+
+              const countedClosingAmount = money?.(
+                session?.countedClosingBalance ??
+                  session?.counted_closing_balance ??
+                  session?.closingBalance ??
+                  session?.closing_balance ??
+                  0,
+              );
+
+              const expectedClosingAmount = money?.(
+                session?.expectedClosingBalance ??
+                  session?.expected_closing_balance ??
+                  0,
+              );
+
+              const closingVarianceAmountValue =
+                session?.closingVarianceAmount ??
+                session?.closing_variance_amount ??
+                0;
+
+              const closingVariance = money?.(closingVarianceAmountValue);
+
+              const closingVarianceTypeValue =
+                session?.closingVarianceType ??
+                session?.closing_variance_type ??
+                "MATCH";
+
+              const closingVarianceReasonValue =
+                session?.closingVarianceReason ??
+                session?.closing_variance_reason;
 
               return (
                 <div
@@ -202,40 +514,104 @@ export default function CashierSessionsSection({
                           {status === "OPEN" ? "Open now" : status}
                         </TinyPill>
 
+                        <TinyPill tone={varianceTone(openingVarianceTypeValue)}>
+                          {varianceLabel(openingVarianceTypeValue)}
+                        </TinyPill>
+
+                        {String(status) === "CLOSED" ? (
+                          <TinyPill
+                            tone={varianceTone(closingVarianceTypeValue)}
+                          >
+                            {closingVarianceLabel(closingVarianceTypeValue)}
+                          </TinyPill>
+                        ) : null}
+
                         {String(currentOpenSession?.id) ===
                         String(sessionId) ? (
                           <TinyPill tone="success">Current</TinyPill>
                         ) : null}
                       </div>
 
-                      <div className="mt-2 grid grid-cols-1 gap-2 text-xs app-muted sm:grid-cols-2">
-                        <div>
-                          Started:{" "}
-                          <b>
-                            {safeDate?.(
-                              session?.openedAt || session?.opened_at,
-                            )}
-                          </b>
-                        </div>
-                        <div>
-                          Ended:{" "}
-                          <b>
-                            {safeDate?.(
-                              session?.closedAt || session?.closed_at,
-                            )}
-                          </b>
-                        </div>
-                      </div>
-                    </div>
+                      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3 dark:bg-slate-950">
+                          <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
+                            Start of day
+                          </div>
 
-                    <div className="shrink-0 text-right">
-                      <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
-                        Starting amount
+                          <div className="mt-2 grid grid-cols-1 gap-2 text-xs app-muted">
+                            <div>
+                              Started at:{" "}
+                              <b>
+                                {safeDate?.(
+                                  session?.openedAt || session?.opened_at,
+                                )}
+                              </b>
+                            </div>
+                            <div>
+                              Cash expected at start: <b>{expectedOpening}</b>
+                            </div>
+                            <div>
+                              Cash entered at start: <b>{opening}</b>
+                            </div>
+                            <div>
+                              Difference at start:{" "}
+                              <b>
+                                {Number(openingVarianceAmountValue) > 0
+                                  ? "+"
+                                  : ""}
+                                {openingVariance}
+                              </b>
+                            </div>
+                          </div>
+
+                          {openingVarianceReasonValue ? (
+                            <div className="mt-2 text-xs app-muted">
+                              Reason at start:{" "}
+                              <b>{String(openingVarianceReasonValue)}</b>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3 dark:bg-slate-950">
+                          <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
+                            End of day
+                          </div>
+
+                          <div className="mt-2 grid grid-cols-1 gap-2 text-xs app-muted">
+                            <div>
+                              Ended at:{" "}
+                              <b>
+                                {safeDate?.(
+                                  session?.closedAt || session?.closed_at,
+                                )}
+                              </b>
+                            </div>
+                            <div>
+                              Cash expected at end:{" "}
+                              <b>{expectedClosingAmount}</b>
+                            </div>
+                            <div>
+                              Cash counted at end: <b>{countedClosingAmount}</b>
+                            </div>
+                            <div>
+                              Difference at end:{" "}
+                              <b>
+                                {Number(closingVarianceAmountValue) > 0
+                                  ? "+"
+                                  : ""}
+                                {closingVariance}
+                              </b>
+                            </div>
+                          </div>
+
+                          {closingVarianceReasonValue ? (
+                            <div className="mt-2 text-xs app-muted">
+                              Reason at end:{" "}
+                              <b>{String(closingVarianceReasonValue)}</b>
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
-                      <div className="mt-1 text-lg font-extrabold text-[var(--app-fg)]">
-                        {opening}
-                      </div>
-                      <div className="text-[11px] app-muted">RWF</div>
                     </div>
                   </div>
                 </div>

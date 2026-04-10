@@ -11,6 +11,36 @@ import {
 
 import AsyncButton from "../../../components/AsyncButton";
 
+function statusTone(status) {
+  const value = String(status || "")
+    .trim()
+    .toUpperCase();
+
+  if (value === "VOID") return "danger";
+  return "success";
+}
+
+function categoryLabel(category) {
+  const raw = String(category || "GENERAL")
+    .trim()
+    .toUpperCase();
+
+  return raw.replaceAll("_", " ");
+}
+
+function methodLabel(method) {
+  const raw = String(method || "CASH")
+    .trim()
+    .toUpperCase();
+
+  if (raw === "CASH") return "Cash";
+  if (raw === "BANK") return "Bank";
+  if (raw === "MOMO") return "Mobile money";
+  if (raw === "CARD") return "Card";
+  if (raw === "OTHER") return "Other";
+  return raw || "Cash";
+}
+
 export default function CashierExpensesSection({
   currentOpenSession,
   expenses,
@@ -21,6 +51,10 @@ export default function CashierExpensesSection({
   setExpenseAmount,
   expenseCategory,
   setExpenseCategory,
+  expenseDate,
+  setExpenseDate,
+  expensePayeeName,
+  setExpensePayeeName,
   expenseRef,
   setExpenseRef,
   expenseNote,
@@ -44,9 +78,14 @@ export default function CashierExpensesSection({
       expense?.id,
       expense?.amount,
       expense?.category ?? expense?.type,
+      expense?.method,
+      expense?.status,
+      expense?.payeeName ?? expense?.payee_name,
       expense?.reference ?? expense?.ref,
       expense?.cashSessionId ?? expense?.cash_session_id,
       expense?.note,
+      expense?.expenseDate ?? expense?.expense_date,
+      expense?.createdAt ?? expense?.created_at,
     ]
       .map((x) => String(x ?? ""))
       .join(" ")
@@ -58,17 +97,18 @@ export default function CashierExpensesSection({
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.92fr_1.08fr]">
       <SectionCard
-        title="Record money spent"
-        hint="Use this when money leaves the drawer to pay for a real business cost."
+        title="Money spent"
+        hint="Use this only when cash leaves the drawer for a real day-to-day business cost."
       >
         {isLocked ? (
           <Banner kind="warn" className="mb-4">
-            Start your cashier day first before recording money spent.
+            Start your cashier day first before saving money spent.
           </Banner>
         ) : (
           <Banner kind="info" className="mb-4">
-            This form is for real business spending from the cashier drawer,
-            like transport, lunch, airtime, or other daily costs.
+            Use this for real cash spending like transport, lunch, airtime,
+            repairs, or other daily business costs. Do not use this for stock
+            buying or supplier purchasing.
           </Banner>
         )}
 
@@ -81,19 +121,23 @@ export default function CashierExpensesSection({
           <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4 dark:bg-slate-900">
             <div className="flex flex-wrap items-center gap-2">
               <div className="text-base font-black text-[var(--app-fg)]">
-                New money out record
+                Save money spent
               </div>
               {currentOpenSession?.id ? (
-                <TinyPill tone="success">
-                  Day #{currentOpenSession.id} is open
-                </TinyPill>
+                <>
+                  <TinyPill tone="success">
+                    Day #{currentOpenSession.id} is open
+                  </TinyPill>
+                  <TinyPill tone="warn">Cash only</TinyPill>
+                </>
               ) : (
                 <TinyPill tone="warn">Day not open</TinyPill>
               )}
             </div>
 
             <div className="mt-2 text-sm app-muted">
-              Write the amount, what it was for, and a short note if needed.
+              Write how much money left the drawer, what it was used for, and
+              who received it if needed.
             </div>
 
             <form onSubmit={onCreateExpense} className="mt-4 grid gap-3">
@@ -105,21 +149,40 @@ export default function CashierExpensesSection({
               />
 
               <Input
-                placeholder="What was it for? Example: Transport"
+                placeholder="What was this money used for?"
                 value={expenseCategory}
                 onChange={(e) => setExpenseCategory?.(e.target.value)}
                 disabled={isLocked}
               />
 
               <Input
-                placeholder="Reference number (optional)"
+                type="date"
+                value={expenseDate}
+                onChange={(e) => setExpenseDate?.(e.target.value)}
+                disabled={isLocked}
+              />
+
+              <Input
+                placeholder="Who received this money? (optional)"
+                value={expensePayeeName}
+                onChange={(e) => setExpensePayeeName?.(e.target.value)}
+                disabled={isLocked}
+              />
+
+              <Input
+                placeholder="Receipt number or transfer code (optional)"
                 value={expenseRef}
                 onChange={(e) => setExpenseRef?.(e.target.value)}
                 disabled={isLocked}
               />
 
+              <div className="text-xs app-muted">
+                Fill this only if you have a receipt number, slip number, or
+                transfer code. You can leave it empty.
+              </div>
+
               <Input
-                placeholder="Short note (optional)"
+                placeholder="Extra note (optional)"
                 value={expenseNote}
                 onChange={(e) => setExpenseNote?.(e.target.value)}
                 disabled={isLocked}
@@ -130,7 +193,7 @@ export default function CashierExpensesSection({
                   type="submit"
                   variant="primary"
                   state={expenseBtnState}
-                  text="Save spending record"
+                  text="Save money spent"
                   loadingText="Saving…"
                   successText="Saved"
                   disabled={isLocked}
@@ -143,7 +206,7 @@ export default function CashierExpensesSection({
 
       <SectionCard
         title="Money spent history"
-        hint="Latest records of money that left the drawer for business costs."
+        hint="Latest records of cash that left the drawer for daily business costs."
         right={
           <RefreshButton
             loading={expensesLoading}
@@ -154,7 +217,7 @@ export default function CashierExpensesSection({
       >
         <div className="grid gap-4">
           <Input
-            placeholder="Search by ID, amount, purpose, reference or note"
+            placeholder="Search by number, amount, purpose, person, receipt code, status or note"
             value={expenseQ}
             onChange={(e) => setExpenseQ?.(e.target.value)}
           />
@@ -167,7 +230,7 @@ export default function CashierExpensesSection({
             </div>
           ) : filteredRows.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-[var(--border-strong)] bg-[var(--card)] p-6 text-sm app-muted dark:bg-slate-900">
-              No spending records found.
+              No money spent records found.
             </div>
           ) : (
             <div className="grid gap-3">
@@ -180,12 +243,21 @@ export default function CashierExpensesSection({
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <div className="text-sm font-extrabold text-[var(--app-fg)]">
-                          Spending #{expense?.id ?? "—"}
+                          Money spent #{expense?.id ?? "—"}
                         </div>
+
                         <TinyPill tone="warn">
-                          {String(
+                          {categoryLabel(
                             expense?.category ?? expense?.type ?? "GENERAL",
                           )}
+                        </TinyPill>
+
+                        <TinyPill tone={statusTone(expense?.status)}>
+                          {String(expense?.status || "POSTED")}
+                        </TinyPill>
+
+                        <TinyPill tone="neutral">
+                          {methodLabel(expense?.method || "CASH")}
                         </TinyPill>
                       </div>
 
@@ -200,7 +272,19 @@ export default function CashierExpensesSection({
                       </div>
 
                       <div className="mt-1 text-xs app-muted">
-                        Time:{" "}
+                        When it happened:{" "}
+                        <b>
+                          {safeDate?.(
+                            expense?.expenseDate ||
+                              expense?.expense_date ||
+                              expense?.createdAt ||
+                              expense?.created_at,
+                          )}
+                        </b>
+                      </div>
+
+                      <div className="mt-1 text-xs app-muted">
+                        Saved on:{" "}
                         <b>
                           {safeDate?.(
                             expense?.createdAt || expense?.created_at,
@@ -209,13 +293,31 @@ export default function CashierExpensesSection({
                       </div>
 
                       <div className="mt-2 text-xs app-muted">
-                        Reference:{" "}
+                        Who received it:{" "}
+                        <b>
+                          {expense?.payeeName ?? expense?.payee_name ?? "—"}
+                        </b>
+                      </div>
+
+                      <div className="mt-1 text-xs app-muted">
+                        Receipt / transfer code:{" "}
                         <b>{expense?.reference ?? expense?.ref ?? "—"}</b>
                       </div>
 
+                      {expense?.voidReason || expense?.void_reason ? (
+                        <div className="mt-2 break-words text-xs text-rose-700 dark:text-rose-300">
+                          Why it was cancelled:{" "}
+                          <b>
+                            {String(
+                              expense?.voidReason ?? expense?.void_reason,
+                            )}
+                          </b>
+                        </div>
+                      ) : null}
+
                       {expense?.note ? (
                         <div className="mt-2 break-words text-xs app-muted">
-                          Note: <b>{String(expense.note)}</b>
+                          Extra note: <b>{String(expense.note)}</b>
                         </div>
                       ) : null}
                     </div>
@@ -236,7 +338,7 @@ export default function CashierExpensesSection({
               {filteredRows.length > 60 ? (
                 <div className="text-xs app-muted">
                   Showing first 60 matching records. Narrow your search to find
-                  more faster.
+                  results faster.
                 </div>
               ) : null}
             </div>

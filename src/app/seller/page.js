@@ -852,6 +852,14 @@ export default function SellerPage() {
         return;
       }
 
+      if (unit < selling) {
+        pushToast(
+          "warn",
+          `${it.productName}: use discount instead of changing the price.`,
+        );
+        return;
+      }
+
       const maxPct = Number(it.maxDiscountPercent ?? 0) || 0;
       const pct = Number(it.discountPercent ?? 0) || 0;
       if (pct > maxPct) {
@@ -871,10 +879,10 @@ export default function SellerPage() {
       customerPhone: typedPhone ? typedPhone : null,
       note: toStr(note) ? toStr(note).slice(0, 200) : null,
       items: saleCart.map((it) => {
-        const out = { productId: Number(it.productId), qty: toInt(it.qty) };
-
-        const up = Number(it.unitPrice);
-        if (Number.isFinite(up)) out.unitPrice = up;
+        const out = {
+          productId: Number(it.productId),
+          qty: toInt(it.qty),
+        };
 
         const dp = Number(it.discountPercent);
         if (Number.isFinite(dp) && dp > 0) out.discountPercent = dp;

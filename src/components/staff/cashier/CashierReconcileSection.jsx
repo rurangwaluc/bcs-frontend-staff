@@ -44,9 +44,9 @@ function differenceTone(value) {
 
 function differenceLabel(value) {
   const n = Number(value || 0);
-  if (n === 0) return "Balanced";
-  if (n > 0) return "More than expected";
-  return "Less than expected";
+  if (n === 0) return "Matches closed day";
+  if (n > 0) return "More than closed day";
+  return "Less than closed day";
 }
 
 export default function CashierReconcileSection({
@@ -75,6 +75,21 @@ export default function CashierReconcileSection({
   const hasOpenSession = !!currentOpenSession?.id;
   const formLocked = hasOpenSession || !hasClosedSession;
 
+  const selectedClosedSession = sessionRows.find(
+    (session) => String(session?.id) === String(selectedClosedSessionId || ""),
+  );
+
+  const officialClosedCash = Number(
+    selectedClosedSession?.countedClosingBalance ??
+      selectedClosedSession?.counted_closing_balance ??
+      selectedClosedSession?.closingBalance ??
+      selectedClosedSession?.closing_balance ??
+      0,
+  );
+
+  const typedCheckedCash = Number(reconcileCountedCash || 0);
+  const checkDifference = typedCheckedCash - officialClosedCash;
+
   const filteredRows = reconcileRows.filter((row) => {
     const q = String(reconcileQ || "")
       .trim()
@@ -101,23 +116,23 @@ export default function CashierReconcileSection({
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.92fr_1.08fr]">
       <SectionCard
-        title="Count cash after closing the day"
-        hint="After you end the cashier day, count all cash in hand and compare it with the system total."
+        title="Check cash after closing the day"
+        hint="Use this to check a finished cashier day again and confirm whether the cash still matches the closed result."
       >
         {hasOpenSession ? (
           <Banner kind="warn" className="mb-4">
-            You still have an open cashier day. Close it first before saving a
-            cash count result.
+            You still have an open cashier day. End it first before saving a
+            cash check.
           </Banner>
         ) : !hasClosedSession ? (
           <Banner kind="warn" className="mb-4">
-            No finished cashier day found yet. Close a cashier day first before
-            saving a cash count result.
+            No finished cashier day found yet. End a cashier day first before
+            saving a cash check.
           </Banner>
         ) : (
           <Banner kind="info" className="mb-4">
-            Choose a finished cashier day, enter the total cash you counted by
-            hand, then save the result.
+            Choose a finished cashier day, count the cash again, then save the
+            result to check whether it still matches the closed day.
           </Banner>
         )}
 
@@ -130,21 +145,21 @@ export default function CashierReconcileSection({
           <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4 dark:bg-slate-900">
             <div className="flex flex-wrap items-center gap-2">
               <div className="text-base font-black text-[var(--app-fg)]">
-                Save cash count result
+                Save cash check
               </div>
 
               {hasOpenSession ? (
-                <TinyPill tone="warn">Close open day first</TinyPill>
+                <TinyPill tone="warn">End open day first</TinyPill>
               ) : hasClosedSession ? (
                 <TinyPill tone="success">Ready</TinyPill>
               ) : (
-                <TinyPill tone="warn">Nothing to count yet</TinyPill>
+                <TinyPill tone="warn">Nothing to check yet</TinyPill>
               )}
             </div>
 
             <div className="mt-2 text-sm app-muted">
-              This checks whether the total cash you counted matches what the
-              system expects for that finished cashier day.
+              This is a second check after the day was already closed. It does
+              not replace the closed result. It helps confirm it.
             </div>
 
             {!formLocked ? (
@@ -156,7 +171,7 @@ export default function CashierReconcileSection({
                   <option value="">Choose finished cashier day…</option>
                   {sessionRows.map((session) => (
                     <option key={session?.id} value={String(session?.id)}>
-                      Cashier day #{session?.id} • closed{" "}
+                      Cashier day #{session?.id} • ended{" "}
                       {dateText(
                         safeDate,
                         session?.closedAt || session?.closed_at,
@@ -165,14 +180,73 @@ export default function CashierReconcileSection({
                   ))}
                 </Select>
 
+                {selectedClosedSession ? (
+                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 dark:bg-slate-950">
+                    <div className="text-xs uppercase tracking-[0.08em] app-muted">
+                      Cash counted when the day was closed
+                    </div>
+                    <div className="mt-1 text-lg font-extrabold text-[var(--app-fg)]">
+                      {moneyText(money, officialClosedCash)}
+                    </div>
+                    <div className="mt-1 text-xs app-muted">
+                      This is the official cash result saved when that cashier
+                      day was ended.
+                    </div>
+                  </div>
+                ) : null}
+
                 <Input
-                  placeholder="Total cash counted by hand (RWF)"
+                  placeholder="Cash counted during this check (RWF)"
                   value={reconcileCountedCash}
                   onChange={(e) => setReconcileCountedCash?.(e.target.value)}
                 />
 
+                {selectedClosedSession &&
+                String(reconcileCountedCash || "").trim() !== "" ? (
+                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 dark:bg-slate-950">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-sm font-semibold text-[var(--app-fg)]">
+                        Difference from the closed day
+                      </div>
+                      <TinyPill tone={differenceTone(checkDifference)}>
+                        {differenceLabel(checkDifference)}
+                      </TinyPill>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
+                          Closed day cash
+                        </div>
+                        <div className="mt-1 text-base font-extrabold text-[var(--app-fg)]">
+                          {moneyText(money, officialClosedCash)}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
+                          Counted now
+                        </div>
+                        <div className="mt-1 text-base font-extrabold text-[var(--app-fg)]">
+                          {moneyText(money, typedCheckedCash)}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
+                          Difference
+                        </div>
+                        <div className="mt-1 text-base font-extrabold text-[var(--app-fg)]">
+                          {checkDifference > 0 ? "+" : ""}
+                          {moneyText(money, checkDifference)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
                 <Input
-                  placeholder="Short note (optional)"
+                  placeholder="Why are you doing this check? (optional)"
                   value={reconcileNote}
                   onChange={(e) => setReconcileNote?.(e.target.value)}
                 />
@@ -182,7 +256,7 @@ export default function CashierReconcileSection({
                     type="submit"
                     variant="primary"
                     state={reconcileBtnState}
-                    text="Save cash count result"
+                    text="Save cash check"
                     loadingText="Saving…"
                     successText="Saved"
                   />
@@ -191,8 +265,8 @@ export default function CashierReconcileSection({
             ) : (
               <div className="mt-4 rounded-2xl border border-dashed border-[var(--border-strong)] bg-[var(--card)] p-4 text-sm app-muted dark:bg-slate-950">
                 {hasOpenSession
-                  ? "Close the current cashier day first, then come back here to save the final cash count."
-                  : "Once you close a cashier day, it will appear here for cash counting."}
+                  ? "End the current cashier day first, then come back here to save a cash check."
+                  : "Once you end a cashier day, it will appear here for cash checking."}
               </div>
             )}
           </div>
@@ -200,8 +274,8 @@ export default function CashierReconcileSection({
       </SectionCard>
 
       <SectionCard
-        title="Cash count history"
-        hint="Past records showing system cash, counted cash, and the difference."
+        title="Cash check history"
+        hint="Past checks showing the closed day cash, the cash counted again later, and the difference."
         right={
           <RefreshButton
             loading={reconcilesLoading}
@@ -212,7 +286,7 @@ export default function CashierReconcileSection({
       >
         <div className="grid gap-4">
           <Input
-            placeholder="Search by record ID, cashier day, note or amount"
+            placeholder="Search by check ID, cashier day, note or amount"
             value={reconcileQ}
             onChange={(e) => setReconcileQ?.(e.target.value)}
           />
@@ -225,7 +299,7 @@ export default function CashierReconcileSection({
             </div>
           ) : filteredRows.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-[var(--border-strong)] bg-[var(--card)] p-6 text-sm app-muted dark:bg-slate-900">
-              No cash count records found.
+              No cash check records found.
             </div>
           ) : (
             <div className="grid gap-3">
@@ -242,7 +316,7 @@ export default function CashierReconcileSection({
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="text-sm font-extrabold text-[var(--app-fg)]">
-                            Cash count #{row?.id ?? "—"}
+                            Cash check #{row?.id ?? "—"}
                           </div>
 
                           <TinyPill tone={tone}>
@@ -269,7 +343,7 @@ export default function CashierReconcileSection({
 
                         {toText(row?.note) ? (
                           <div className="mt-2 break-words text-xs app-muted">
-                            Note: <b>{toText(row.note)}</b>
+                            Reason for check: <b>{toText(row.note)}</b>
                           </div>
                         ) : null}
                       </div>
@@ -279,6 +353,7 @@ export default function CashierReconcileSection({
                           Difference
                         </div>
                         <div className="mt-1 text-lg font-extrabold text-[var(--app-fg)]">
+                          {difference > 0 ? "+" : ""}
                           {moneyText(money, difference)}
                         </div>
                         <div className="text-[11px] app-muted">RWF</div>
@@ -288,7 +363,7 @@ export default function CashierReconcileSection({
                     <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
                       <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3 dark:bg-slate-950">
                         <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
-                          System cash
+                          Closed day cash
                         </div>
                         <div className="mt-1 text-sm font-extrabold text-[var(--app-fg)]">
                           {moneyText(
@@ -300,7 +375,7 @@ export default function CashierReconcileSection({
 
                       <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3 dark:bg-slate-950">
                         <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
-                          Counted cash
+                          Counted again
                         </div>
                         <div className="mt-1 text-sm font-extrabold text-[var(--app-fg)]">
                           {moneyText(
@@ -315,6 +390,7 @@ export default function CashierReconcileSection({
                           Difference
                         </div>
                         <div className="mt-1 text-sm font-extrabold text-[var(--app-fg)]">
+                          {difference > 0 ? "+" : ""}
                           {moneyText(money, difference)}
                         </div>
                       </div>

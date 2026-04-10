@@ -142,7 +142,7 @@ export default function SellerCreateSection({
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.95fr_1.05fr]">
       <SectionCard
         title="Products"
-        hint="Search products quickly and add them to the current draft sale."
+        hint="Choose products for the sale. If the customer wants something extra, add it as another item."
         right={
           <AsyncButton
             variant="secondary"
@@ -354,7 +354,7 @@ export default function SellerCreateSection({
 
       <SectionCard
         title="Create sale"
-        hint="Attach a customer, prepare the cart, then create a draft sale for release."
+        hint="Choose products, attach a customer, then create a draft sale for stock release."
       >
         <form onSubmit={createSale} className="grid gap-4">
           <div className="rounded-3xl border border-[var(--border-strong)] bg-[var(--card-2)] p-4 shadow-sm">
@@ -604,7 +604,8 @@ export default function SellerCreateSection({
                 </div>
                 <div className="mt-1 text-sm app-muted">
                   Adjust quantity and discount before creating the draft.
-                  Product price is locked to the official selling price.
+                  Product price is fixed to the official selling price. If the
+                  customer wants something extra, add it as another item.
                 </div>
               </div>
 
@@ -716,7 +717,8 @@ export default function SellerCreateSection({
                             className="cursor-not-allowed opacity-80"
                           />
                           <div className="mt-1 text-[11px] app-muted">
-                            Locked to official selling price
+                            Fixed by the business. Add another item instead of
+                            changing this price.
                           </div>
                         </div>
 

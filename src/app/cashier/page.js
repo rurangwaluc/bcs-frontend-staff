@@ -60,6 +60,41 @@ function dedupeNotifications(list) {
   return out;
 }
 
+function normalizeExpenseRow(row) {
+  if (!row || typeof row !== "object") return null;
+
+  return {
+    ...row,
+    id: row.id ?? null,
+    locationId: row.locationId ?? row.location_id ?? null,
+    locationName: row.locationName ?? row.location_name ?? "",
+    locationCode: row.locationCode ?? row.location_code ?? "",
+    cashSessionId: row.cashSessionId ?? row.cash_session_id ?? null,
+    cashierId: row.cashierId ?? row.cashier_id ?? null,
+    cashierName: row.cashierName ?? row.cashier_name ?? "",
+    cashierEmail: row.cashierEmail ?? row.cashier_email ?? "",
+    category: row.category ?? "GENERAL",
+    amount: Number(row.amount ?? 0),
+    expenseDate:
+      row.expenseDate ??
+      row.expense_date ??
+      row.createdAt ??
+      row.created_at ??
+      null,
+    method: String(row.method || "CASH").toUpperCase(),
+    status: String(row.status || "POSTED").toUpperCase(),
+    payeeName: row.payeeName ?? row.payee_name ?? "",
+    reference: row.reference ?? "",
+    note: row.note ?? "",
+    voidedAt: row.voidedAt ?? row.voided_at ?? null,
+    voidedByUserId: row.voidedByUserId ?? row.voided_by_user_id ?? null,
+    voidReason: row.voidReason ?? row.void_reason ?? "",
+    ledgerEntryId: row.ledgerEntryId ?? row.ledger_entry_id ?? null,
+    attachmentCount: Number(row.attachmentCount ?? row.attachment_count ?? 0),
+    createdAt: row.createdAt ?? row.created_at ?? null,
+  };
+}
+
 const SECTIONS = RAW_SECTIONS.map((section) => {
   switch (section.key) {
     case "dashboard":
@@ -73,9 +108,9 @@ const SECTIONS = RAW_SECTIONS.map((section) => {
     case "credits":
       return { ...section, label: "Credit collections" };
     case "deposits":
-      return { ...section, label: "Bank deposits" };
+      return { ...section, label: "Send money out" };
     case "expenses":
-      return { ...section, label: "Cash expenses" };
+      return { ...section, label: "Money spent" };
     case "reconcile":
       return { ...section, label: "Count cash" };
     case "refunds":
@@ -154,9 +189,12 @@ export default function CashierPage() {
   const [sessionsLoading, setSessionsLoading] = useState(false);
 
   const [openingBalance, setOpeningBalance] = useState("");
+  const [openingVarianceReason, setOpeningVarianceReason] = useState("");
   const [openBtnState, setOpenBtnState] = useState("idle");
 
   const [closeNote, setCloseNote] = useState("");
+  const [countedClosingCash, setCountedClosingCash] = useState("");
+  const [closingVarianceReason, setClosingVarianceReason] = useState("");
   const [closeBtnState, setCloseBtnState] = useState("idle");
 
   const currentOpenSession = useMemo(() => {
@@ -226,6 +264,8 @@ export default function CashierPage() {
   const [expenseQ, setExpenseQ] = useState("");
   const [expenseAmount, setExpenseAmount] = useState("");
   const [expenseCategory, setExpenseCategory] = useState("GENERAL");
+  const [expenseDate, setExpenseDate] = useState("");
+  const [expensePayeeName, setExpensePayeeName] = useState("");
   const [expenseRef, setExpenseRef] = useState("");
   const [expenseNote, setExpenseNote] = useState("");
   const [expenseBtnState, setExpenseBtnState] = useState("idle");
@@ -399,7 +439,11 @@ export default function CashierPage() {
       const list = Array.isArray(data?.expenses)
         ? data.expenses
         : data?.items || data?.rows || [];
-      setExpenses(Array.isArray(list) ? list : []);
+      setExpenses(
+        (Array.isArray(list) ? list : [])
+          .map(normalizeExpenseRow)
+          .filter(Boolean),
+      );
     } catch (e) {
       toast(
         "danger",
@@ -792,11 +836,17 @@ export default function CashierPage() {
     try {
       await apiFetch(ENDPOINTS.CASH_SESSION_OPEN, {
         method: "POST",
-        body: { openingBalance: Math.round(n) },
+        body: {
+          openingBalance: Math.round(n),
+          openingVarianceReason: openingVarianceReason?.trim()
+            ? openingVarianceReason.trim().slice(0, 300)
+            : undefined,
+        },
       });
 
       toast("success", "Cash session opened.");
       setOpeningBalance("");
+      setOpeningVarianceReason("");
       await loadSessions();
       await loadUnread();
 
@@ -819,19 +869,32 @@ export default function CashierPage() {
       return toast("warn", "There is no open cash session.");
     }
 
+    const counted = numOrNull(countedClosingCash);
+    if (counted == null || counted < 0) {
+      return toast("warn", "Enter the cash you counted now.");
+    }
+
     setCloseBtnState("loading");
     try {
       await apiFetch(ENDPOINTS.CASH_SESSION_CLOSE(currentOpenSession.id), {
         method: "POST",
         body: {
+          countedCash: Math.round(counted),
+          closingVarianceReason: closingVarianceReason?.trim()
+            ? closingVarianceReason.trim().slice(0, 300)
+            : undefined,
           note: closeNote?.trim() ? closeNote.trim().slice(0, 200) : undefined,
         },
       });
 
       toast("success", "Cash session closed.");
       setCloseNote("");
+      setCountedClosingCash("");
+      setClosingVarianceReason("");
       await loadSessions();
       await loadUnread();
+      await loadLedger();
+      await loadLedgerToday();
 
       setCloseBtnState("success");
       setTimeout(() => setCloseBtnState("idle"), 900);
@@ -857,13 +920,30 @@ export default function CashierPage() {
       return toast("warn", "Enter a valid amount.");
     }
 
+    const requested = Math.round(n);
+    const availableCash = Math.max(0, Math.round(expectedDrawerCash || 0));
+
+    if (availableCash <= 0) {
+      return toast(
+        "warn",
+        "There is no cash currently expected in the drawer. Record cash-in first before making a deposit.",
+      );
+    }
+
+    if (requested > availableCash) {
+      return toast(
+        "warn",
+        `This deposit is higher than the cash currently expected in the drawer (${money(availableCash)}).`,
+      );
+    }
+
     setDepositBtnState("loading");
     try {
       await apiFetch(ENDPOINTS.CASHBOOK_DEPOSIT_CREATE, {
         method: "POST",
         body: {
           cashSessionId: Number(currentOpenSession.id),
-          amount: Math.round(n),
+          amount: requested,
           method: String(depositMethod || "BANK").toUpperCase(),
           reference: depositReference?.trim()
             ? depositReference.trim().slice(0, 120)
@@ -882,6 +962,8 @@ export default function CashierPage() {
 
       await loadDeposits();
       await loadSessions();
+      await loadLedger();
+      await loadLedgerToday();
 
       setDepositBtnState("success");
       setTimeout(() => setDepositBtnState("idle"), 900);
@@ -907,16 +989,41 @@ export default function CashierPage() {
       return toast("warn", "Enter a valid amount.");
     }
 
+    const requested = Math.round(n);
+    const availableCash = Math.max(0, Math.round(expectedDrawerCash || 0));
+
+    if (availableCash <= 0) {
+      return toast(
+        "warn",
+        "There is no cash currently expected in the drawer. Record cash-in first before spending from the drawer.",
+      );
+    }
+
+    if (requested > availableCash) {
+      return toast(
+        "warn",
+        `This cash expense is higher than the cash currently expected in the drawer (${money(availableCash)}).`,
+      );
+    }
+
     setExpenseBtnState("loading");
     try {
       await apiFetch(ENDPOINTS.EXPENSE_CREATE, {
         method: "POST",
         body: {
           cashSessionId: Number(currentOpenSession.id),
-          amount: Math.round(n),
-          category: String(expenseCategory || "GENERAL").slice(0, 50),
+          amount: requested,
+          category: String(expenseCategory || "GENERAL")
+            .trim()
+            .toUpperCase()
+            .slice(0, 60),
+          expenseDate: expenseDate || undefined,
+          method: "CASH",
+          payeeName: expensePayeeName?.trim()
+            ? expensePayeeName.trim().slice(0, 120)
+            : undefined,
           reference: expenseRef?.trim()
-            ? expenseRef.trim().slice(0, 120)
+            ? expenseRef.trim().slice(0, 80)
             : undefined,
           note: expenseNote?.trim()
             ? expenseNote.trim().slice(0, 200)
@@ -927,11 +1034,15 @@ export default function CashierPage() {
       toast("success", "Cash expense saved.");
       setExpenseAmount("");
       setExpenseCategory("GENERAL");
+      setExpenseDate("");
+      setExpensePayeeName("");
       setExpenseRef("");
       setExpenseNote("");
 
       await loadExpenses();
       await loadSessions();
+      await loadLedger();
+      await loadLedgerToday();
 
       setExpenseBtnState("success");
       setTimeout(() => setExpenseBtnState("idle"), 900);
@@ -1336,7 +1447,13 @@ export default function CashierPage() {
                 sessionsLoading={sessionsLoading}
                 openingBalance={openingBalance}
                 setOpeningBalance={setOpeningBalance}
+                openingVarianceReason={openingVarianceReason}
+                setOpeningVarianceReason={setOpeningVarianceReason}
                 openBtnState={openBtnState}
+                countedClosingCash={countedClosingCash}
+                setCountedClosingCash={setCountedClosingCash}
+                closingVarianceReason={closingVarianceReason}
+                setClosingVarianceReason={setClosingVarianceReason}
                 closeNote={closeNote}
                 setCloseNote={setCloseNote}
                 closeBtnState={closeBtnState}
@@ -1344,6 +1461,7 @@ export default function CashierPage() {
                 loadUnread={loadUnread}
                 money={money}
                 safeDate={safeDate}
+                expectedDrawerCash={expectedDrawerCash}
                 onOpenSession={handleOpenSession}
                 onCloseSession={handleCloseSession}
               />
@@ -1421,6 +1539,10 @@ export default function CashierPage() {
                 setExpenseAmount={setExpenseAmount}
                 expenseCategory={expenseCategory}
                 setExpenseCategory={setExpenseCategory}
+                expenseDate={expenseDate}
+                setExpenseDate={setExpenseDate}
+                expensePayeeName={expensePayeeName}
+                setExpensePayeeName={setExpensePayeeName}
                 expenseRef={expenseRef}
                 setExpenseRef={setExpenseRef}
                 expenseNote={expenseNote}
