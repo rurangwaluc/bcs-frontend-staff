@@ -49,6 +49,16 @@ function Banner({ kind = "info", children }) {
   );
 }
 
+function isMainLocation(me) {
+  const loc = me?.location || null;
+  return (
+    loc?.isMain === true ||
+    loc?.is_main === true ||
+    me?.locationIsMain === true ||
+    me?.location_is_main === true
+  );
+}
+
 function locationLabel(me) {
   const loc = me?.location || null;
 
@@ -62,17 +72,19 @@ function locationLabel(me) {
     (me?.locationCode != null ? String(me.locationCode).trim() : "") ||
     "";
 
-  // IMPORTANT: do NOT show “Location #1” here (you requested name/code only)
-  if (name && code) return `${name} (${code})`;
-  if (name) return name;
+  let base = "";
+  if (name && code) base = `${name} (${code})`;
+  else if (name) base = name;
+  else base = "Store not set";
 
-  return "Store not set";
+  return isMainLocation(me) ? `${base} • Main branch` : base;
 }
-
 
 function Skeleton({ className = "" }) {
   return (
-    <div className={cx("animate-pulse rounded-xl bg-slate-200/70", className)} />
+    <div
+      className={cx("animate-pulse rounded-xl bg-slate-200/70", className)}
+    />
   );
 }
 
@@ -112,7 +124,7 @@ function Button({ kind = "primary", onClick, children }) {
       onClick={onClick}
       className={cx(
         "rounded-xl border px-4 py-2.5 text-sm font-semibold transition",
-        cls
+        cls,
       )}
     >
       {children}
@@ -202,7 +214,6 @@ export default function EvidencePage() {
   const prettyType = friendlyRecordType(entity);
 
   function goBackOneStep() {
-    // Real “back” (browser history). If there is no history, user will still be safe:
     try {
       router.back();
     } catch {
@@ -215,13 +226,14 @@ export default function EvidencePage() {
   }
 
   if (loadingMe) return <PageSkeleton />;
-  if (!me || !canUseEvidence) return <div className="p-6 text-sm text-slate-600">Redirecting…</div>;
+  if (!me || !canUseEvidence)
+    return <div className="p-6 text-sm text-slate-600">Redirecting…</div>;
 
   return (
     <div className="min-h-screen bg-slate-50">
       <RoleBar
         title="Proof"
-        subtitle={`${role === "manager" ? "Manager tools" : "Admin tools"} • ${me?.email || "—"}`}
+        subtitle={`${role === "manager" ? "Manager tools" : "Admin tools"} • ${me?.email || "—"} • ${locationLabel(me)}`}
         user={me}
       />
 
@@ -229,10 +241,13 @@ export default function EvidencePage() {
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-sm font-semibold text-slate-900">What is this page?</div>
+              <div className="text-sm font-semibold text-slate-900">
+                What is this page?
+              </div>
               <div className="mt-1 text-sm text-slate-600">
                 This page shows <b>proof</b> of what happened in the system:
-                <b> who did it</b> and <b>when</b>. Use it only when there is a problem to check.
+                <b> who did it</b> and <b>when</b>. Use it only when there is a
+                problem to check.
               </div>
             </div>
 
@@ -248,16 +263,23 @@ export default function EvidencePage() {
 
           <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-              <div className="text-xs font-semibold text-slate-600">What you are checking</div>
-              <div className="mt-1 text-sm font-semibold text-slate-900">{prettyType}</div>
+              <div className="text-xs font-semibold text-slate-600">
+                What you are checking
+              </div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">
+                {prettyType}
+              </div>
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 md:col-span-2">
-              <div className="text-xs font-semibold text-slate-600">Selected item</div>
+              <div className="text-xs font-semibold text-slate-600">
+                Selected item
+              </div>
               <div className="mt-1 text-sm text-slate-700">
                 {entity && entityId ? (
                   <>
-                    You opened proof for one <b>{prettyType.toLowerCase()}</b> from the previous page.
+                    You opened proof for one <b>{prettyType.toLowerCase()}</b>{" "}
+                    from the previous page.
                   </>
                 ) : (
                   <>Nothing was selected. Go back and open proof again.</>
@@ -278,7 +300,8 @@ export default function EvidencePage() {
           ) : (
             <div className="mt-4">
               <Banner kind="info">
-                If you see “No results”, try a bigger date range (example: last 7 days).
+                If you see “No results”, try a bigger date range (example: last
+                7 days).
               </Banner>
             </div>
           )}
@@ -286,20 +309,13 @@ export default function EvidencePage() {
 
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4">
           <AuditLogsPanel
-              title="Proof timeline"
-              subtitle="This is the list of actions for that item."
-              currentLocationLabel={locationLabel(me)}
-              initialFilters={initialFilters}
-              defaultLimit={100}
-            />
+            title="Proof timeline"
+            subtitle="This is the list of actions for that item."
+            currentLocationLabel={locationLabel(me)}
+            initialFilters={initialFilters}
+            defaultLimit={100}
+          />
         </div>
-
-        {/* IMPORTANT NOTE */}
-        {/* <Banner kind="warn">
-          You still see “Entity ID”, “User ID”, and “200” because they are inside <b>AuditLogsPanel</b>.
-          To remove/rename them (simple English), we must update:
-          <b> frontend-staff/src/components/AuditLogsPanel.js</b>.
-        </Banner> */}
       </div>
     </div>
   );

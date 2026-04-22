@@ -61,6 +61,16 @@ function isOnlineFromUser(u) {
   return Date.now() - d.getTime() <= ONLINE_WINDOW_MS;
 }
 
+function isMainLocationFromUser(u) {
+  const loc = u?.location || null;
+  return (
+    loc?.isMain === true ||
+    loc?.is_main === true ||
+    u?.locationIsMain === true ||
+    u?.location_is_main === true
+  );
+}
+
 function locationLabelFromUser(u) {
   const loc = u?.location || null;
 
@@ -74,10 +84,12 @@ function locationLabelFromUser(u) {
     (u?.locationCode != null ? String(u.locationCode).trim() : "") ||
     "";
 
-  if (name && code) return `${name} (${code})`;
-  if (name) return name;
+  let base = "";
+  if (name && code) base = `${name} (${code})`;
+  else if (name) base = name;
+  else base = "Store not set";
 
-  return "Store not set";
+  return isMainLocationFromUser(u) ? `${base} • Main branch` : base;
 }
 
 function toneClass(tone = "neutral") {

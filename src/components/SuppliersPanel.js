@@ -306,6 +306,34 @@ function ModalShell({ title, subtitle, onClose, children }) {
 const SUPPLIER_PAGE_SIZE = 24;
 const BILL_PAGE_SIZE = 40;
 
+function parseBillNoNumber(value) {
+  const raw = toStr(value);
+  if (!raw) return null;
+
+  if (/^\d+$/.test(raw)) {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  const match = raw.match(/(\d+)$/);
+  if (!match) return null;
+
+  const n = Number(match[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function nextBillNoFromBills(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  let maxNum = 0;
+
+  for (const row of list) {
+    const n = parseBillNoNumber(row?.billNo ?? row?.bill_no);
+    if (Number.isFinite(n) && n > maxNum) maxNum = n;
+  }
+
+  return String(maxNum + 1).padStart(3, "0");
+}
+
 export default function SuppliersPanel({
   title = "Suppliers",
   subtitle = "",
@@ -367,12 +395,14 @@ export default function SuppliersPanel({
   const [billCreateState, setBillCreateState] = useState("idle");
   const [billForm, setBillForm] = useState({
     supplierId: "",
-    billNo: "",
+    billNo: "001",
     currency: defaultCurrency,
     totalAmount: "",
     dueDate: "",
     note: "",
   });
+
+  const nextBillNo = useMemo(() => nextBillNoFromBills(bills), [bills]);
 
   function toast(kind, text) {
     setMsgKind(kind || "info");
@@ -494,6 +524,16 @@ export default function SuppliersPanel({
   useEffect(() => {
     setBillsVisibleCount(BILL_PAGE_SIZE);
   }, [billQ, billStatus, selectedSupplierId]);
+
+  useEffect(() => {
+    if (!billCreateOpen) return;
+
+    setBillForm((prev) => {
+      const currentBillNo = toStr(prev.billNo);
+      if (currentBillNo) return prev;
+      return { ...prev, billNo: nextBillNo };
+    });
+  }, [billCreateOpen, nextBillNo]);
 
   const suppliersFiltered = useMemo(() => {
     const qq = toStr(supQ).toLowerCase();
@@ -660,6 +700,8 @@ export default function SuppliersPanel({
       return;
     }
 
+    const resolvedBillNo = toStr(billForm.billNo) || nextBillNo;
+
     setBillCreateState("loading");
     setMsg("");
 
@@ -668,7 +710,7 @@ export default function SuppliersPanel({
         method: "POST",
         body: {
           supplierId,
-          billNo: toStr(billForm.billNo) || undefined,
+          billNo: resolvedBillNo,
           currency:
             toStr(billForm.currency || defaultCurrency) || defaultCurrency,
           totalAmount: Math.round(amt),
@@ -685,7 +727,10 @@ export default function SuppliersPanel({
       setBillCreateOpen(false);
       setBillForm({
         supplierId: "",
-        billNo: "",
+        billNo: nextBillNoFromBills([
+          ...bills,
+          { billNo: resolvedBillNo },
+        ]),
         currency: defaultCurrency,
         totalAmount: "",
         dueDate: "",
@@ -738,7 +783,17 @@ export default function SuppliersPanel({
           text="New bill"
           loadingText="Opening…"
           successText="Done"
-          onClick={() => setBillCreateOpen(true)}
+          onClick={() => {
+            setBillForm({
+              supplierId: selectedSupplierId || "",
+              billNo: nextBillNo,
+              currency: defaultCurrency,
+              totalAmount: "",
+              dueDate: "",
+              note: "",
+            });
+            setBillCreateOpen(true);
+          }}
         />
       ) : null}
     </div>
@@ -1455,14 +1510,18 @@ export default function SuppliersPanel({
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-                  Bill number
+                <div className="mb-1 flex items-center justify-between gap-2 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                  <span>Bill number *</span>
+                  <span className="normal-case tracking-normal text-[10px]">
+                    Auto-generated
+                  </span>
                 </div>
                 <Input
                   value={billForm.billNo}
                   onChange={(e) =>
                     setBillForm((p) => ({ ...p, billNo: e.target.value }))
                   }
+                  placeholder="001"
                 />
               </div>
 
@@ -1525,6 +1584,11 @@ export default function SuppliersPanel({
                   setBillForm((p) => ({ ...p, note: e.target.value }))
                 }
               />
+            </div>
+
+            <div className="rounded-[18px] border border-[var(--border)] bg-[var(--card-2)] p-3 text-xs text-[var(--muted)]">
+              Next suggested bill number:{" "}
+              <b className="text-[var(--app-fg)]">{nextBillNo}</b>
             </div>
 
             <div className="flex justify-end gap-2 pt-2">

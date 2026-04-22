@@ -29,6 +29,16 @@ export function safeDate(v) {
   }
 }
 
+function isMainLocation(me) {
+  const loc = me?.location || null;
+  return (
+    loc?.isMain === true ||
+    loc?.is_main === true ||
+    me?.locationIsMain === true ||
+    me?.location_is_main === true
+  );
+}
+
 export function locationLabel(me) {
   const loc = me?.location || null;
 
@@ -44,10 +54,13 @@ export function locationLabel(me) {
 
   const id = loc?.id ?? me?.locationId ?? me?.location_id ?? null;
 
-  if (name && code) return `${name} (${code})`;
-  if (name) return name;
-  if (id != null && id !== "") return `Location #${id}`;
-  return "Location —";
+  let base = "";
+  if (name && code) base = `${name} (${code})`;
+  else if (name) base = name;
+  else if (id != null && id !== "") base = `Location #${id}`;
+  else base = "Location —";
+
+  return isMainLocation(me) ? `${base} • Main branch` : base;
 }
 
 export function getSellerPaymentMethodFromSale(sale) {

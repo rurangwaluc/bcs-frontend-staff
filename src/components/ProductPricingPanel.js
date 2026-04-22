@@ -151,6 +151,16 @@ function ProductQuickStats({ product }) {
       ? Number(sp) - Number(pp)
       : null;
 
+  const discountValue =
+    Number.isFinite(Number(sp)) && Number.isFinite(Number(md))
+      ? (Number(sp) * Number(md)) / 100
+      : null;
+
+  const lowestAllowedPrice =
+    Number.isFinite(Number(sp)) && Number.isFinite(Number(discountValue))
+      ? Number(sp) - Number(discountValue)
+      : null;
+
   return (
     <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900">
@@ -181,14 +191,34 @@ function ProductQuickStats({ product }) {
       </div>
 
       {margin != null ? (
-        <div className="sm:col-span-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
-              Unit margin
-            </div>
-            <div className="break-words text-sm font-black text-slate-900 dark:text-slate-100">
-              {fmtMoney(margin)}
-            </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
+          <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
+            Unit margin
+          </div>
+          <div className="mt-1 break-words text-sm font-black text-slate-900 dark:text-slate-100">
+            {fmtMoney(margin)}
+          </div>
+        </div>
+      ) : null}
+
+      {discountValue != null ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
+          <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
+            Discount value
+          </div>
+          <div className="mt-1 break-words text-sm font-black text-slate-900 dark:text-slate-100">
+            {fmtMoney(discountValue)}
+          </div>
+        </div>
+      ) : null}
+
+      {lowestAllowedPrice != null ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
+          <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
+            Lowest allowed price
+          </div>
+          <div className="mt-1 break-words text-sm font-black text-slate-900 dark:text-slate-100">
+            {fmtMoney(lowestAllowedPrice)}
           </div>
         </div>
       ) : null}
@@ -284,6 +314,12 @@ function ProductEditModal({
   const marginPercent =
     pp != null && sp != null && pp > 0 ? ((sp - pp) / pp) * 100 : null;
 
+  const maxDiscountValue =
+    sp != null && md != null ? (sp * md) / 100 : null;
+
+  const discountedPrice =
+    sp != null && maxDiscountValue != null ? sp - maxDiscountValue : null;
+
   const tone =
     profitPreview == null
       ? "neutral"
@@ -354,7 +390,7 @@ function ProductEditModal({
                     : "border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900",
             )}
           >
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <div>
                 <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
                   Unit margin
@@ -377,10 +413,19 @@ function ProductEditModal({
 
               <div>
                 <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
-                  Discount cap
+                  Discount value
                 </div>
                 <div className="mt-1 break-words text-lg font-black text-slate-950 dark:text-slate-50">
-                  {md == null ? "—" : `${md}%`}
+                  {maxDiscountValue == null ? "—" : fmtMoney(maxDiscountValue)}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
+                  Lowest allowed price
+                </div>
+                <div className="mt-1 break-words text-lg font-black text-slate-950 dark:text-slate-50">
+                  {discountedPrice == null ? "—" : fmtMoney(discountedPrice)}
                 </div>
               </div>
             </div>

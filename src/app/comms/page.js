@@ -32,6 +32,16 @@ function roleTitle(role) {
   return "Staff";
 }
 
+function isMainLocationFromMe(me) {
+  const loc = me?.location || null;
+  return (
+    loc?.isMain === true ||
+    loc?.is_main === true ||
+    me?.locationIsMain === true ||
+    me?.location_is_main === true
+  );
+}
+
 function locationLabelFromMe(me) {
   const loc = me?.location || null;
 
@@ -45,9 +55,12 @@ function locationLabelFromMe(me) {
     (me?.locationCode != null ? String(me.locationCode).trim() : "") ||
     "";
 
-  if (name && code) return `${name} (${code})`;
-  if (name) return name;
-  return "Store not set";
+  let base = "";
+  if (name && code) base = `${name} (${code})`;
+  else if (name) base = name;
+  else base = "Store not set";
+
+  return isMainLocationFromMe(me) ? `${base} • Main branch` : base;
 }
 
 function Skeleton({ className = "" }) {

@@ -2,12 +2,14 @@
 
 import { Input, SectionCard, Skeleton, TextArea } from "./seller-ui";
 import { money, toStr } from "./seller-utils";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import AsyncButton from "../../../components/AsyncButton";
 
 const PRODUCT_PAGE_SIZE = 10;
 const MAX_EXTRA_CHARGE_PER_UNIT = 1000000;
+const ADD_CONFIRM_MS = 1800;
+const CART_HIGHLIGHT_MS = 2200;
 
 function getAvailableQty(productOrItem) {
   return (
@@ -32,6 +34,56 @@ function hasValidSellingPrice(productOrItem) {
     productOrItem?.sellingPrice ?? productOrItem?.selling_price ?? 0,
   );
   return Number.isFinite(n) && n > 0;
+}
+
+function isProductSellable(productOrItem) {
+  const tracked = isInventoryTracked(productOrItem);
+  const availableQty = getAvailableQty(productOrItem);
+  const hasPrice = hasValidSellingPrice(productOrItem);
+
+  if (!hasPrice) return false;
+  if (tracked && availableQty <= 0) return false;
+  return true;
+}
+
+function productPriorityScore(productOrItem) {
+  const tracked = isInventoryTracked(productOrItem);
+  const availableQty = getAvailableQty(productOrItem);
+  const hasPrice = hasValidSellingPrice(productOrItem);
+
+  if (hasPrice && (!tracked || availableQty > 0)) return 0;
+  if (!hasPrice && (!tracked || availableQty > 0)) return 1;
+  if (hasPrice && tracked && availableQty <= 0) return 2;
+  return 3;
+}
+
+function compareProductsForSale(a, b) {
+  const pa = productPriorityScore(a);
+  const pb = productPriorityScore(b);
+
+  if (pa !== pb) return pa - pb;
+
+  const qa = getAvailableQty(a);
+  const qb = getAvailableQty(b);
+  if (qa !== qb) return qb - qa;
+
+  const na = String(a?.name || "")
+    .trim()
+    .toLowerCase();
+  const nb = String(b?.name || "")
+    .trim()
+    .toLowerCase();
+  if (na !== nb) return na.localeCompare(nb);
+
+  const sa = String(a?.sku || "")
+    .trim()
+    .toLowerCase();
+  const sb = String(b?.sku || "")
+    .trim()
+    .toLowerCase();
+  if (sa !== sb) return sa.localeCompare(sb);
+
+  return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
 }
 
 function clampDiscountPercent(value, maxPct) {
@@ -85,7 +137,9 @@ function ProductAlertPill({ tone = "neutral", children }) {
       ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]"
       : tone === "warn"
         ? "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]"
-        : "border-[var(--border)] bg-[var(--card)] text-[var(--app-fg)]";
+        : tone === "success"
+          ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
+          : "border-[var(--border)] bg-[var(--card)] text-[var(--app-fg)]";
 
   return (
     <span
@@ -96,6 +150,49 @@ function ProductAlertPill({ tone = "neutral", children }) {
     >
       {children}
     </span>
+  );
+}
+
+function SellableOnlyToggle({ checked, onChange }) {
+  return (
+    <label className="inline-flex cursor-pointer items-center gap-3 rounded-2xl border border-[var(--border-strong)] bg-[var(--card)] px-4 py-2.5 shadow-sm transition hover:bg-[var(--hover)]">
+      <span className="text-sm font-semibold text-[var(--app-fg)]">
+        Sellable only
+      </span>
+
+      <span
+        className={[
+          "relative inline-flex h-6 w-11 items-center rounded-full transition",
+          checked ? "bg-[var(--success-fg)]" : "bg-[var(--border-strong)]",
+        ].join(" ")}
+      >
+        <input
+          type="checkbox"
+          className="sr-only"
+          checked={checked}
+          onChange={(e) => onChange(Boolean(e.target.checked))}
+        />
+        <span
+          className={[
+            "inline-block h-5 w-5 transform rounded-full bg-white shadow transition",
+            checked ? "translate-x-5" : "translate-x-1",
+          ].join(" ")}
+        />
+      </span>
+    </label>
+  );
+}
+
+function CartCountBadge({ itemCount, unitCount }) {
+  return (
+    <div className="inline-flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--border-strong)] bg-[var(--card)] px-3 py-2 shadow-sm">
+      <span className="rounded-full border border-[var(--success-border)] bg-[var(--success-bg)] px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-[var(--success-fg)]">
+        {itemCount} item{itemCount === 1 ? "" : "s"}
+      </span>
+      <span className="rounded-full border border-[var(--border)] bg-[var(--card-2)] px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-[var(--app-fg)]">
+        {unitCount} unit{unitCount === 1 ? "" : "s"}
+      </span>
+    </div>
   );
 }
 
@@ -311,6 +408,13 @@ export default function SellerCreateSection({
 }) {
   const [visibleProductCount, setVisibleProductCount] =
     useState(PRODUCT_PAGE_SIZE);
+  const [sellableOnly, setSellableOnly] = useState(false);
+  const [justAddedProductId, setJustAddedProductId] = useState(null);
+  const [justAddedProductName, setJustAddedProductName] = useState("");
+  const [highlightedCartProductId, setHighlightedCartProductId] =
+    useState(null);
+
+  const cartItemRefs = useRef({});
 
   const safeFilteredProducts = Array.isArray(filteredProducts)
     ? filteredProducts
@@ -318,12 +422,80 @@ export default function SellerCreateSection({
 
   const safeSaleCart = Array.isArray(saleCart) ? saleCart : [];
 
-  const visibleProducts = useMemo(() => {
-    return safeFilteredProducts.slice(0, visibleProductCount);
-  }, [safeFilteredProducts, visibleProductCount]);
+  const prioritizedProducts = useMemo(() => {
+    return safeFilteredProducts.slice().sort(compareProductsForSale);
+  }, [safeFilteredProducts]);
 
-  const canLoadMoreProducts =
-    visibleProducts.length < safeFilteredProducts.length;
+  const finalProductList = useMemo(() => {
+    if (!sellableOnly) return prioritizedProducts;
+    return prioritizedProducts.filter(isProductSellable);
+  }, [prioritizedProducts, sellableOnly]);
+
+  const sellableCount = useMemo(() => {
+    return prioritizedProducts.filter(isProductSellable).length;
+  }, [prioritizedProducts]);
+
+  const blockedCount = Math.max(0, prioritizedProducts.length - sellableCount);
+
+  const visibleProducts = useMemo(() => {
+    return finalProductList.slice(0, visibleProductCount);
+  }, [finalProductList, visibleProductCount]);
+
+  const canLoadMoreProducts = visibleProducts.length < finalProductList.length;
+
+  const cartItemCount = safeSaleCart.length;
+  const cartUnitCount = useMemo(() => {
+    return safeSaleCart.reduce((sum, it) => {
+      const qty = Number(it?.qty ?? 0) || 0;
+      return sum + Math.max(0, qty);
+    }, 0);
+  }, [safeSaleCart]);
+
+  useEffect(() => {
+    if (!justAddedProductId) return;
+    const t = setTimeout(() => {
+      setJustAddedProductId(null);
+      setJustAddedProductName("");
+    }, ADD_CONFIRM_MS);
+
+    return () => clearTimeout(t);
+  }, [justAddedProductId]);
+
+  useEffect(() => {
+    if (!justAddedProductId) return;
+
+    const existsInCart = safeSaleCart.some(
+      (it) => String(it?.productId ?? "") === String(justAddedProductId),
+    );
+    if (!existsInCart) return;
+
+    const node = cartItemRefs.current[String(justAddedProductId)];
+    if (!node) return;
+
+    try {
+      node.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    } catch {}
+
+    setHighlightedCartProductId(justAddedProductId);
+  }, [justAddedProductId, safeSaleCart]);
+
+  useEffect(() => {
+    if (!highlightedCartProductId) return;
+    const t = setTimeout(() => {
+      setHighlightedCartProductId(null);
+    }, CART_HIGHLIGHT_MS);
+
+    return () => clearTimeout(t);
+  }, [highlightedCartProductId]);
+
+  function handleAddProductToSaleCart(product) {
+    addProductToSaleCart(product);
+    setJustAddedProductId(product?.id ?? null);
+    setJustAddedProductName(product?.name || product?.productName || "Product");
+  }
 
   const hasCartValidationError = useMemo(() => {
     return safeSaleCart.some((it) => {
@@ -349,7 +521,7 @@ export default function SellerCreateSection({
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.95fr_1.05fr]">
       <SectionCard
         title="Products"
-        hint="Choose products for the sale. For a negotiated higher selling price, add the product first, then use the controlled extra charge field inside the cart."
+        hint="Choose products for the sale. Sellable products appear first. For a negotiated higher selling price, add the product first, then use the controlled extra charge field inside the cart."
         right={
           <AsyncButton
             variant="secondary"
@@ -372,6 +544,38 @@ export default function SellerCreateSection({
             }}
           />
 
+          {justAddedProductId ? (
+            <div className="rounded-2xl border border-[var(--success-border)] bg-[var(--success-bg)] px-4 py-3 text-sm text-[var(--success-fg)] shadow-sm">
+              Added to cart: <b>{justAddedProductName}</b>
+            </div>
+          ) : null}
+
+          {!productsLoading && prioritizedProducts.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <SellableOnlyToggle
+                checked={sellableOnly}
+                onChange={(checked) => {
+                  setSellableOnly(checked);
+                  setVisibleProductCount(PRODUCT_PAGE_SIZE);
+                }}
+              />
+
+              <ProductAlertPill tone="success">
+                {sellableCount} sellable
+              </ProductAlertPill>
+
+              {!sellableOnly && blockedCount > 0 ? (
+                <ProductAlertPill tone="warn">
+                  {blockedCount} blocked shown later
+                </ProductAlertPill>
+              ) : null}
+
+              {sellableOnly ? (
+                <ProductAlertPill>Blocked hidden</ProductAlertPill>
+              ) : null}
+            </div>
+          ) : null}
+
           {productsLoading ? (
             <div className="grid gap-3">
               <Skeleton className="h-24 w-full" />
@@ -379,9 +583,11 @@ export default function SellerCreateSection({
               <Skeleton className="h-24 w-full" />
               <Skeleton className="h-24 w-full" />
             </div>
-          ) : safeFilteredProducts.length === 0 ? (
+          ) : finalProductList.length === 0 ? (
             <div className="rounded-3xl border border-[var(--border-strong)] bg-[var(--card-2)] p-5 text-sm app-muted shadow-sm">
-              No products found.
+              {sellableOnly
+                ? "No sellable products found."
+                : "No products found."}
             </div>
           ) : (
             <div className="grid gap-3">
@@ -397,10 +603,14 @@ export default function SellerCreateSection({
                 const outOfStock = tracked && availableQty <= 0;
                 const missingPrice = !hasValidSellingPrice(p);
                 const addBlocked = outOfStock || missingPrice;
+                const justAdded =
+                  String(justAddedProductId ?? "") === String(p?.id ?? "");
 
                 const cardTone = addBlocked
                   ? "border-[var(--danger-border)] bg-[var(--danger-bg)]"
-                  : "border-[var(--border-strong)] bg-[var(--card-2)]";
+                  : justAdded
+                    ? "border-[var(--success-border)] bg-[var(--success-bg)]"
+                    : "border-[var(--border-strong)] bg-[var(--card-2)]";
 
                 const statusText = missingPrice
                   ? "Price missing"
@@ -424,6 +634,16 @@ export default function SellerCreateSection({
                           <div className="truncate text-base font-black text-[var(--app-fg)]">
                             {p?.name || "—"}
                           </div>
+
+                          {justAdded ? (
+                            <ProductAlertPill tone="success">
+                              Added
+                            </ProductAlertPill>
+                          ) : !addBlocked ? (
+                            <ProductAlertPill tone="success">
+                              Sellable
+                            </ProductAlertPill>
+                          ) : null}
 
                           {missingPrice ? (
                             <ProductAlertPill tone="danger">
@@ -498,10 +718,12 @@ export default function SellerCreateSection({
                                 "mt-1 text-sm font-black",
                                 addBlocked
                                   ? "text-[var(--danger-fg)]"
-                                  : "text-[var(--success-fg)]",
+                                  : justAdded
+                                    ? "text-[var(--success-fg)]"
+                                    : "text-[var(--success-fg)]",
                               ].join(" ")}
                             >
-                              {statusText}
+                              {justAdded ? "Added to cart" : statusText}
                             </div>
                           </div>
                         </div>
@@ -520,12 +742,14 @@ export default function SellerCreateSection({
                           "app-focus shrink-0 rounded-2xl border px-4 py-2.5 text-sm font-semibold shadow-sm transition",
                           addBlocked
                             ? "cursor-not-allowed border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)] opacity-80"
-                            : "border-[var(--border-strong)] bg-[var(--card)] text-[var(--app-fg)] hover:bg-[var(--hover)]",
+                            : justAdded
+                              ? "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]"
+                              : "border-[var(--border-strong)] bg-[var(--card)] text-[var(--app-fg)] hover:bg-[var(--hover)]",
                         ].join(" ")}
-                        onClick={() => addProductToSaleCart(p)}
+                        onClick={() => handleAddProductToSaleCart(p)}
                         disabled={addBlocked}
                       >
-                        {addBlocked ? "Blocked" : "Add"}
+                        {addBlocked ? "Blocked" : justAdded ? "Added" : "Add"}
                       </button>
                     </div>
                   </div>
@@ -548,12 +772,12 @@ export default function SellerCreateSection({
             </div>
           ) : null}
 
-          {safeFilteredProducts.length > PRODUCT_PAGE_SIZE ? (
+          {finalProductList.length > PRODUCT_PAGE_SIZE ? (
             <div className="text-xs app-muted">
               Showing{" "}
-              {Math.min(visibleProducts.length, safeFilteredProducts.length)} of{" "}
-              {safeFilteredProducts.length} product
-              {safeFilteredProducts.length === 1 ? "" : "s"}.
+              {Math.min(visibleProducts.length, finalProductList.length)} of{" "}
+              {finalProductList.length} product
+              {finalProductList.length === 1 ? "" : "s"}.
             </div>
           ) : null}
         </div>
@@ -806,8 +1030,14 @@ export default function SellerCreateSection({
           <div className="rounded-3xl border border-[var(--border-strong)] bg-[var(--card-2)] p-4 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-base font-black text-[var(--app-fg)]">
-                  Cart
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="text-base font-black text-[var(--app-fg)]">
+                    Cart
+                  </div>
+                  <CartCountBadge
+                    itemCount={cartItemCount}
+                    unitCount={cartUnitCount}
+                  />
                 </div>
                 <div className="mt-1 text-sm app-muted">
                   Adjust quantity, discount, and — when necessary — a controlled
@@ -845,6 +1075,9 @@ export default function SellerCreateSection({
                   const extraChargePerUnit = clampExtraChargePerUnit(
                     it.extraChargePerUnit,
                   );
+                  const isHighlighted =
+                    String(highlightedCartProductId ?? "") ===
+                    String(it.productId ?? "");
 
                   const line =
                     typeof previewLineTotal === "function"
@@ -868,13 +1101,29 @@ export default function SellerCreateSection({
                   return (
                     <div
                       key={String(it.productId)}
-                      className="rounded-3xl border border-[var(--border-strong)] bg-[var(--card)] p-4 shadow-sm"
+                      ref={(node) => {
+                        cartItemRefs.current[String(it.productId)] = node;
+                      }}
+                      className={[
+                        "rounded-3xl border p-4 shadow-sm transition-all duration-300",
+                        isHighlighted
+                          ? "border-[var(--success-border)] bg-[var(--success-bg)] ring-2 ring-[var(--success-border)]"
+                          : "border-[var(--border-strong)] bg-[var(--card)]",
+                      ].join(" ")}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="truncate text-base font-black text-[var(--app-fg)]">
-                            {it.productName}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="truncate text-base font-black text-[var(--app-fg)]">
+                              {it.productName}
+                            </div>
+                            {isHighlighted ? (
+                              <ProductAlertPill tone="success">
+                                Just added
+                              </ProductAlertPill>
+                            ) : null}
                           </div>
+
                           <div className="mt-1 text-sm app-muted">
                             SKU:{" "}
                             <b className="text-[var(--app-fg)]">{it.sku}</b> •

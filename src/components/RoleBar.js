@@ -17,6 +17,16 @@ function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
+function isMainLocation(user) {
+  const loc = user?.location || null;
+  return (
+    loc?.isMain === true ||
+    loc?.is_main === true ||
+    user?.locationIsMain === true ||
+    user?.location_is_main === true
+  );
+}
+
 function locationLabel(user) {
   if (!user) return "";
   const loc = user?.location || null;
@@ -31,10 +41,14 @@ function locationLabel(user) {
     (user?.locationCode != null ? toStr(user.locationCode) : "") ||
     "";
 
-  if (name && code) return `${name} (${code})`;
-  if (name) return name;
-  if (code) return code;
-  return "";
+  let base = "";
+  if (name && code) base = `${name} (${code})`;
+  else if (name) base = name;
+  else if (code) base = code;
+  else base = "";
+
+  if (!base) return "";
+  return isMainLocation(user) ? `${base} • Main branch` : base;
 }
 
 export default function RoleBar({

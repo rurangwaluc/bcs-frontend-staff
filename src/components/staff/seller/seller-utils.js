@@ -70,6 +70,16 @@ export function isToday(dateLike) {
   return isSameLocalDay(dateLike, new Date());
 }
 
+function isMainLocation(me) {
+  const loc = me?.location || null;
+  return (
+    loc?.isMain === true ||
+    loc?.is_main === true ||
+    me?.locationIsMain === true ||
+    me?.location_is_main === true
+  );
+}
+
 export function locationLabel(me) {
   const loc = me?.location || null;
 
@@ -83,10 +93,13 @@ export function locationLabel(me) {
     (me?.locationCode != null ? toStr(me.locationCode) : "") ||
     "";
 
-  if (name && code) return `${name} (${code})`;
-  if (name) return name;
-  if (code) return code;
-  return "Store —";
+  let base = "";
+  if (name && code) base = `${name} (${code})`;
+  else if (name) base = name;
+  else if (code) base = code;
+  else base = "Store —";
+
+  return isMainLocation(me) ? `${base} • Main branch` : base;
 }
 
 export function nowLocalDatetimeValue() {
