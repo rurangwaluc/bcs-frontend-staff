@@ -36,6 +36,59 @@ function hasValidSellingPrice(productOrItem) {
   return Number.isFinite(n) && n > 0;
 }
 
+function getSellingPrice(productOrItem) {
+  return (
+    Number(
+      productOrItem?.sellingPrice ??
+        productOrItem?.selling_price ??
+        productOrItem?.price ??
+        0,
+    ) || 0
+  );
+}
+
+function getMaxDiscountPercent(productOrItem) {
+  return (
+    Number(
+      productOrItem?.maxDiscountPercent ??
+        productOrItem?.max_discount_percent ??
+        0,
+    ) || 0
+  );
+}
+
+function getMaxDiscountAmount(productOrItem) {
+  return (
+    Number(
+      productOrItem?.maxDiscountAmount ??
+        productOrItem?.max_discount_amount ??
+        productOrItem?.discountAmountLimit ??
+        productOrItem?.discount_amount_limit ??
+        0,
+    ) || 0
+  );
+}
+
+function resolveProductPolicy(itemOrProduct, productMap) {
+  const id = String(itemOrProduct?.productId ?? itemOrProduct?.id ?? "");
+  const source = productMap.get(id) || null;
+
+  return {
+    sellingPrice: Math.max(
+      0,
+      getSellingPrice(itemOrProduct) || getSellingPrice(source),
+    ),
+    maxDiscountPercent: Math.max(
+      0,
+      getMaxDiscountPercent(itemOrProduct) || getMaxDiscountPercent(source),
+    ),
+    maxDiscountAmount: Math.max(
+      0,
+      getMaxDiscountAmount(itemOrProduct) || getMaxDiscountAmount(source),
+    ),
+  };
+}
+
 function isProductSellable(productOrItem) {
   const tracked = isInventoryTracked(productOrItem);
   const availableQty = getAvailableQty(productOrItem);
@@ -92,6 +145,12 @@ function clampDiscountPercent(value, maxPct) {
   return Math.min(n, Number(maxPct ?? 0) || 0);
 }
 
+function clampDiscountAmount(value, maxAmount) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(Math.trunc(n), Number(maxAmount ?? 0) || 0);
+}
+
 function clampExtraChargePerUnit(value) {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n) || n < 0) return 0;
@@ -123,9 +182,11 @@ function computeLinePreview({
 
   const pctRaw = Number(discountPercent ?? 0);
   const pct = Number.isFinite(pctRaw) ? Math.max(0, Math.min(100, pctRaw)) : 0;
-
   const pctDiscount = Math.round((base * pct) / 100);
-  const amtDiscount = Math.max(0, Number(discountAmount ?? 0) || 0);
+
+  const amtPerUnit = Math.max(0, Number(discountAmount ?? 0) || 0);
+  const amtDiscount = amtPerUnit * q;
+
   const totalDiscount = Math.min(base, pctDiscount + amtDiscount);
 
   return Math.max(0, base - totalDiscount);
@@ -227,11 +288,13 @@ function ProductReadinessBanner({
 function ExtraChargeBlock({
   item,
   maxPct,
+  maxAmount,
   lockedSellingPrice,
   updateCart,
   lineTotal,
 }) {
   const extraChargePerUnit = clampExtraChargePerUnit(item?.extraChargePerUnit);
+  const discountAmount = clampDiscountAmount(item?.discountAmount, maxAmount);
   const priceAdjustmentReason = normalizePriceAdjustmentReason(
     item?.priceAdjustmentReason,
   );
@@ -291,7 +354,7 @@ function ExtraChargeBlock({
                   item.discountPercent,
                   maxPct,
                 ),
-                discountAmount: 0,
+                discountAmount,
                 extraChargePerUnit: clampExtraChargePerUnit(e.target.value),
                 priceAdjustmentType:
                   clampExtraChargePerUnit(e.target.value) > 0
@@ -337,7 +400,7 @@ function ExtraChargeBlock({
                 item.discountPercent,
                 maxPct,
               ),
-              discountAmount: 0,
+              discountAmount,
               extraChargePerUnit,
               priceAdjustmentType,
               priceAdjustmentReason: normalizePriceAdjustmentReason(
@@ -422,6 +485,15 @@ export default function SellerCreateSection({
 
   const safeSaleCart = Array.isArray(saleCart) ? saleCart : [];
 
+  const productMap = useMemo(() => {
+    const map = new Map();
+    for (const row of safeFilteredProducts) {
+      const id = String(row?.id ?? row?.productId ?? "");
+      if (id) map.set(id, row);
+    }
+    return map;
+  }, [safeFilteredProducts]);
+
   const prioritizedProducts = useMemo(() => {
     return safeFilteredProducts.slice().sort(compareProductsForSale);
   }, [safeFilteredProducts]);
@@ -478,8 +550,6 @@ export default function SellerCreateSection({
         block: "center",
       });
     } catch {}
-
-    setHighlightedCartProductId(justAddedProductId);
   }, [justAddedProductId, safeSaleCart]);
 
   useEffect(() => {
@@ -495,10 +565,14 @@ export default function SellerCreateSection({
     addProductToSaleCart(product);
     setJustAddedProductId(product?.id ?? null);
     setJustAddedProductName(product?.name || product?.productName || "Product");
+    setHighlightedCartProductId(product?.id ?? null);
   }
 
   const hasCartValidationError = useMemo(() => {
     return safeSaleCart.some((it) => {
+      const policy = resolveProductPolicy(it, productMap);
+      const maxAmount = policy.maxDiscountAmount;
+
       const tracked = isInventoryTracked(it);
       const availableQty = getAvailableQty(it);
       const enteredQty = Number(it?.qty ?? 0) || 0;
@@ -508,14 +582,16 @@ export default function SellerCreateSection({
         it?.extraChargePerUnit,
       );
       const reason = normalizePriceAdjustmentReason(it?.priceAdjustmentReason);
+      const discountAmount = clampDiscountAmount(it?.discountAmount, maxAmount);
 
       if (enteredQty <= 0) return true;
       if (exceedsStock) return true;
       if (extraChargePerUnit > 0 && !reason) return true;
+      if (discountAmount > maxAmount) return true;
 
       return false;
     });
-  }, [safeSaleCart]);
+  }, [safeSaleCart, productMap]);
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.95fr_1.05fr]">
@@ -592,12 +668,10 @@ export default function SellerCreateSection({
           ) : (
             <div className="grid gap-3">
               {visibleProducts.map((p) => {
-                const selling =
-                  Number(p?.sellingPrice ?? p?.selling_price ?? 0) || 0;
-                const maxp =
-                  Number(
-                    p?.maxDiscountPercent ?? p?.max_discount_percent ?? 0,
-                  ) || 0;
+                const policy = resolveProductPolicy(p, productMap);
+                const selling = policy.sellingPrice;
+                const maxp = policy.maxDiscountPercent;
+                const maxAmount = policy.maxDiscountAmount;
                 const availableQty = getAvailableQty(p);
                 const tracked = isInventoryTracked(p);
                 const outOfStock = tracked && availableQty <= 0;
@@ -702,7 +776,7 @@ export default function SellerCreateSection({
 
                           <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
                             <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
-                              Max discount
+                              Max discount %
                             </div>
                             <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
                               {maxp}%
@@ -711,20 +785,27 @@ export default function SellerCreateSection({
 
                           <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
                             <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
-                              Status
+                              Max discount amount
                             </div>
-                            <div
-                              className={[
-                                "mt-1 text-sm font-black",
-                                addBlocked
-                                  ? "text-[var(--danger-fg)]"
-                                  : justAdded
-                                    ? "text-[var(--success-fg)]"
-                                    : "text-[var(--success-fg)]",
-                              ].join(" ")}
-                            >
-                              {justAdded ? "Added to cart" : statusText}
+                            <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
+                              {money(maxAmount)} RWF
                             </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+                            Status
+                          </div>
+                          <div
+                            className={[
+                              "mt-1 text-sm font-black",
+                              addBlocked
+                                ? "text-[var(--danger-fg)]"
+                                : "text-[var(--success-fg)]",
+                            ].join(" ")}
+                          >
+                            {justAdded ? "Added to cart" : statusText}
                           </div>
                         </div>
 
@@ -1062,19 +1143,26 @@ export default function SellerCreateSection({
             ) : (
               <div className="mt-4 grid gap-3">
                 {safeSaleCart.map((it) => {
-                  const maxPct = Number(it.maxDiscountPercent ?? 0) || 0;
+                  const policy = resolveProductPolicy(it, productMap);
+                  const maxPct = policy.maxDiscountPercent;
+                  const maxAmount = policy.maxDiscountAmount;
                   const availableQty = getAvailableQty(it);
                   const tracked = isInventoryTracked(it);
                   const enteredQty = Number(it.qty ?? 0) || 0;
                   const exceedsStock = tracked && enteredQty > availableQty;
-                  const lockedSellingPrice = Number(it.sellingPrice ?? 0) || 0;
+                  const lockedSellingPrice = policy.sellingPrice;
                   const safeDiscountPercent = clampDiscountPercent(
                     it.discountPercent,
                     maxPct,
                   );
+                  const safeDiscountAmount = clampDiscountAmount(
+                    it.discountAmount,
+                    maxAmount,
+                  );
                   const extraChargePerUnit = clampExtraChargePerUnit(
                     it.extraChargePerUnit,
                   );
+                  const totalFixedDiscount = safeDiscountAmount * enteredQty;
                   const isHighlighted =
                     String(highlightedCartProductId ?? "") ===
                     String(it.productId ?? "");
@@ -1086,7 +1174,7 @@ export default function SellerCreateSection({
                           qty: enteredQty,
                           unitPrice: lockedSellingPrice,
                           discountPercent: safeDiscountPercent,
-                          discountAmount: 0,
+                          discountAmount: safeDiscountAmount,
                           extraChargePerUnit,
                         })
                       : computeLinePreview({
@@ -1094,7 +1182,7 @@ export default function SellerCreateSection({
                           qty: enteredQty,
                           unitPrice: lockedSellingPrice,
                           discountPercent: safeDiscountPercent,
-                          discountAmount: 0,
+                          discountAmount: safeDiscountAmount,
                           extraChargePerUnit,
                         });
 
@@ -1149,7 +1237,7 @@ export default function SellerCreateSection({
                         </button>
                       </div>
 
-                      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <div>
                           <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
                             Qty
@@ -1164,7 +1252,7 @@ export default function SellerCreateSection({
                                 qty: Number(e.target.value || 1),
                                 unitPrice: lockedSellingPrice,
                                 discountPercent: safeDiscountPercent,
-                                discountAmount: 0,
+                                discountAmount: safeDiscountAmount,
                                 extraChargePerUnit,
                               })
                             }
@@ -1208,13 +1296,39 @@ export default function SellerCreateSection({
                                   maxPct,
                                 ),
                                 unitPrice: lockedSellingPrice,
-                                discountAmount: 0,
+                                discountAmount: safeDiscountAmount,
                                 extraChargePerUnit,
                               })
                             }
                           />
                           <div className="mt-1 text-[11px] app-muted">
                             Max allowed by manager: {maxPct}%
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] app-muted">
+                            Discount amount / unit
+                          </div>
+                          <Input
+                            type="number"
+                            min="0"
+                            max={String(maxAmount)}
+                            value={String(safeDiscountAmount)}
+                            onChange={(e) =>
+                              updateCart(it.productId, {
+                                discountAmount: clampDiscountAmount(
+                                  e.target.value,
+                                  maxAmount,
+                                ),
+                                unitPrice: lockedSellingPrice,
+                                discountPercent: safeDiscountPercent,
+                                extraChargePerUnit,
+                              })
+                            }
+                          />
+                          <div className="mt-1 text-[11px] app-muted">
+                            Max allowed by manager: {money(maxAmount)} RWF
                           </div>
                         </div>
                       </div>
@@ -1229,10 +1343,49 @@ export default function SellerCreateSection({
                       <ExtraChargeBlock
                         item={it}
                         maxPct={maxPct}
+                        maxAmount={maxAmount}
                         lockedSellingPrice={lockedSellingPrice}
                         updateCart={updateCart}
                         lineTotal={line}
                       />
+
+                      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
+                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-4 py-3 shadow-sm">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+                            % discount
+                          </div>
+                          <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
+                            {safeDiscountPercent}%
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-4 py-3 shadow-sm">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+                            Amount discount / unit
+                          </div>
+                          <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
+                            {money(safeDiscountAmount)} RWF
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-4 py-3 shadow-sm">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+                            Total fixed discount
+                          </div>
+                          <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
+                            {money(totalFixedDiscount)} RWF
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-4 py-3 shadow-sm">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+                            Extra charge / unit
+                          </div>
+                          <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
+                            {money(extraChargePerUnit)} RWF
+                          </div>
+                        </div>
+                      </div>
 
                       <div className="mt-4 flex items-center justify-between rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-4 py-3 shadow-sm">
                         <div className="text-sm font-semibold app-muted">

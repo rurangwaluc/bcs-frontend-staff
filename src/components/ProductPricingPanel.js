@@ -25,6 +25,11 @@ function toNumberOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+function toFiniteNumber(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 function fmtMoney(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return "—";
@@ -39,6 +44,35 @@ function fmtPercent(v) {
 
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
+}
+
+function normalizeProduct(row) {
+  if (!row || typeof row !== "object") {
+    return null;
+  }
+
+  return {
+    ...row,
+
+    id: row.id ?? null,
+    name: row.name ?? row.productName ?? "",
+    sku: row.sku ?? "",
+
+    purchasePrice: row.purchasePrice ?? row.costPrice ?? row.cost_price ?? 0,
+
+    costPrice: row.costPrice ?? row.purchasePrice ?? row.cost_price ?? 0,
+
+    sellingPrice: row.sellingPrice ?? row.selling_price ?? row.price ?? 0,
+
+    maxDiscountPercent: row.maxDiscountPercent ?? row.max_discount_percent ?? 0,
+
+    maxDiscountAmount:
+      row.maxDiscountAmount ??
+      row.max_discount_amount ??
+      row.discountAmountLimit ??
+      row.discount_amount_limit ??
+      0,
+  };
 }
 
 function Banner({ kind = "info", children }) {
@@ -141,24 +175,41 @@ function priceTone(purchase, selling) {
   return "success";
 }
 
+function getProductMaxDiscountAmount(product) {
+  return (
+    product?.maxDiscountAmount ??
+    product?.max_discount_amount ??
+    product?.discountAmountLimit ??
+    product?.discount_amount_limit ??
+    0
+  );
+}
+
 function ProductQuickStats({ product }) {
   const pp =
     product?.purchasePrice ?? product?.costPrice ?? product?.cost_price;
   const sp = product?.sellingPrice ?? product?.selling_price ?? product?.price;
   const md = product?.maxDiscountPercent ?? product?.max_discount_percent ?? 0;
+  const mda = getProductMaxDiscountAmount(product);
+
   const margin =
     Number.isFinite(Number(sp)) && Number.isFinite(Number(pp))
       ? Number(sp) - Number(pp)
       : null;
 
-  const discountValue =
+  const discountPercentValue =
     Number.isFinite(Number(sp)) && Number.isFinite(Number(md))
       ? (Number(sp) * Number(md)) / 100
       : null;
 
-  const lowestAllowedPrice =
-    Number.isFinite(Number(sp)) && Number.isFinite(Number(discountValue))
-      ? Number(sp) - Number(discountValue)
+  const lowestAllowedByPercent =
+    Number.isFinite(Number(sp)) && Number.isFinite(Number(discountPercentValue))
+      ? Number(sp) - Number(discountPercentValue)
+      : null;
+
+  const lowestAllowedByAmount =
+    Number.isFinite(Number(sp)) && Number.isFinite(Number(mda))
+      ? Math.max(0, Number(sp) - Number(mda))
       : null;
 
   return (
@@ -183,10 +234,19 @@ function ProductQuickStats({ product }) {
 
       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900">
         <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
-          Max disc
+          Max disc %
         </div>
         <div className="mt-1 break-words text-sm font-black text-slate-900 dark:text-slate-100">
           {fmtPercent(md)}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900">
+        <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
+          Max disc amount
+        </div>
+        <div className="mt-1 break-words text-sm font-black text-slate-900 dark:text-slate-100">
+          {fmtMoney(mda)}
         </div>
       </div>
 
@@ -201,24 +261,35 @@ function ProductQuickStats({ product }) {
         </div>
       ) : null}
 
-      {discountValue != null ? (
+      {discountPercentValue != null ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
           <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
-            Discount value
+            % discount value
           </div>
           <div className="mt-1 break-words text-sm font-black text-slate-900 dark:text-slate-100">
-            {fmtMoney(discountValue)}
+            {fmtMoney(discountPercentValue)}
           </div>
         </div>
       ) : null}
 
-      {lowestAllowedPrice != null ? (
+      {lowestAllowedByPercent != null ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
           <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
-            Lowest allowed price
+            Lowest by %
           </div>
           <div className="mt-1 break-words text-sm font-black text-slate-900 dark:text-slate-100">
-            {fmtMoney(lowestAllowedPrice)}
+            {fmtMoney(lowestAllowedByPercent)}
+          </div>
+        </div>
+      ) : null}
+
+      {lowestAllowedByAmount != null ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
+          <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
+            Lowest by amount
+          </div>
+          <div className="mt-1 break-words text-sm font-black text-slate-900 dark:text-slate-100">
+            {fmtMoney(lowestAllowedByAmount)}
           </div>
         </div>
       ) : null}
@@ -297,6 +368,8 @@ function ProductEditModal({
   setSellingPrice,
   maxDiscountPercent,
   setMaxDiscountPercent,
+  maxDiscountAmount,
+  setMaxDiscountAmount,
   saveState,
   onClose,
   onSave,
@@ -309,16 +382,22 @@ function ProductEditModal({
   const pp = toNumberOrNull(purchasePrice);
   const sp = toNumberOrNull(sellingPrice);
   const md = toNumberOrNull(maxDiscountPercent);
+  const mda = toNumberOrNull(maxDiscountAmount);
 
   const profitPreview = pp != null && sp != null ? sp - pp : null;
   const marginPercent =
     pp != null && sp != null && pp > 0 ? ((sp - pp) / pp) * 100 : null;
 
-  const maxDiscountValue =
+  const maxDiscountValueByPercent =
     sp != null && md != null ? (sp * md) / 100 : null;
 
-  const discountedPrice =
-    sp != null && maxDiscountValue != null ? sp - maxDiscountValue : null;
+  const discountedPriceByPercent =
+    sp != null && maxDiscountValueByPercent != null
+      ? sp - maxDiscountValueByPercent
+      : null;
+
+  const discountedPriceByAmount =
+    sp != null && mda != null ? Math.max(0, sp - mda) : null;
 
   const tone =
     profitPreview == null
@@ -331,7 +410,7 @@ function ProductEditModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4">
-      <div className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-[28px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-[28px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950">
         <div className="border-b border-slate-200 px-4 py-4 dark:border-slate-800 sm:px-5">
           <div className="text-lg font-black text-slate-950 dark:text-slate-50">
             Edit pricing
@@ -365,16 +444,31 @@ function ProductEditModal({
             </div>
           </div>
 
-          <div>
-            <Label>Max discount (%)</Label>
-            <Input
-              inputMode="numeric"
-              placeholder="Example: 10"
-              value={maxDiscountPercent}
-              onChange={(e) => setMaxDiscountPercent(e.target.value)}
-            />
-            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Use 0 if this product should not be discounted.
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <Label>Max discount (%)</Label>
+              <Input
+                inputMode="numeric"
+                placeholder="Example: 10"
+                value={maxDiscountPercent}
+                onChange={(e) => setMaxDiscountPercent(e.target.value)}
+              />
+              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Use 0 if percentage discount should not be allowed.
+              </div>
+            </div>
+
+            <div>
+              <Label>Max discount amount (RWF)</Label>
+              <Input
+                inputMode="numeric"
+                placeholder="Example: 500"
+                value={maxDiscountAmount}
+                onChange={(e) => setMaxDiscountAmount(e.target.value)}
+              />
+              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Use 0 if fixed amount discount should not be allowed.
+              </div>
             </div>
           </div>
 
@@ -390,7 +484,7 @@ function ProductEditModal({
                     : "border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900",
             )}
           >
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               <div>
                 <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
                   Unit margin
@@ -413,19 +507,43 @@ function ProductEditModal({
 
               <div>
                 <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
-                  Discount value
+                  % discount value
                 </div>
                 <div className="mt-1 break-words text-lg font-black text-slate-950 dark:text-slate-50">
-                  {maxDiscountValue == null ? "—" : fmtMoney(maxDiscountValue)}
+                  {maxDiscountValueByPercent == null
+                    ? "—"
+                    : fmtMoney(maxDiscountValueByPercent)}
                 </div>
               </div>
 
               <div>
                 <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
-                  Lowest allowed price
+                  Lowest by %
                 </div>
                 <div className="mt-1 break-words text-lg font-black text-slate-950 dark:text-slate-50">
-                  {discountedPrice == null ? "—" : fmtMoney(discountedPrice)}
+                  {discountedPriceByPercent == null
+                    ? "—"
+                    : fmtMoney(discountedPriceByPercent)}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
+                  Amount discount
+                </div>
+                <div className="mt-1 break-words text-lg font-black text-slate-950 dark:text-slate-50">
+                  {mda == null ? "—" : fmtMoney(mda)}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-400">
+                  Lowest by amount
+                </div>
+                <div className="mt-1 break-words text-lg font-black text-slate-950 dark:text-slate-50">
+                  {discountedPriceByAmount == null
+                    ? "—"
+                    : fmtMoney(discountedPriceByAmount)}
                 </div>
               </div>
             </div>
@@ -470,6 +588,7 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
   const [purchasePrice, setPurchasePrice] = useState("");
   const [sellingPrice, setSellingPrice] = useState("");
   const [maxDiscountPercent, setMaxDiscountPercent] = useState("0");
+  const [maxDiscountAmount, setMaxDiscountAmount] = useState("0");
 
   const [saveState, setSaveState] = useState("idle");
 
@@ -485,7 +604,9 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
     try {
       const data = await apiFetch(ENDPOINTS.PRODUCTS_LIST, { method: "GET" });
       const list = data?.products ?? data?.items ?? data?.rows ?? [];
-      setProducts(Array.isArray(list) ? list : []);
+      setProducts(
+        (Array.isArray(list) ? list : []).map(normalizeProduct).filter(Boolean),
+      );
     } catch (e) {
       setProducts([]);
       toast(
@@ -543,15 +664,30 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
   }, [filtered]);
 
   function openEdit(p) {
-    setActive(p);
+    const normalized = normalizeProduct(p);
+    setActive(normalized);
 
-    const pp = p?.purchasePrice ?? p?.costPrice ?? p?.cost_price ?? null;
-    const sp = p?.sellingPrice ?? p?.selling_price ?? p?.price ?? null;
-    const md = p?.maxDiscountPercent ?? p?.max_discount_percent ?? 0;
+    const pp =
+      normalized?.purchasePrice ??
+      normalized?.costPrice ??
+      normalized?.cost_price ??
+      null;
+
+    const sp =
+      normalized?.sellingPrice ??
+      normalized?.selling_price ??
+      normalized?.price ??
+      null;
+
+    const md =
+      normalized?.maxDiscountPercent ?? normalized?.max_discount_percent ?? 0;
+
+    const mda = getProductMaxDiscountAmount(normalized);
 
     setPurchasePrice(pp == null ? "" : String(pp));
     setSellingPrice(sp == null ? "" : String(sp));
     setMaxDiscountPercent(String(md));
+    setMaxDiscountAmount(String(mda));
 
     setSaveState("idle");
     setMsg("");
@@ -564,6 +700,7 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
     setPurchasePrice("");
     setSellingPrice("");
     setMaxDiscountPercent("0");
+    setMaxDiscountAmount("0");
     setSaveState("idle");
   }
 
@@ -583,6 +720,7 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
     const ppRaw = normalizeNumberInput(purchasePrice);
     const spRaw = normalizeNumberInput(sellingPrice);
     const mdRaw = normalizeNumberInput(maxDiscountPercent);
+    const mdaRaw = normalizeNumberInput(maxDiscountAmount);
 
     if (ppRaw === "") {
       setSaveState("idle");
@@ -596,12 +734,21 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
 
     if (mdRaw === "") {
       setSaveState("idle");
-      return toast("danger", "Max discount is required. Use 0 if none.");
+      return toast(
+        "danger",
+        "Max discount percent is required. Use 0 if none.",
+      );
+    }
+
+    if (mdaRaw === "") {
+      setSaveState("idle");
+      return toast("danger", "Max discount amount is required. Use 0 if none.");
     }
 
     const pp = Number(ppRaw);
     const sp = Number(spRaw);
     const md = Number(mdRaw);
+    const mda = Number(mdaRaw);
 
     if (!Number.isFinite(pp) || pp < 0) {
       setSaveState("idle");
@@ -615,7 +762,12 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
 
     if (!Number.isFinite(md) || md < 0 || md > 100) {
       setSaveState("idle");
-      return toast("danger", "Max discount must be between 0 and 100.");
+      return toast("danger", "Max discount percent must be between 0 and 100.");
+    }
+
+    if (!Number.isFinite(mda) || mda < 0) {
+      setSaveState("idle");
+      return toast("danger", "Max discount amount must be 0 or more.");
     }
 
     if (sp < pp) {
@@ -626,20 +778,52 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
       );
     }
 
+    if (mda > sp) {
+      setSaveState("idle");
+      return toast(
+        "danger",
+        "Max discount amount cannot be greater than selling price.",
+      );
+    }
+
     try {
-      await apiFetch(ENDPOINTS.PRODUCT_PRICING_UPDATE(active.id), {
-        method: "PATCH",
-        body: {
-          purchasePrice: pp,
-          sellingPrice: sp,
-          maxDiscountPercent: md,
+      const response = await apiFetch(
+        ENDPOINTS.PRODUCT_PRICING_UPDATE(active.id),
+        {
+          method: "PATCH",
+          body: {
+            purchasePrice: pp,
+            sellingPrice: sp,
+            maxDiscountPercent: md,
+            maxDiscountAmount: mda,
+          },
         },
-      });
+      );
+
+      const updatedProduct = normalizeProduct(
+        response?.product ?? response?.data ?? response,
+      );
+
+      if (updatedProduct?.id != null) {
+        setProducts((prev) =>
+          (Array.isArray(prev) ? prev : []).map((row) =>
+            String(row?.id) === String(updatedProduct.id)
+              ? normalizeProduct({
+                  ...row,
+                  ...updatedProduct,
+                })
+              : row,
+          ),
+        );
+      }
 
       setSaveState("success");
       toast("success", "Pricing saved.");
       closeEdit();
-      await load();
+
+      // IMPORTANT:
+      // do NOT immediately call load() here,
+      // because it can overwrite the fresh saved value with stale list data.
     } catch (e) {
       setSaveState("idle");
       toast("danger", e?.data?.error || e?.message || "Update failed.");
@@ -731,6 +915,8 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
         setSellingPrice={setSellingPrice}
         maxDiscountPercent={maxDiscountPercent}
         setMaxDiscountPercent={setMaxDiscountPercent}
+        maxDiscountAmount={maxDiscountAmount}
+        setMaxDiscountAmount={setMaxDiscountAmount}
         saveState={saveState}
         onClose={closeEdit}
         onSave={save}

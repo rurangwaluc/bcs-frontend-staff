@@ -95,6 +95,18 @@ function isInventoryTracked(productOrItem) {
   );
 }
 
+function getMaxDiscountAmount(productOrItem) {
+  return (
+    Number(
+      productOrItem?.maxDiscountAmount ??
+        productOrItem?.max_discount_amount ??
+        productOrItem?.discountAmountLimit ??
+        productOrItem?.discount_amount_limit ??
+        0,
+    ) || 0
+  );
+}
+
 function toIsoEndOfDay(dateValue) {
   const raw = String(dateValue || "").trim();
   if (!raw) return undefined;
@@ -671,11 +683,13 @@ export default function SellerPage() {
     const maxDiscountPercent = Number(
       p?.maxDiscountPercent ?? p?.max_discount_percent ?? 0,
     );
+    const maxDiscountAmount = getMaxDiscountAmount(p);
     const qtyOnHand = getAvailableQty(p);
     const trackInventory = isInventoryTracked(p);
 
     const sp = Number.isFinite(sellingPrice) ? sellingPrice : 0;
     const md = Number.isFinite(maxDiscountPercent) ? maxDiscountPercent : 0;
+    const mda = Number.isFinite(maxDiscountAmount) ? maxDiscountAmount : 0;
 
     return {
       productId,
@@ -691,6 +705,7 @@ export default function SellerPage() {
       priceAdjustmentReason: "",
 
       maxDiscountPercent: md,
+      maxDiscountAmount: mda,
       qty: 1,
       discountPercent: 0,
       discountAmount: 0,
@@ -705,6 +720,7 @@ export default function SellerPage() {
 
     const qtyOnHand = getAvailableQty(product);
     const trackInventory = isInventoryTracked(product);
+    const maxDiscountAmount = getMaxDiscountAmount(product);
 
     if (trackInventory && qtyOnHand <= 0) {
       pushToast("warn", `${product?.name || "Product"} is out of stock.`);
@@ -732,6 +748,7 @@ export default function SellerPage() {
                 qty: nextQty,
                 qtyOnHand,
                 trackInventory,
+                maxDiscountAmount,
               }
             : x,
         );
@@ -768,7 +785,11 @@ export default function SellerPage() {
         const unitPrice = baseUnitPrice + extraChargePerUnit;
 
         const discountPercent = normalizePercent(merged.discountPercent ?? 0);
-        const discountAmount = normalizeMoneyInt(merged.discountAmount ?? 0);
+        const rawDiscountAmount = normalizeMoneyInt(merged.discountAmount ?? 0);
+        const maxDiscountAmount = normalizeMoneyInt(
+          merged.maxDiscountAmount ?? 0,
+        );
+        const discountAmount = Math.min(rawDiscountAmount, maxDiscountAmount);
 
         const hasUplift = extraChargePerUnit > 0;
         const priceAdjustmentReason = hasUplift
@@ -788,6 +809,7 @@ export default function SellerPage() {
 
           discountPercent,
           discountAmount,
+          maxDiscountAmount,
 
           priceAdjustmentType,
           priceAdjustmentReason,
@@ -810,7 +832,9 @@ export default function SellerPage() {
     const pct = normalizePercent(it.discountPercent ?? 0);
     const pctDisc = Math.round((base * pct) / 100);
 
-    const amtDisc = normalizeMoneyInt(it.discountAmount ?? 0);
+    const amtDiscPerUnit = normalizeMoneyInt(it.discountAmount ?? 0);
+    const amtDisc = amtDiscPerUnit * qty;
+
     const disc = Math.min(base, pctDisc + amtDisc);
 
     return Math.max(0, base - disc);
@@ -972,6 +996,16 @@ export default function SellerPage() {
         );
         return;
       }
+
+      const maxAmountPerUnit = Number(it.maxDiscountAmount ?? 0) || 0;
+      const amountPerUnit = Number(it.discountAmount ?? 0) || 0;
+      if (amountPerUnit > maxAmountPerUnit) {
+        pushToast(
+          "warn",
+          `Discount amount too high for ${it.productName}. Max ${maxAmountPerUnit} RWF per unit.`,
+        );
+        return;
+      }
     }
 
     const payload = {
@@ -983,10 +1017,13 @@ export default function SellerPage() {
       note: toStr(note) ? toStr(note).slice(0, 200) : null,
       items: saleCart.map((it) => {
         const pricing = deriveCartPricing(it);
+        const qty = toInt(it.qty);
+        const discountAmountPerUnit = normalizeMoneyInt(it.discountAmount ?? 0);
+        const totalDiscountAmount = discountAmountPerUnit * qty;
 
         const out = {
           productId: Number(it.productId),
-          qty: toInt(it.qty),
+          qty,
           unitPrice: pricing.unitPrice,
           extraChargePerUnit: pricing.extraChargePerUnit,
         };
@@ -999,8 +1036,9 @@ export default function SellerPage() {
         const dp = Number(it.discountPercent);
         if (Number.isFinite(dp) && dp > 0) out.discountPercent = dp;
 
-        const da = Number(it.discountAmount);
-        if (Number.isFinite(da) && da > 0) out.discountAmount = da;
+        if (Number.isFinite(totalDiscountAmount) && totalDiscountAmount > 0) {
+          out.discountAmount = totalDiscountAmount;
+        }
 
         return out;
       }),
