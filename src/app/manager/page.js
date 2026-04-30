@@ -823,6 +823,98 @@ export default function ManagerPage() {
     setMsg("");
   }
 
+  function getCreditStatus(sale) {
+    return String(
+      sale?.credit?.status ?? sale?.creditStatus ?? "",
+    ).toUpperCase();
+  }
+
+  function openSaleWorkflow(sale) {
+    setSection("sales");
+
+    const saleId = Number(sale?.id || 0);
+    if (saleId > 0) {
+      ensureSaleDetails(saleId);
+      setSalesQ(String(saleId));
+      setSalesPage(1);
+    }
+
+    const saleStatus = String(sale?.status || "").toUpperCase();
+    const creditStatus = getCreditStatus(sale);
+
+    if (saleStatus === "DRAFT") {
+      toast(
+        "warn",
+        "This sale is still draft. Storekeeper must fulfill it first.",
+      );
+      return;
+    }
+
+    if (saleStatus === "FULFILLED") {
+      toast(
+        "warn",
+        "This sale was fulfilled already. Seller must mark it as paid before cashier payment recording.",
+      );
+      return;
+    }
+
+    if (saleStatus === "AWAITING_PAYMENT_RECORD") {
+      toast(
+        "info",
+        "This sale is already waiting for cashier payment recording.",
+      );
+      return;
+    }
+
+    if (
+      ["PENDING_APPROVAL", "APPROVED", "PARTIALLY_PAID"].includes(creditStatus)
+    ) {
+      toast(
+        "info",
+        "This sale is linked to an active credit workflow. Review the credit section too.",
+      );
+      return;
+    }
+
+    toast("info", `Opened sales workflow for sale #${saleId || "—"}.`);
+  }
+
+  function openPaymentRecord(sale) {
+    setSection("payments");
+    setPayView("list");
+
+    const saleId = Number(sale?.id || 0);
+    if (saleId > 0) {
+      setPayQ(String(saleId));
+      ensureSaleDetails(saleId);
+    }
+
+    toast("info", `Opened payment recording view for sale #${saleId || "—"}.`);
+  }
+
+  function openCreditRequest(sale) {
+    setSection("credits");
+
+    const saleId = Number(sale?.id || 0);
+    if (saleId > 0) {
+      ensureSaleDetails(saleId);
+    }
+
+    toast("info", `Opened credit workflow for sale #${saleId || "—"}.`);
+  }
+
+  function canRecordPayment(sale) {
+    const saleStatus = String(sale?.status || "").toUpperCase();
+    return saleStatus === "AWAITING_PAYMENT_RECORD";
+  }
+
+  function canOpenCreditRequest(sale) {
+    const creditStatus = getCreditStatus(sale);
+    return ["PENDING_APPROVAL", "APPROVED", "PARTIALLY_PAID"].includes(
+      creditStatus,
+    );
+  }
+
   async function confirmCancel() {
     if (!cancelSaleId) return;
 
@@ -1075,6 +1167,11 @@ export default function ManagerPage() {
                     mergedSale.items || mergedSale?.items || [],
                   );
                 }}
+                openSaleWorkflow={openSaleWorkflow}
+                openPaymentRecord={openPaymentRecord}
+                openCreditRequest={openCreditRequest}
+                canRecordPayment={canRecordPayment}
+                canOpenCreditRequest={canOpenCreditRequest}
               />
             ) : null}
 
@@ -1096,6 +1193,11 @@ export default function ManagerPage() {
                 getCustomerAddress={getCustomerAddress}
                 canCancelSale={canCancelSale}
                 openCancel={openCancel}
+                openSaleWorkflow={openSaleWorkflow}
+                openPaymentRecord={openPaymentRecord}
+                openCreditRequest={openCreditRequest}
+                canRecordPayment={canRecordPayment}
+                canOpenCreditRequest={canOpenCreditRequest}
               />
             ) : null}
 
@@ -1275,13 +1377,13 @@ export default function ManagerPage() {
                         <option value="sale">Sales</option>
                         <option value="payment">Payments</option>
                         <option value="refund">Refunds</option>
-                        <option value="credit">Credits</option>
                         <option value="cash_session">Cash sessions</option>
+                        <option value="credit">Credits</option>
+                        <option value="product">Products</option>
+                        <option value="inventory">Inventory</option>
+                        <option value="user">Staff</option>
                         <option value="expense">Expenses</option>
                         <option value="deposit">Deposits</option>
-                        <option value="inventory">Inventory</option>
-                        <option value="product">Products</option>
-                        <option value="user">Staff</option>
                       </Select>
                     </div>
 
