@@ -275,6 +275,125 @@ function extractReasonList(sale) {
   return inferred;
 }
 
+function resolveStuckAction(sale) {
+  const saleStatus = String(sale?.status || "").toUpperCase();
+  const creditStatus = String(
+    sale?.credit?.status ?? sale?.creditStatus ?? "",
+  ).toUpperCase();
+
+  if (creditStatus === "PENDING_APPROVAL") {
+    return {
+      tone: "warn",
+      blocker: "Credit request is waiting for manager approval.",
+      responsibleRole: "Manager",
+      actionLabel: "Open credit workflow",
+      targetSection: "credits",
+      helper:
+        "Review the credit request and approve or reject it from the credit workflow.",
+    };
+  }
+
+  if (creditStatus === "APPROVED") {
+    return {
+      tone: "info",
+      blocker: "Credit was approved but collection is still open.",
+      responsibleRole: "Manager / credit collection",
+      actionLabel: "Open credit workflow",
+      targetSection: "credits",
+      helper:
+        "Continue collection follow-up and move the credit toward settlement.",
+    };
+  }
+
+  if (creditStatus === "PARTIALLY_PAID") {
+    return {
+      tone: "warn",
+      blocker: "Credit is active and still has remaining balance.",
+      responsibleRole: "Manager / credit collection",
+      actionLabel: "Open credit workflow",
+      targetSection: "credits",
+      helper:
+        "Track remaining balance and continue collection from the credit workflow.",
+    };
+  }
+
+  if (saleStatus === "DRAFT") {
+    return {
+      tone: "warn",
+      blocker: "Stock has not been released yet for this sale.",
+      responsibleRole: "Storekeeper",
+      actionLabel: "Open storekeeper flow",
+      targetSection: "sales",
+      helper:
+        "Open the sales workflow and push the storekeeper to fulfill this draft sale.",
+    };
+  }
+
+  if (saleStatus === "FULFILLED") {
+    return {
+      tone: "info",
+      blocker:
+        "Stock was released, but seller has not marked the sale as paid yet.",
+      responsibleRole: "Seller",
+      actionLabel: "Tell seller to mark paid",
+      targetSection: "sales",
+      helper:
+        "Open the sales workflow, inspect the sale, and direct the seller to mark it as paid.",
+    };
+  }
+
+  if (saleStatus === "AWAITING_PAYMENT_RECORD") {
+    return {
+      tone: "warn",
+      blocker:
+        "Payment was marked by seller, but payment record was not completed yet.",
+      responsibleRole: "Cashier / manager",
+      actionLabel: "Open payment recording",
+      targetSection: "sales",
+      helper:
+        "Open the sales workflow and finish the payment-recording step so the sale can complete.",
+    };
+  }
+
+  if (saleStatus === "PENDING" || saleStatus === "APPROVED") {
+    return {
+      tone: "warn",
+      blocker: "This sale is stuck in a managed approval state.",
+      responsibleRole: "Manager",
+      actionLabel: "Open sales workflow",
+      targetSection: "sales",
+      helper:
+        "Inspect the sale in the manager sales workflow and move it to the next valid step.",
+    };
+  }
+
+  return {
+    tone: "neutral",
+    blocker: "This sale needs manual review in the sales workflow.",
+    responsibleRole: "Manager",
+    actionLabel: "Open sales workflow",
+    targetSection: "sales",
+    helper:
+      "Inspect the sale details and decide the next valid workflow action.",
+  };
+}
+
+function actionToneClasses(tone) {
+  if (tone === "warn") {
+    return "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-fg)]";
+  }
+  if (tone === "danger") {
+    return "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-fg)]";
+  }
+  if (tone === "success") {
+    return "border-[var(--success-border)] bg-[var(--success-bg)] text-[var(--success-fg)]";
+  }
+  if (tone === "info") {
+    return "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-fg)]";
+  }
+  return "border-[var(--border)] bg-[var(--card-2)] text-[var(--app-fg)]";
+}
+
 function MixCard({ label, count, total, tone = "neutral" }) {
   const toneBar =
     tone === "success"
@@ -365,6 +484,7 @@ function StuckSaleReasonModal({ open, sale, onClose, money, fmt }) {
   if (!open || !sale) return null;
 
   const reasons = extractReasonList(sale);
+  const action = resolveStuckAction(sale);
 
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
@@ -436,6 +556,35 @@ function StuckSaleReasonModal({ open, sale, onClose, money, fmt }) {
             </div>
           </div>
 
+          <div
+            className={cx(
+              "mt-4 rounded-[22px] border p-4",
+              actionToneClasses(action.tone),
+            )}
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <div className="text-[11px] font-black uppercase tracking-[0.12em] opacity-80">
+                  Real blocker
+                </div>
+                <div className="mt-1 text-sm font-black">{action.blocker}</div>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-black uppercase tracking-[0.12em] opacity-80">
+                  Responsible role
+                </div>
+                <div className="mt-1 text-sm font-black">
+                  {action.responsibleRole}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 text-sm leading-6 opacity-90">
+              {action.helper}
+            </div>
+          </div>
+
           <div className="mt-4 rounded-[22px] border border-[var(--border)] bg-[var(--card-2)] p-4">
             <div className="text-sm font-black text-[var(--app-fg)]">
               Why this sale is stuck
@@ -469,8 +618,16 @@ function StuckSaleReasonModal({ open, sale, onClose, money, fmt }) {
   );
 }
 
-function StuckSaleCard({ sale, money, fmt, topItem, onOpenReasons }) {
+function StuckSaleCard({
+  sale,
+  money,
+  fmt,
+  topItem,
+  onOpenReasons,
+  onTakeAction,
+}) {
   const total = money(sale?.totalAmount ?? sale?.total ?? 0);
+  const action = resolveStuckAction(sale);
 
   return (
     <div className="rounded-[24px] border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_8px_22px_rgba(15,23,42,0.05)] dark:shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
@@ -530,6 +687,33 @@ function StuckSaleCard({ sale, money, fmt, topItem, onOpenReasons }) {
         </div>
       </div>
 
+      <div
+        className={cx(
+          "mt-4 rounded-[20px] border p-4",
+          actionToneClasses(action.tone),
+        )}
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <div className="text-[11px] font-black uppercase tracking-[0.12em] opacity-80">
+              Real blocker
+            </div>
+            <div className="mt-1 text-sm font-black">{action.blocker}</div>
+          </div>
+
+          <div>
+            <div className="text-[11px] font-black uppercase tracking-[0.12em] opacity-80">
+              Responsible role
+            </div>
+            <div className="mt-1 text-sm font-black">
+              {action.responsibleRole}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 text-sm leading-6 opacity-90">{action.helper}</div>
+      </div>
+
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
           <span className="inline-flex items-center rounded-full border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.08em] text-[var(--warn-fg)]">
@@ -537,13 +721,23 @@ function StuckSaleCard({ sale, money, fmt, topItem, onOpenReasons }) {
           </span>
         </div>
 
-        <button
-          type="button"
-          onClick={() => onOpenReasons?.(sale)}
-          className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-xs font-black uppercase tracking-[0.08em] text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
-        >
-          Click for details
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onOpenReasons?.(sale)}
+            className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-xs font-black uppercase tracking-[0.08em] text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+          >
+            Click for details
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onTakeAction?.(sale)}
+            className="rounded-2xl border border-[var(--app-fg)] bg-[var(--app-fg)] px-4 py-2 text-xs font-black uppercase tracking-[0.08em] text-[var(--app-bg)] transition hover:opacity-90"
+          >
+            {action.actionLabel}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -677,6 +871,12 @@ export default function ManagerDashboardSection(props) {
   const totalReasonCount = useMemo(() => {
     return stuck.reduce((sum, sale) => sum + extractReasonList(sale).length, 0);
   }, [stuck]);
+
+  function handleStuckSaleAction(sale) {
+    const action = resolveStuckAction(sale);
+    if (!action?.targetSection) return;
+    goToSection(action.targetSection);
+  }
 
   return (
     <div className="grid gap-4">
@@ -846,6 +1046,7 @@ export default function ManagerDashboardSection(props) {
                     fmt={formatDate}
                     topItem={topItem}
                     onOpenReasons={setSelectedStuckSale}
+                    onTakeAction={handleStuckSaleAction}
                   />
                 );
               })}
