@@ -108,6 +108,9 @@ export function useAdminPageState({ router }) {
         await Promise.all([
           data.loadPaymentsSummary(),
           data.loadPayments(),
+          data.loadPaymentsBreakdown(),
+          data.loadExpenses(),
+          data.loadExpensesSummary(),
           data.loadAwaitingPaymentSales(),
           cashier.loadSessions(),
         ]);
@@ -132,6 +135,11 @@ export function useAdminPageState({ router }) {
           data.loadSales(),
           data.loadInvReqPendingCount(),
           data.loadCreditsOpen(),
+          data.loadPaymentsSummary(),
+          data.loadPayments(),
+          data.loadPaymentsBreakdown(),
+          data.loadExpenses(),
+          data.loadExpensesSummary(),
         ]);
       }
     },
@@ -143,6 +151,9 @@ export function useAdminPageState({ router }) {
       data.loadInvReqPendingCount,
       data.loadPaymentsSummary,
       data.loadPayments,
+      data.loadPaymentsBreakdown,
+      data.loadExpenses,
+      data.loadExpensesSummary,
       data.loadAwaitingPaymentSales,
       data.loadAdminDash,
       data.loadCreditsOpen,
@@ -161,6 +172,7 @@ export function useAdminPageState({ router }) {
       loadedSectionsRef.current.delete("inv_requests");
       loadedSectionsRef.current.delete("sales");
       loadedSectionsRef.current.delete("payments");
+      loadedSectionsRef.current.delete("reports");
       setSection("dashboard");
     },
   });
@@ -194,6 +206,9 @@ export function useAdminPageState({ router }) {
     loadArrivals: data.loadArrivals,
     loadPayments: data.loadPayments,
     loadPaymentsSummary: data.loadPaymentsSummary,
+    loadPaymentsBreakdown: data.loadPaymentsBreakdown,
+    loadExpenses: data.loadExpenses,
+    loadExpensesSummary: data.loadExpensesSummary,
     loadInvReqPendingCount: data.loadInvReqPendingCount,
 
     dash: data.dash,
@@ -203,6 +218,14 @@ export function useAdminPageState({ router }) {
     paymentsLoading: data.paymentsLoading,
     paymentsSummary: data.paymentsSummary,
     paySummaryLoading: data.paySummaryLoading,
+    paymentsBreakdown: data.paymentsBreakdown,
+    payBreakdownLoading: data.payBreakdownLoading,
+
+    expenses: data.expenses,
+    expensesLoading: data.expensesLoading,
+    expensesSummary: data.expensesSummary,
+    expensesSummaryLoading: data.expensesSummaryLoading,
+
     coverage: coverage.coverage,
     paymentsPage,
     setPaymentsPage,
@@ -323,6 +346,7 @@ export function useAdminPageState({ router }) {
       loadedSectionsRef.current.delete("arrivals");
       loadedSectionsRef.current.delete("inv_requests");
       loadedSectionsRef.current.delete("credits");
+      loadedSectionsRef.current.delete("reports");
     }
 
     previousCoverageRoleRef.current = next || null;
@@ -343,6 +367,9 @@ export function useAdminPageState({ router }) {
           data.loadProducts({ includeInactive: data.showArchivedProducts }),
           data.loadPaymentsSummary(),
           data.loadPayments(),
+          data.loadPaymentsBreakdown(),
+          data.loadExpenses(),
+          data.loadExpensesSummary(),
           data.loadArrivals(),
           data.loadInvReqPendingCount(),
         ]);
@@ -373,11 +400,20 @@ export function useAdminPageState({ router }) {
           await Promise.all([
             data.loadPaymentsSummary(),
             data.loadPayments(),
+            data.loadPaymentsBreakdown(),
+            data.loadExpenses(),
+            data.loadExpensesSummary(),
             data.loadAwaitingPaymentSales(),
             cashier.loadSessions(),
           ]);
         } else {
-          await Promise.all([data.loadPaymentsSummary(), data.loadPayments()]);
+          await Promise.all([
+            data.loadPaymentsSummary(),
+            data.loadPayments(),
+            data.loadPaymentsBreakdown(),
+            data.loadExpenses(),
+            data.loadExpensesSummary(),
+          ]);
         }
         return;
       }
@@ -434,6 +470,20 @@ export function useAdminPageState({ router }) {
         return;
       }
 
+      if (section === "reports") {
+        await Promise.all([
+          data.loadSales(),
+          data.loadInventory(),
+          data.loadProducts({ includeInactive: data.showArchivedProducts }),
+          data.loadPayments(),
+          data.loadPaymentsSummary(),
+          data.loadPaymentsBreakdown(),
+          data.loadExpenses(),
+          data.loadExpensesSummary(),
+        ]);
+        return;
+      }
+
       if (section === "users") {
         await data.loadUsers();
       }
@@ -452,6 +502,9 @@ export function useAdminPageState({ router }) {
     data.showArchivedProducts,
     data.loadPaymentsSummary,
     data.loadPayments,
+    data.loadPaymentsBreakdown,
+    data.loadExpenses,
+    data.loadExpensesSummary,
     data.loadAwaitingPaymentSales,
     data.loadArrivals,
     data.loadInvReqPendingCount,
@@ -511,6 +564,19 @@ export function useAdminPageState({ router }) {
           await data.loadCreditsOpen();
         }
 
+        if (section === "reports") {
+          await Promise.all([
+            data.loadSales(),
+            data.loadInventory(),
+            data.loadProducts({ includeInactive: data.showArchivedProducts }),
+            data.loadPayments(),
+            data.loadPaymentsSummary(),
+            data.loadPaymentsBreakdown(),
+            data.loadExpenses(),
+            data.loadExpensesSummary(),
+          ]);
+        }
+
         await coverage.loadCoverage();
 
         setRefreshNonce((n) => n + 1);
@@ -527,6 +593,9 @@ export function useAdminPageState({ router }) {
           data.loadProducts({ includeInactive: data.showArchivedProducts }),
           data.loadPaymentsSummary(),
           data.loadPayments(),
+          data.loadPaymentsBreakdown(),
+          data.loadExpenses(),
+          data.loadExpensesSummary(),
           data.loadArrivals(),
           data.loadInvReqPendingCount(),
         ]);
@@ -551,11 +620,20 @@ export function useAdminPageState({ router }) {
           await Promise.all([
             data.loadPaymentsSummary(),
             data.loadPayments(),
+            data.loadPaymentsBreakdown(),
+            data.loadExpenses(),
+            data.loadExpensesSummary(),
             data.loadAwaitingPaymentSales(),
             cashier.loadSessions(),
           ]);
         } else {
-          await Promise.all([data.loadPaymentsSummary(), data.loadPayments()]);
+          await Promise.all([
+            data.loadPaymentsSummary(),
+            data.loadPayments(),
+            data.loadPaymentsBreakdown(),
+            data.loadExpenses(),
+            data.loadExpensesSummary(),
+          ]);
         }
       } else if (section === "inventory") {
         if (coverage.isStoreKeeperCoverage || coverage.isManagerCoverage) {
@@ -603,6 +681,9 @@ export function useAdminPageState({ router }) {
     data.showArchivedProducts,
     data.loadPaymentsSummary,
     data.loadPayments,
+    data.loadPaymentsBreakdown,
+    data.loadExpenses,
+    data.loadExpensesSummary,
     data.loadAwaitingPaymentSales,
     data.loadArrivals,
     data.loadInvReqPendingCount,
@@ -633,13 +714,9 @@ export function useAdminPageState({ router }) {
       derived.salesProps,
       data.salesLoading,
       salesQ,
-      setSalesQ,
       salesStatusFilter,
-      setSalesStatusFilter,
       salesFrom,
-      setSalesFrom,
       salesTo,
-      setSalesTo,
     ],
   );
 
@@ -649,12 +726,96 @@ export function useAdminPageState({ router }) {
       paymentsLoading: data.paymentsLoading,
       paymentsSummary: data.paymentsSummary,
       paySummaryLoading: data.paySummaryLoading,
+      paymentsBreakdown: data.paymentsBreakdown,
+      payBreakdownLoading: data.payBreakdownLoading,
+      expenses: data.expenses,
+      expensesLoading: data.expensesLoading,
+      expensesSummary: data.expensesSummary,
+      expensesSummaryLoading: data.expensesSummaryLoading,
+      loadPayments: data.loadPayments,
+      loadPaymentsSummary: data.loadPaymentsSummary,
+      loadPaymentsBreakdown: data.loadPaymentsBreakdown,
+      loadExpenses: data.loadExpenses,
+      loadExpensesSummary: data.loadExpensesSummary,
     }),
     [
       derived.paymentsProps,
       data.paymentsLoading,
       data.paymentsSummary,
       data.paySummaryLoading,
+      data.paymentsBreakdown,
+      data.payBreakdownLoading,
+      data.expenses,
+      data.expensesLoading,
+      data.expensesSummary,
+      data.expensesSummaryLoading,
+      data.loadPayments,
+      data.loadPaymentsSummary,
+      data.loadPaymentsBreakdown,
+      data.loadExpenses,
+      data.loadExpensesSummary,
+    ],
+  );
+
+  const reportsProps = useMemo(
+    () => ({
+      title: "Reports",
+
+      sales: data.sales,
+      inventory: data.inventory,
+      products: data.products,
+      payments: data.payments,
+      paymentsSummary: data.paymentsSummary,
+      paymentsBreakdown: data.paymentsBreakdown,
+      expenses: data.expenses,
+      expensesSummary: data.expensesSummary,
+
+      salesLoading: data.salesLoading,
+      inventoryLoading: data.invLoading,
+      productsLoading: data.prodLoading,
+      paymentsLoading: data.paymentsLoading,
+      paySummaryLoading: data.paySummaryLoading,
+      payBreakdownLoading: data.payBreakdownLoading,
+      expensesLoading: data.expensesLoading,
+      expensesSummaryLoading: data.expensesSummaryLoading,
+
+      invReqPendingCount: data.invReqPendingCount,
+
+      loadSales: data.loadSales,
+      loadInventory: data.loadInventory,
+      loadProducts: data.loadProducts,
+      loadPayments: data.loadPayments,
+      loadPaymentsSummary: data.loadPaymentsSummary,
+      loadPaymentsBreakdown: data.loadPaymentsBreakdown,
+      loadExpenses: data.loadExpenses,
+      loadExpensesSummary: data.loadExpensesSummary,
+    }),
+    [
+      data.sales,
+      data.inventory,
+      data.products,
+      data.payments,
+      data.paymentsSummary,
+      data.paymentsBreakdown,
+      data.expenses,
+      data.expensesSummary,
+      data.salesLoading,
+      data.invLoading,
+      data.prodLoading,
+      data.paymentsLoading,
+      data.paySummaryLoading,
+      data.payBreakdownLoading,
+      data.expensesLoading,
+      data.expensesSummaryLoading,
+      data.invReqPendingCount,
+      data.loadSales,
+      data.loadInventory,
+      data.loadProducts,
+      data.loadPayments,
+      data.loadPaymentsSummary,
+      data.loadPaymentsBreakdown,
+      data.loadExpenses,
+      data.loadExpensesSummary,
     ],
   );
 
@@ -733,7 +894,6 @@ export function useAdminPageState({ router }) {
       data.awaitingPaymentSalesLoading,
       data.loadAwaitingPaymentSales,
       salesQ,
-      setSalesQ,
       cashier.awaitingSales,
       cashier.raw.selectedSale,
       cashier.raw.setSelectedSale,
@@ -812,7 +972,6 @@ export function useAdminPageState({ router }) {
       data.prodLoading,
       data.invLoading,
       invQ,
-      setInvQ,
       derived.filteredInventory,
     ],
   );
@@ -859,9 +1018,7 @@ export function useAdminPageState({ router }) {
       data.invLoading,
       data.prodLoading,
       invQ,
-      setInvQ,
       prodQ,
-      setProdQ,
       data.showArchivedProducts,
       data.setShowArchivedProducts,
     ],
@@ -926,6 +1083,7 @@ export function useAdminPageState({ router }) {
     dashboardProps,
     salesProps,
     paymentsProps,
+    reportsProps,
     cashierCoverageProps,
     sellerCoverageProps,
     storeKeeperInventoryProps,

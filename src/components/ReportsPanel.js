@@ -1,32 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import AsyncButton from "./AsyncButton";
-import { apiFetch } from "../lib/api";
-
-const ENDPOINTS = {
-  SALES_LIST: "/sales",
-  INVENTORY_LIST: "/inventory",
-  REQUESTS_LIST: "/requests",
-  PRODUCTS_LIST: "/products",
-};
 
 function safeArray(x) {
   return Array.isArray(x) ? x : [];
-}
-
-function pickList(data, keys) {
-  for (const k of keys) {
-    if (Array.isArray(data?.[k])) return data[k];
-  }
-  return [];
 }
 
 function parseDateMaybe(v) {
   if (!v) return null;
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function toNumber(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function fmtMoney(v) {
@@ -65,18 +55,21 @@ function Banner({ kind = "info", children }) {
   );
 }
 
-function Card({ title, sub, children }) {
+function Card({ title, sub, children, right = null }) {
   return (
     <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
-      <div className="border-b border-slate-200 px-4 py-4 dark:border-slate-800">
-        <div className="text-sm font-black text-slate-950 dark:text-slate-50">
-          {title}
-        </div>
-        {sub ? (
-          <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-            {sub}
+      <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-4 dark:border-slate-800 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="text-sm font-black text-slate-950 dark:text-slate-50">
+            {title}
           </div>
-        ) : null}
+          {sub ? (
+            <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+              {sub}
+            </div>
+          ) : null}
+        </div>
+        {right}
       </div>
       <div className="p-4">{children}</div>
     </div>
@@ -189,56 +182,188 @@ function MobileReportRow({ title, lines = [] }) {
   );
 }
 
-export default function ReportsPanel({ title = "Reports" }) {
+function normalizeBreakdownBucketMap(bucketLike) {
+  const base = {
+    CASH: { count: 0, total: 0 },
+    MOMO: { count: 0, total: 0 },
+    BANK: { count: 0, total: 0 },
+    CARD: { count: 0, total: 0 },
+    OTHER: { count: 0, total: 0 },
+  };
+
+  if (!bucketLike) return base;
+
+  if (!Array.isArray(bucketLike) && typeof bucketLike === "object") {
+    return {
+      CASH: {
+        count: toNumber(bucketLike?.CASH?.count, 0),
+        total: toNumber(bucketLike?.CASH?.total ?? bucketLike?.CASH?.amount, 0),
+      },
+      MOMO: {
+        count: toNumber(bucketLike?.MOMO?.count, 0),
+        total: toNumber(bucketLike?.MOMO?.total ?? bucketLike?.MOMO?.amount, 0),
+      },
+      BANK: {
+        count: toNumber(bucketLike?.BANK?.count, 0),
+        total: toNumber(bucketLike?.BANK?.total ?? bucketLike?.BANK?.amount, 0),
+      },
+      CARD: {
+        count: toNumber(bucketLike?.CARD?.count, 0),
+        total: toNumber(bucketLike?.CARD?.total ?? bucketLike?.CARD?.amount, 0),
+      },
+      OTHER: {
+        count: toNumber(bucketLike?.OTHER?.count, 0),
+        total: toNumber(
+          bucketLike?.OTHER?.total ?? bucketLike?.OTHER?.amount,
+          0,
+        ),
+      },
+    };
+  }
+
+  for (const row of bucketLike) {
+    const method = String(row?.method || row?.paymentMethod || "OTHER")
+      .trim()
+      .toUpperCase();
+
+    const key = Object.prototype.hasOwnProperty.call(base, method)
+      ? method
+      : "OTHER";
+
+    base[key] = {
+      count: base[key].count + toNumber(row?.count, 0),
+      total:
+        base[key].total +
+        toNumber(row?.totalAmount ?? row?.total ?? row?.amount, 0),
+    };
+  }
+
+  return base;
+}
+
+function PaymentBreakdownCard({ title, buckets, tone = "neutral" }) {
+  const total = Object.values(buckets || {}).reduce(
+    (sum, row) => sum + toNumber(row?.total, 0),
+    0,
+  );
+
+  const barTone =
+    tone === "success"
+      ? "bg-emerald-500"
+      : tone === "warn"
+        ? "bg-amber-500"
+        : tone === "danger"
+          ? "bg-rose-500"
+          : tone === "info"
+            ? "bg-sky-500"
+            : "bg-slate-400";
+
+  return (
+    <div className="relative overflow-hidden rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+      <div className="absolute inset-x-0 top-0 h-[3px]">
+        <div className={cx("h-full w-14 rounded-r-full", barTone)} />
+      </div>
+
+      <div className="text-sm font-black text-slate-950 dark:text-slate-50">
+        {title}
+      </div>
+      <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+        Total:{" "}
+        <b className="text-slate-950 dark:text-slate-50">{fmtMoney(total)}</b>{" "}
+        RWF
+      </div>
+
+      <div className="mt-4 grid gap-2">
+        {["CASH", "MOMO", "BANK", "CARD", "OTHER"].map((key) => (
+          <div
+            key={key}
+            className="flex items-center justify-between rounded-[14px] bg-slate-50 px-3 py-2 text-sm dark:bg-slate-900"
+          >
+            <div className="font-semibold text-slate-900 dark:text-slate-100">
+              {key}
+            </div>
+
+            <div className="text-right">
+              <div className="font-black text-slate-950 dark:text-slate-50">
+                {fmtMoney(buckets?.[key]?.total || 0)}
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                {toNumber(buckets?.[key]?.count, 0)} record(s)
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ExpenseSummaryCard({ title, count, total, tone = "danger" }) {
+  return (
+    <KpiCard
+      title={title}
+      value={
+        <span className="text-[19px] font-semibold tracking-tight">
+          {fmtMoney(total)} RWF
+        </span>
+      }
+      sub={`${toNumber(count, 0).toLocaleString()} expense record(s)`}
+      tone={tone}
+    />
+  );
+}
+
+export default function ReportsPanel({
+  title = "Reports",
+
+  sales = [],
+  inventory = [],
+  products = [],
+  payments = [],
+  paymentsSummary = null,
+  paymentsBreakdown = null,
+  expenses = [],
+  expensesSummary = null,
+
+  salesLoading = false,
+  inventoryLoading = false,
+  productsLoading = false,
+  paymentsLoading = false,
+  paySummaryLoading = false,
+  payBreakdownLoading = false,
+  expensesLoading = false,
+  expensesSummaryLoading = false,
+
+  invReqPendingCount = 0,
+
+  loadSales,
+  loadInventory,
+  loadProducts,
+  loadPayments,
+  loadPaymentsSummary,
+  loadPaymentsBreakdown,
+  loadExpenses,
+  loadExpensesSummary,
+}) {
   const [msg, setMsg] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const [sales, setSales] = useState([]);
-  const [inventory, setInventory] = useState([]);
-  const [requests, setRequests] = useState([]);
-  const [products, setProducts] = useState([]);
-
   const [range, setRange] = useState("30");
   const [lowStockThreshold, setLowStockThreshold] = useState("5");
-
   const [refreshState, setRefreshState] = useState("idle");
-
-  const loadAll = useCallback(async () => {
-    setLoading(true);
-    setMsg("");
-
-    try {
-      const [salesRes, invRes, reqRes, prodRes] = await Promise.all([
-        apiFetch(ENDPOINTS.SALES_LIST, { method: "GET" }),
-        apiFetch(ENDPOINTS.INVENTORY_LIST, { method: "GET" }),
-        apiFetch(ENDPOINTS.REQUESTS_LIST, { method: "GET" }),
-        apiFetch(ENDPOINTS.PRODUCTS_LIST, { method: "GET" }),
-      ]);
-
-      setSales(
-        pickList(salesRes, ["sales", "items", "rows", "data", "result"]) || [],
-      );
-      setInventory(
-        pickList(invRes, ["inventory", "items", "rows", "data", "result"]) ||
-          [],
-      );
-      setRequests(
-        pickList(reqRes, ["requests", "items", "rows", "data", "result"]) || [],
-      );
-      setProducts(
-        pickList(prodRes, ["products", "items", "rows", "data", "result"]) ||
-          [],
-      );
-    } catch (e) {
-      setMsg(e?.data?.error || e?.message || "Failed to load report data.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [rangeAnchor, setRangeAnchor] = useState(() => Date.now());
 
   useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+    setRangeAnchor(Date.now());
+  }, [range]);
+
+  const loading =
+    !!salesLoading ||
+    !!inventoryLoading ||
+    !!productsLoading ||
+    !!paymentsLoading ||
+    !!paySummaryLoading ||
+    !!payBreakdownLoading ||
+    !!expensesLoading ||
+    !!expensesSummaryLoading;
 
   const rangeMs = useMemo(() => {
     if (range === "ALL") return null;
@@ -249,55 +374,51 @@ export default function ReportsPanel({ title = "Reports" }) {
 
   const salesInRange = useMemo(() => {
     const list = safeArray(sales);
+
     if (!rangeMs) return list;
 
-    const cutoff = Date.now() - rangeMs;
+    const cutoff = rangeAnchor - rangeMs;
+
     return list.filter((s) => {
-      const d = parseDateMaybe(s.createdAt || s.created_at);
+      const d = parseDateMaybe(s?.createdAt || s?.created_at);
       return d ? d.getTime() >= cutoff : true;
     });
-  }, [sales, rangeMs]);
+  }, [sales, rangeMs, rangeAnchor]);
 
   const totalRevenue = useMemo(() => {
     return salesInRange.reduce((sum, s) => {
-      const v = s.totalAmount ?? s.total ?? 0;
-      const n = Number(v);
-      return sum + (Number.isFinite(n) ? n : 0);
+      return sum + toNumber(s?.totalAmount ?? s?.total, 0);
     }, 0);
   }, [salesInRange]);
 
   const salesByStatus = useMemo(() => {
     const map = {};
+
     for (const s of salesInRange) {
-      const st = String(s.status || "UNKNOWN").toUpperCase();
+      const st = String(s?.status || "UNKNOWN").toUpperCase();
       map[st] = (map[st] || 0) + 1;
     }
+
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
   }, [salesInRange]);
 
-  const pendingRequestsCount = useMemo(() => {
-    return safeArray(requests).filter(
-      (r) => String(r.status || r.state || "").toUpperCase() === "PENDING",
-    ).length;
-  }, [requests]);
-
   const inventoryTotals = useMemo(() => {
-    const list = safeArray(inventory);
-    const lines = list.map((p) => {
-      const qtyOnHand = Number(p.qtyOnHand ?? p.qty ?? p.quantity ?? 0);
-      const purchasePrice = Number(
-        p.purchasePrice ?? p.costPrice ?? p.cost_price ?? 0,
+    const lines = safeArray(inventory).map((p) => {
+      const qtyOnHand = toNumber(p?.qtyOnHand ?? p?.qty ?? p?.quantity, 0);
+      const purchasePrice = toNumber(
+        p?.purchasePrice ?? p?.costPrice ?? p?.cost_price,
+        0,
       );
+
       return {
-        productId: p.productId ?? p.id ?? null,
-        name: p.productName || p.name || "—",
-        sku: p.sku || "—",
-        qtyOnHand: Number.isFinite(qtyOnHand) ? qtyOnHand : 0,
-        unitPrice: p.sellingPrice ?? p.price ?? p.unitPrice ?? null,
-        purchasePrice: Number.isFinite(purchasePrice) ? purchasePrice : 0,
-        inventoryValue:
-          (Number.isFinite(qtyOnHand) ? qtyOnHand : 0) *
-          (Number.isFinite(purchasePrice) ? purchasePrice : 0),
+        productId: p?.productId ?? p?.id ?? null,
+        name: p?.productName || p?.name || "—",
+        sku: p?.sku || "—",
+        qtyOnHand,
+        unitPrice:
+          p?.sellingPrice ?? p?.price ?? p?.unitPrice ?? p?.unit_price ?? null,
+        purchasePrice,
+        inventoryValue: qtyOnHand * purchasePrice,
       };
     });
 
@@ -312,26 +433,136 @@ export default function ReportsPanel({ title = "Reports" }) {
 
     const lowStock = lines
       .filter((x) => x.qtyOnHand <= threshold)
-      .sort((a, b) => a.qtyOnHand - b.qtyOnHand);
+      .sort((a, b) => a.qtyOnHand - b.qtyOnHand)
+      .slice(0, 20);
 
     return { lines, totalOnHand, totalInventoryValue, lowStock, threshold };
   }, [inventory, lowStockThreshold]);
 
   const latestSales = useMemo(() => {
-    const list = safeArray(salesInRange);
-    const sorted = [...list].sort((a, b) => {
-      const da = parseDateMaybe(a.createdAt || a.created_at)?.getTime() || 0;
-      const db = parseDateMaybe(b.createdAt || b.created_at)?.getTime() || 0;
-      return db - da;
-    });
-    return sorted.slice(0, 10);
+    return safeArray(salesInRange)
+      .slice()
+      .sort((a, b) => {
+        const da =
+          parseDateMaybe(a?.createdAt || a?.created_at)?.getTime() || 0;
+        const db =
+          parseDateMaybe(b?.createdAt || b?.created_at)?.getTime() || 0;
+        return db - da;
+      })
+      .slice(0, 10);
   }, [salesInRange]);
+
+  const latestPayments = useMemo(() => {
+    return safeArray(payments)
+      .slice()
+      .sort((a, b) => {
+        const da =
+          parseDateMaybe(a?.createdAt || a?.created_at)?.getTime() || 0;
+        const db =
+          parseDateMaybe(b?.createdAt || b?.created_at)?.getTime() || 0;
+        return db - da;
+      })
+      .slice(0, 8);
+  }, [payments]);
+
+  const latestExpenses = useMemo(() => {
+    return safeArray(expenses)
+      .slice()
+      .sort((a, b) => {
+        const da =
+          parseDateMaybe(
+            a?.createdAt || a?.created_at || a?.paidAt || a?.paid_at,
+          )?.getTime() || 0;
+        const db =
+          parseDateMaybe(
+            b?.createdAt || b?.created_at || b?.paidAt || b?.paid_at,
+          )?.getTime() || 0;
+        return db - da;
+      })
+      .slice(0, 8);
+  }, [expenses]);
+
+  const normalizedBreakdown = useMemo(() => {
+    return {
+      today: normalizeBreakdownBucketMap(
+        paymentsBreakdown?.today ||
+          paymentsBreakdown?.todayTotals ||
+          paymentsBreakdown?.todayByMethod,
+      ),
+      yesterday: normalizeBreakdownBucketMap(
+        paymentsBreakdown?.yesterday ||
+          paymentsBreakdown?.yesterdayTotals ||
+          paymentsBreakdown?.yesterdayByMethod,
+      ),
+      allTime: normalizeBreakdownBucketMap(
+        paymentsBreakdown?.allTime ||
+          paymentsBreakdown?.all ||
+          paymentsBreakdown?.allTotals ||
+          paymentsBreakdown?.allTimeByMethod ||
+          paymentsBreakdown,
+      ),
+    };
+  }, [paymentsBreakdown]);
+
+  const paymentTodayCount = toNumber(paymentsSummary?.today?.count, 0);
+  const paymentTodayTotal = toNumber(paymentsSummary?.today?.total, 0);
+  const paymentAllCount = toNumber(paymentsSummary?.allTime?.count, 0);
+  const paymentAllTotal = toNumber(paymentsSummary?.allTime?.total, 0);
+
+  const expenseTodayCount = toNumber(
+    expensesSummary?.today?.count ?? expensesSummary?.todayCount,
+    0,
+  );
+  const expenseTodayTotal = toNumber(
+    expensesSummary?.today?.total ?? expensesSummary?.todayTotal,
+    0,
+  );
+  const expenseAllCount = toNumber(
+    expensesSummary?.allTime?.count ??
+      expensesSummary?.count ??
+      expensesSummary?.allCount,
+    0,
+  );
+  const expenseAllTotal = toNumber(
+    expensesSummary?.allTime?.total ??
+      expensesSummary?.total ??
+      expensesSummary?.allTotal,
+    0,
+  );
+
+  const netCashMovement = paymentAllTotal - expenseAllTotal;
 
   async function onRefresh() {
     setRefreshState("loading");
-    await loadAll();
-    setRefreshState("success");
-    setTimeout(() => setRefreshState("idle"), 900);
+    setMsg("");
+    setRangeAnchor(Date.now());
+
+    try {
+      await Promise.all([
+        typeof loadSales === "function" ? loadSales() : Promise.resolve(),
+        typeof loadInventory === "function"
+          ? loadInventory()
+          : Promise.resolve(),
+        typeof loadProducts === "function" ? loadProducts() : Promise.resolve(),
+        typeof loadPayments === "function" ? loadPayments() : Promise.resolve(),
+        typeof loadPaymentsSummary === "function"
+          ? loadPaymentsSummary()
+          : Promise.resolve(),
+        typeof loadPaymentsBreakdown === "function"
+          ? loadPaymentsBreakdown()
+          : Promise.resolve(),
+        typeof loadExpenses === "function" ? loadExpenses() : Promise.resolve(),
+        typeof loadExpensesSummary === "function"
+          ? loadExpensesSummary()
+          : Promise.resolve(),
+      ]);
+
+      setRefreshState("success");
+      setTimeout(() => setRefreshState("idle"), 900);
+    } catch (e) {
+      setMsg(e?.data?.error || e?.message || "Failed to refresh report data.");
+      setRefreshState("idle");
+    }
   }
 
   return (
@@ -343,8 +574,8 @@ export default function ReportsPanel({ title = "Reports" }) {
               {title}
             </div>
             <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-              Sales, stock, and request visibility in one operational reports
-              view.
+              Owner-grade admin reporting across sales, collections, expenses,
+              inventory pressure, and operating health.
             </div>
           </div>
 
@@ -402,11 +633,17 @@ export default function ReportsPanel({ title = "Reports" }) {
 
       {loading ? (
         <>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             <SkeletonBlock h="h-28" />
             <SkeletonBlock h="h-28" />
             <SkeletonBlock h="h-28" />
             <SkeletonBlock h="h-28" />
+            <SkeletonBlock h="h-28" />
+          </div>
+          <div className="grid gap-4 xl:grid-cols-3">
+            <SkeletonBlock h="h-80" />
+            <SkeletonBlock h="h-80" />
+            <SkeletonBlock h="h-80" />
           </div>
           <div className="grid gap-4 xl:grid-cols-2">
             <SkeletonBlock h="h-80" />
@@ -435,40 +672,94 @@ export default function ReportsPanel({ title = "Reports" }) {
                   {fmtMoney(totalRevenue)} RWF
                 </span>
               }
-              sub="Sales total"
+              sub="Sales total in range"
               tone="success"
             />
 
             <KpiCard
-              title="Inventory qty"
+              title="Payments all time"
               value={
                 <span className="text-[19px] font-semibold tracking-tight">
-                  {inventoryTotals.totalOnHand.toLocaleString()}
+                  {fmtMoney(paymentAllTotal)} RWF
                 </span>
               }
-              sub="Total units on hand"
+              sub={`${paymentAllCount.toLocaleString()} payment record(s)`}
+              tone="info"
+            />
+
+            <ExpenseSummaryCard
+              title="Expenses all time"
+              count={expenseAllCount}
+              total={expenseAllTotal}
+              tone="danger"
             />
 
             <KpiCard
-              title="Inventory value"
+              title="Net cash movement"
               value={
                 <span className="text-[19px] font-semibold tracking-tight">
-                  {fmtMoney(inventoryTotals.totalInventoryValue)} RWF
+                  {fmtMoney(netCashMovement)} RWF
                 </span>
               }
-              sub="Qty × purchase price"
-              tone="warn"
+              sub="Payments minus expenses"
+              tone={
+                netCashMovement > 0
+                  ? "success"
+                  : netCashMovement < 0
+                    ? "danger"
+                    : "neutral"
+              }
+            />
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-3">
+            <Card
+              title="Financial control"
+              sub="Fast operational view of money in, money out, and unresolved pressure."
+            >
+              <div className="grid gap-3">
+                <KpiCard
+                  title="Payments today"
+                  value={`${fmtMoney(paymentTodayTotal)} RWF`}
+                  sub={`${paymentTodayCount.toLocaleString()} payment(s)`}
+                  tone="success"
+                />
+
+                <ExpenseSummaryCard
+                  title="Expenses today"
+                  count={expenseTodayCount}
+                  total={expenseTodayTotal}
+                  tone="danger"
+                />
+
+                <KpiCard
+                  title="Pending inventory requests"
+                  value={toNumber(invReqPendingCount, 0).toLocaleString()}
+                  sub="Awaiting decision"
+                  tone={
+                    toNumber(invReqPendingCount, 0) > 0 ? "warn" : "neutral"
+                  }
+                />
+
+                <KpiCard
+                  title="Inventory value"
+                  value={`${fmtMoney(inventoryTotals.totalInventoryValue)} RWF`}
+                  sub={`${inventoryTotals.totalOnHand.toLocaleString()} unit(s) on hand`}
+                  tone="warn"
+                />
+              </div>
+            </Card>
+
+            <PaymentBreakdownCard
+              title="Today payment mix"
+              buckets={normalizedBreakdown.today}
+              tone="info"
             />
 
-            <KpiCard
-              title="Pending requests"
-              value={
-                <span className="text-[19px] font-semibold tracking-tight">
-                  {pendingRequestsCount.toLocaleString()}
-                </span>
-              }
-              sub="Awaiting action"
-              tone={pendingRequestsCount > 0 ? "danger" : "neutral"}
+            <PaymentBreakdownCard
+              title="All-time payment mix"
+              buckets={normalizedBreakdown.allTime}
+              tone="success"
             />
           </div>
 
@@ -491,7 +782,7 @@ export default function ReportsPanel({ title = "Reports" }) {
                     ))}
                   </div>
 
-                  <div className="hidden md:block overflow-x-auto">
+                  <div className="hidden overflow-x-auto md:block">
                     <table className="w-full text-sm">
                       <thead className="bg-slate-50 text-slate-600 dark:bg-slate-900 dark:text-slate-400">
                         <tr className="border-b border-slate-200 dark:border-slate-800">
@@ -535,24 +826,24 @@ export default function ReportsPanel({ title = "Reports" }) {
                   <div className="grid gap-3 md:hidden">
                     {latestSales.map((s) => (
                       <MobileReportRow
-                        key={s.id}
-                        title={s.customerName || "Customer"}
+                        key={s?.id}
+                        title={s?.customerName || "Customer"}
                         lines={[
-                          { label: "Status", value: s.status || "—" },
+                          { label: "Status", value: s?.status || "—" },
                           {
                             label: "Total",
-                            value: `${fmtMoney(s.totalAmount ?? s.total)} RWF`,
+                            value: `${fmtMoney(s?.totalAmount ?? s?.total)} RWF`,
                           },
                           {
                             label: "Time",
-                            value: fmtDate(s.createdAt || s.created_at),
+                            value: fmtDate(s?.createdAt || s?.created_at),
                           },
                         ]}
                       />
                     ))}
                   </div>
 
-                  <div className="hidden md:block overflow-x-auto">
+                  <div className="hidden overflow-x-auto md:block">
                     <table className="w-full text-sm">
                       <thead className="bg-slate-50 text-slate-600 dark:bg-slate-900 dark:text-slate-400">
                         <tr className="border-b border-slate-200 dark:border-slate-800">
@@ -573,20 +864,212 @@ export default function ReportsPanel({ title = "Reports" }) {
                       <tbody>
                         {latestSales.map((s) => (
                           <tr
-                            key={s.id}
+                            key={s?.id}
                             className="border-b border-slate-100 dark:border-slate-900"
                           >
                             <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">
-                              {s.status || "—"}
+                              {s?.status || "—"}
                             </td>
                             <td className="p-3 text-slate-700 dark:text-slate-300">
-                              {s.customerName || "—"}
+                              {s?.customerName || "—"}
                             </td>
                             <td className="p-3 text-right text-slate-700 dark:text-slate-300">
-                              {fmtMoney(s.totalAmount ?? s.total)}
+                              {fmtMoney(s?.totalAmount ?? s?.total)}
                             </td>
                             <td className="p-3 text-slate-700 dark:text-slate-300">
-                              {fmtDate(s.createdAt || s.created_at)}
+                              {fmtDate(s?.createdAt || s?.created_at)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </Card>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Card
+              title="Latest payment records"
+              sub="Newest recorded collections"
+            >
+              {latestPayments.length === 0 ? (
+                <EmptyState
+                  title="No payments yet"
+                  hint="Payment records will appear here once recorded."
+                />
+              ) : (
+                <>
+                  <div className="grid gap-3 md:hidden">
+                    {latestPayments.map((p) => (
+                      <MobileReportRow
+                        key={p?.id}
+                        title={`Payment #${p?.id ?? "—"}`}
+                        lines={[
+                          {
+                            label: "Sale",
+                            value: `#${p?.saleId ?? p?.sale_id ?? "—"}`,
+                          },
+                          {
+                            label: "Method",
+                            value: String(p?.method || "—").toUpperCase(),
+                          },
+                          {
+                            label: "Amount",
+                            value: `${fmtMoney(p?.amount)} RWF`,
+                          },
+                          {
+                            label: "Time",
+                            value: fmtDate(p?.createdAt || p?.created_at),
+                          },
+                        ]}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="hidden overflow-x-auto md:block">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-600 dark:bg-slate-900 dark:text-slate-400">
+                        <tr className="border-b border-slate-200 dark:border-slate-800">
+                          <th className="p-3 text-left text-xs font-semibold">
+                            Payment
+                          </th>
+                          <th className="p-3 text-left text-xs font-semibold">
+                            Sale
+                          </th>
+                          <th className="p-3 text-left text-xs font-semibold">
+                            Method
+                          </th>
+                          <th className="p-3 text-right text-xs font-semibold">
+                            Amount
+                          </th>
+                          <th className="p-3 text-left text-xs font-semibold">
+                            Time
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {latestPayments.map((p) => (
+                          <tr
+                            key={p?.id}
+                            className="border-b border-slate-100 dark:border-slate-900"
+                          >
+                            <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">
+                              #{p?.id ?? "—"}
+                            </td>
+                            <td className="p-3 text-slate-700 dark:text-slate-300">
+                              #{p?.saleId ?? p?.sale_id ?? "—"}
+                            </td>
+                            <td className="p-3 text-slate-700 dark:text-slate-300">
+                              {String(p?.method || "—").toUpperCase()}
+                            </td>
+                            <td className="p-3 text-right font-semibold text-slate-900 dark:text-slate-100">
+                              {fmtMoney(p?.amount)}
+                            </td>
+                            <td className="p-3 text-slate-700 dark:text-slate-300">
+                              {fmtDate(p?.createdAt || p?.created_at)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </Card>
+
+            <Card
+              title="Latest expenses"
+              sub="Newest recorded money-out activity"
+            >
+              {latestExpenses.length === 0 ? (
+                <EmptyState
+                  title="No expenses yet"
+                  hint="Expense records will appear here once recorded."
+                />
+              ) : (
+                <>
+                  <div className="grid gap-3 md:hidden">
+                    {latestExpenses.map((e) => (
+                      <MobileReportRow
+                        key={e?.id}
+                        title={
+                          e?.categoryName ||
+                          e?.category ||
+                          e?.type ||
+                          `Expense #${e?.id ?? "—"}`
+                        }
+                        lines={[
+                          {
+                            label: "Amount",
+                            value: `${fmtMoney(e?.amount)} RWF`,
+                          },
+                          {
+                            label: "Method",
+                            value: String(
+                              e?.method || e?.paymentMethod || "—",
+                            ).toUpperCase(),
+                          },
+                          {
+                            label: "Time",
+                            value: fmtDate(
+                              e?.createdAt ||
+                                e?.created_at ||
+                                e?.paidAt ||
+                                e?.paid_at,
+                            ),
+                          },
+                        ]}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="hidden overflow-x-auto md:block">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-600 dark:bg-slate-900 dark:text-slate-400">
+                        <tr className="border-b border-slate-200 dark:border-slate-800">
+                          <th className="p-3 text-left text-xs font-semibold">
+                            Expense
+                          </th>
+                          <th className="p-3 text-left text-xs font-semibold">
+                            Method
+                          </th>
+                          <th className="p-3 text-right text-xs font-semibold">
+                            Amount
+                          </th>
+                          <th className="p-3 text-left text-xs font-semibold">
+                            Time
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {latestExpenses.map((e) => (
+                          <tr
+                            key={e?.id}
+                            className="border-b border-slate-100 dark:border-slate-900"
+                          >
+                            <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">
+                              {e?.categoryName ||
+                                e?.category ||
+                                e?.type ||
+                                `Expense #${e?.id ?? "—"}`}
+                            </td>
+                            <td className="p-3 text-slate-700 dark:text-slate-300">
+                              {String(
+                                e?.method || e?.paymentMethod || "—",
+                              ).toUpperCase()}
+                            </td>
+                            <td className="p-3 text-right font-semibold text-slate-900 dark:text-slate-100">
+                              {fmtMoney(e?.amount)}
+                            </td>
+                            <td className="p-3 text-slate-700 dark:text-slate-300">
+                              {fmtDate(
+                                e?.createdAt ||
+                                  e?.created_at ||
+                                  e?.paidAt ||
+                                  e?.paid_at,
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -633,7 +1116,7 @@ export default function ReportsPanel({ title = "Reports" }) {
                   ))}
                 </div>
 
-                <div className="hidden md:block overflow-x-auto">
+                <div className="hidden overflow-x-auto md:block">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 text-slate-600 dark:bg-slate-900 dark:text-slate-400">
                       <tr className="border-b border-slate-200 dark:border-slate-800">

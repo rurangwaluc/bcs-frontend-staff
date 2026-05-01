@@ -69,6 +69,7 @@ export default function AdminPage() {
                 <option value="store_keeper">Store keeper</option>
                 <option value="manager">Manager</option>
               </AdminSelect>
+
               <button
                 type="button"
                 onClick={() => router.push(admin.actAsHref)}
@@ -175,7 +176,7 @@ export default function AdminPage() {
         {admin.section === "cash" ? (
           <AdminSectionCard
             title="Cash reports"
-            hint="Cash summary and oversight for this location."
+            hint="Cash summary, expenses, and location-level money oversight."
           >
             <CashReportsPanel
               key={`cash-${admin.refreshNonce}`}
@@ -214,9 +215,12 @@ export default function AdminPage() {
         {admin.section === "reports" ? (
           <AdminSectionCard
             title="Reports"
-            hint="Quick overview and operational summaries."
+            hint="Operational reports, payment trends, supplier exposure, and financial oversight."
           >
-            <ReportsPanel key={`reports-${admin.refreshNonce}`} />
+            <ReportsPanel
+              key={`reports-${admin.refreshNonce}`}
+              {...admin.reportsProps}
+            />
           </AdminSectionCard>
         ) : null}
 

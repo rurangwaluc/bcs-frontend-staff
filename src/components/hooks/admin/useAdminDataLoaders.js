@@ -35,7 +35,12 @@ export const ENDPOINTS = {
 
   PAYMENTS_LIST: "/payments",
   PAYMENTS_SUMMARY: "/payments/summary",
+  PAYMENTS_BREAKDOWN: "/payments/breakdown",
   PAYMENT_RECORD: "/payments",
+
+  EXPENSES_LIST: "/cash/expenses",
+  EXPENSES_SUMMARY: "/cash/expenses/summary",
+  EXPENSE_CREATE: "/cash/expenses",
 
   CASH_SESSIONS_MINE: "/cash-sessions/mine",
   CASH_SESSION_OPEN: "/cash-sessions/open",
@@ -108,8 +113,19 @@ export function useAdminDataLoaders({ toast }) {
 
   const [payments, setPayments] = useState([]);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
+
   const [paymentsSummary, setPaymentsSummary] = useState(null);
   const [paySummaryLoading, setPaySummaryLoading] = useState(false);
+
+  const [paymentsBreakdown, setPaymentsBreakdown] = useState(null);
+  const [payBreakdownLoading, setPayBreakdownLoading] = useState(false);
+
+  const [expenses, setExpenses] = useState([]);
+  const [expensesLoading, setExpensesLoading] = useState(false);
+
+  const [expensesSummary, setExpensesSummary] = useState(null);
+  const [expensesSummaryLoading, setExpensesSummaryLoading] = useState(false);
+
   const [canReadPayments, setCanReadPayments] = useState(true);
 
   const [creditsLoading, setCreditsLoading] = useState(false);
@@ -168,6 +184,7 @@ export function useAdminDataLoaders({ toast }) {
 
   const loadAwaitingPaymentSales = useCallback(async () => {
     setAwaitingPaymentSalesLoading(true);
+
     try {
       let list = [];
 
@@ -180,6 +197,7 @@ export function useAdminDataLoaders({ toast }) {
           `${ENDPOINTS.SALES_LIST}?${qs.toString()}`,
           { method: "GET" },
         );
+
         list = readList(filteredData, ["sales"]);
       } catch {
         list = [];
@@ -188,9 +206,7 @@ export function useAdminDataLoaders({ toast }) {
       if (!Array.isArray(list) || list.length === 0) {
         const fallbackData = await apiFetch(
           `${ENDPOINTS.SALES_LIST}?limit=200`,
-          {
-            method: "GET",
-          },
+          { method: "GET" },
         );
         list = readList(fallbackData, ["sales"]);
       }
@@ -281,10 +297,12 @@ export function useAdminDataLoaders({ toast }) {
     } catch (e) {
       setPayments([]);
       const text = e?.data?.error || e?.message || "";
+
       if (String(text).toLowerCase().includes("forbidden")) {
         setCanReadPayments(false);
         return;
       }
+
       if (!String(text).toLowerCase().includes("not found")) {
         toast(
           "danger",
@@ -307,10 +325,12 @@ export function useAdminDataLoaders({ toast }) {
     } catch (e) {
       setPaymentsSummary(null);
       const text = e?.data?.error || e?.message || "";
+
       if (String(text).toLowerCase().includes("forbidden")) {
         setCanReadPayments(false);
         return;
       }
+
       if (!String(text).toLowerCase().includes("not found")) {
         toast(
           "danger",
@@ -319,6 +339,76 @@ export function useAdminDataLoaders({ toast }) {
       }
     } finally {
       setPaySummaryLoading(false);
+    }
+  }, [toast]);
+
+  const loadPaymentsBreakdown = useCallback(async () => {
+    setPayBreakdownLoading(true);
+    try {
+      const data = await apiFetch(ENDPOINTS.PAYMENTS_BREAKDOWN, {
+        method: "GET",
+      });
+      setPaymentsBreakdown(data?.breakdown || data || null);
+      setCanReadPayments(true);
+    } catch (e) {
+      setPaymentsBreakdown(null);
+      const text = e?.data?.error || e?.message || "";
+
+      if (String(text).toLowerCase().includes("forbidden")) {
+        setCanReadPayments(false);
+        return;
+      }
+
+      if (!String(text).toLowerCase().includes("not found")) {
+        toast(
+          "danger",
+          e?.data?.error || e?.message || "Failed to load payment breakdown",
+        );
+      }
+    } finally {
+      setPayBreakdownLoading(false);
+    }
+  }, [toast]);
+
+  const loadExpenses = useCallback(async () => {
+    setExpensesLoading(true);
+    try {
+      const data = await apiFetch(ENDPOINTS.EXPENSES_LIST, { method: "GET" });
+      setExpenses(readList(data, ["expenses"]));
+    } catch (e) {
+      setExpenses([]);
+      const text = e?.data?.error || e?.message || "";
+
+      if (!String(text).toLowerCase().includes("not found")) {
+        toast(
+          "danger",
+          e?.data?.error || e?.message || "Failed to load expenses",
+        );
+      }
+    } finally {
+      setExpensesLoading(false);
+    }
+  }, [toast]);
+
+  const loadExpensesSummary = useCallback(async () => {
+    setExpensesSummaryLoading(true);
+    try {
+      const data = await apiFetch(ENDPOINTS.EXPENSES_SUMMARY, {
+        method: "GET",
+      });
+      setExpensesSummary(data?.summary || data || null);
+    } catch (e) {
+      setExpensesSummary(null);
+      const text = e?.data?.error || e?.message || "";
+
+      if (!String(text).toLowerCase().includes("not found")) {
+        toast(
+          "danger",
+          e?.data?.error || e?.message || "Failed to load expense summary",
+        );
+      }
+    } finally {
+      setExpensesSummaryLoading(false);
     }
   }, [toast]);
 
@@ -365,6 +455,7 @@ export function useAdminDataLoaders({ toast }) {
         "adjustRequests",
         "inventoryAdjustRequests",
       ]);
+
       setInvReqPendingCount(Array.isArray(rows) ? rows.length : 0);
     } catch {
       // silent
@@ -394,6 +485,7 @@ export function useAdminDataLoaders({ toast }) {
       toast("success", `Sale #${cancelSaleId} cancelled`);
       setCancelState("success");
       setTimeout(() => setCancelState("idle"), 900);
+
       setCancelOpen(false);
       setCancelSaleId(null);
       setCancelReason("");
@@ -442,6 +534,7 @@ export function useAdminDataLoaders({ toast }) {
 
       setArchState("success");
       setTimeout(() => setArchState("idle"), 900);
+
       setArchOpen(false);
       setArchProduct(null);
       setArchReason("");
@@ -481,6 +574,7 @@ export function useAdminDataLoaders({ toast }) {
       toast("success", `Deleted product #${pid}`);
       setDelState("success");
       setTimeout(() => setDelState("idle"), 900);
+
       setDelOpen(false);
       setDelProduct(null);
 
@@ -548,7 +642,8 @@ export function useAdminDataLoaders({ toast }) {
   const suppliersPanelProps = useMemo(
     () => ({
       title: "Suppliers",
-      subtitle: "Admin: create suppliers, bills, and bill payments.",
+      subtitle:
+        "Admin: create suppliers, create bills, record supplier payments, and track supplier exposure.",
       capabilities: {
         canCreateSupplier: true,
         canCreateBill: true,
@@ -596,9 +691,19 @@ export function useAdminDataLoaders({ toast }) {
     paymentsLoading,
     paymentsSummary,
     paySummaryLoading,
+    paymentsBreakdown,
+    payBreakdownLoading,
     canReadPayments,
     loadPayments,
     loadPaymentsSummary,
+    loadPaymentsBreakdown,
+
+    expenses,
+    expensesLoading,
+    expensesSummary,
+    expensesSummaryLoading,
+    loadExpenses,
+    loadExpensesSummary,
 
     creditsLoading,
     loadCreditsOpen,
