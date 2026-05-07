@@ -165,6 +165,13 @@ function supplierActiveTone(isActive) {
   return isActive === false ? "danger" : "success";
 }
 
+function paymentMethodTone(method) {
+  const m = String(method || "").toUpperCase();
+  if (m === "CASH") return "success";
+  if (m === "MOMO" || m === "BANK" || m === "CARD") return "info";
+  return "neutral";
+}
+
 function Input({ className = "", ...props }) {
   return (
     <input
@@ -305,6 +312,7 @@ function ModalShell({ title, subtitle, onClose, children }) {
 
 const SUPPLIER_PAGE_SIZE = 24;
 const BILL_PAGE_SIZE = 40;
+const PAYMENT_METHOD_OPTIONS = ["CASH", "MOMO", "BANK", "CARD", "OTHER"];
 
 function parseBillNoNumber(value) {
   const raw = toStr(value);
@@ -355,8 +363,13 @@ export default function SuppliersPanel({
     SUPPLIER_SUMMARY: "/supplier/summary",
     SUPPLIER_BILLS_LIST: "/supplier-bills",
     SUPPLIER_BILL_CREATE: "/supplier-bills",
+    SUPPLIER_BILL_PAYMENT_CREATE: null,
     ...endpoints,
   };
+
+  const hasBillPaymentEndpoint =
+    typeof ENDPOINTS.SUPPLIER_BILL_PAYMENT_CREATE === "string" &&
+    toStr(ENDPOINTS.SUPPLIER_BILL_PAYMENT_CREATE).length > 0;
 
   const [msg, setMsg] = useState("");
   const [msgKind, setMsgKind] = useState("info");
@@ -400,6 +413,17 @@ export default function SuppliersPanel({
     totalAmount: "",
     dueDate: "",
     note: "",
+  });
+
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [paymentState, setPaymentState] = useState("idle");
+  const [paymentTargetBill, setPaymentTargetBill] = useState(null);
+  const [paymentForm, setPaymentForm] = useState({
+    amount: "",
+    method: "CASH",
+    reference: "",
+    note: "",
+    paidAt: "",
   });
 
   const nextBillNo = useMemo(() => nextBillNoFromBills(bills), [bills]);
@@ -612,6 +636,20 @@ export default function SuppliersPanel({
       ),
     ).length;
 
+    const paidBills = bills.filter(
+      (b) => String(b?.status || "").toUpperCase() === "PAID",
+    ).length;
+
+    const totalBillValue = bills.reduce(
+      (sum, b) => sum + toInt(b?.totalAmount ?? 0),
+      0,
+    );
+
+    const totalPaid = bills.reduce(
+      (sum, b) => sum + toInt(b?.paidAmount ?? 0),
+      0,
+    );
+
     const outstandingBalance = bills.reduce(
       (sum, b) => sum + toInt(b?.balance ?? 0),
       0,
@@ -624,6 +662,9 @@ export default function SuppliersPanel({
       abroadSuppliers,
       billsCount: bills.length,
       openBills,
+      paidBills,
+      totalBillValue,
+      totalPaid,
       outstandingBalance,
     };
   }, [suppliers, bills]);
@@ -727,10 +768,7 @@ export default function SuppliersPanel({
       setBillCreateOpen(false);
       setBillForm({
         supplierId: "",
-        billNo: nextBillNoFromBills([
-          ...bills,
-          { billNo: resolvedBillNo },
-        ]),
+        billNo: nextBillNoFromBills([...bills, { billNo: resolvedBillNo }]),
         currency: defaultCurrency,
         totalAmount: "",
         dueDate: "",
@@ -742,6 +780,116 @@ export default function SuppliersPanel({
     } catch (err) {
       setBillCreateState("idle");
       toast("danger", err?.data?.error || err?.message || "Create bill failed");
+    }
+  }
+
+  function openBillPaymentModal(bill) {
+    if (!bill) return;
+
+    if (!caps.canRecordBillPayment) {
+      toast("warn", "This role cannot record supplier bill payments.");
+      return;
+    }
+
+    if (!hasBillPaymentEndpoint) {
+      toast(
+        "warn",
+        "Supplier bill payment endpoint is not wired yet. Add SUPPLIER_BILL_PAYMENT_CREATE to enable payment recording here.",
+      );
+      return;
+    }
+
+    const balance = toInt(bill?.balance ?? 0);
+
+    setPaymentTargetBill(bill);
+    setPaymentForm({
+      amount: balance > 0 ? String(balance) : "",
+      method: "BANK",
+      reference: "",
+      note: "",
+      paidAt: "",
+    });
+    setPaymentState("idle");
+    setPaymentOpen(true);
+  }
+
+  async function submitBillPayment(e) {
+    e.preventDefault();
+
+    if (!caps.canRecordBillPayment) return;
+    if (!hasBillPaymentEndpoint) {
+      toast(
+        "warn",
+        "Supplier bill payment endpoint is not wired yet. Add SUPPLIER_BILL_PAYMENT_CREATE to enable this action.",
+      );
+      return;
+    }
+    if (paymentState === "loading") return;
+
+    const bill = paymentTargetBill;
+    const billId = Number(bill?.id);
+    if (!Number.isInteger(billId) || billId <= 0) {
+      toast("warn", "Invalid supplier bill.");
+      return;
+    }
+
+    const amount = Number(paymentForm.amount);
+    const balance = toInt(bill?.balance ?? 0);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast("warn", "Payment amount must be greater than zero.");
+      return;
+    }
+
+    if (balance > 0 && amount > balance) {
+      toast("warn", "Payment amount cannot be greater than current balance.");
+      return;
+    }
+
+    const method = String(paymentForm.method || "").toUpperCase();
+    if (!PAYMENT_METHOD_OPTIONS.includes(method)) {
+      toast("warn", "Choose a valid payment method.");
+      return;
+    }
+
+    setPaymentState("loading");
+    setMsg("");
+
+    try {
+      await apiFetch(ENDPOINTS.SUPPLIER_BILL_PAYMENT_CREATE, {
+        method: "POST",
+        body: {
+          supplierBillId: billId,
+          amount: Math.round(amount),
+          method,
+          reference: toStr(paymentForm.reference) || undefined,
+          note: toStr(paymentForm.note) || undefined,
+          paidAt: toStr(paymentForm.paidAt) || undefined,
+        },
+      });
+
+      toast("success", `Payment recorded for bill #${billId}.`);
+      setPaymentState("success");
+      setTimeout(() => setPaymentState("idle"), 900);
+
+      setPaymentOpen(false);
+      setPaymentTargetBill(null);
+
+      await Promise.all([
+        loadBills(),
+        loadSupplierSummary(String(bill?.supplierId ?? "")),
+        loadSuppliers(),
+      ]);
+
+      if (bill?.supplierId) {
+        setSelectedSupplierId(String(bill.supplierId));
+      }
+    } catch (err) {
+      setPaymentState("idle");
+      toast(
+        "danger",
+        err?.data?.error || err?.message || "Record supplier payment failed",
+      );
     }
   }
 
@@ -801,11 +949,22 @@ export default function SuppliersPanel({
 
   return (
     <div className="grid gap-4">
+      {caps.canRecordBillPayment && !hasBillPaymentEndpoint ? (
+        <Banner kind="warn">
+          This role is allowed to record supplier payments, but this panel still
+          needs <b>SUPPLIER_BILL_PAYMENT_CREATE</b> in its endpoints to activate
+          the payment action.
+        </Banner>
+      ) : null}
+
       {msg ? <Banner kind={msgKind}>{msg}</Banner> : null}
 
       <SectionCard
         title={title}
-        hint={subtitle || "Suppliers and supplier bills."}
+        hint={
+          subtitle ||
+          "Supplier control, bills, and money-out authority for operational finance."
+        }
         right={headerRight}
       >
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.05fr_0.95fr]">
@@ -814,7 +973,7 @@ export default function SuppliersPanel({
               Supplier overview
             </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <MetricCard
                 label="Suppliers"
                 value={String(overview.supplierCount)}
@@ -827,6 +986,18 @@ export default function SuppliersPanel({
                 tone={overview.activeSuppliers > 0 ? "success" : "default"}
               />
               <MetricCard
+                label="Open bills"
+                value={String(overview.openBills)}
+                sub="Need payment attention"
+                tone={overview.openBills > 0 ? "warn" : "default"}
+              />
+              <MetricCard
+                label="Paid bills"
+                value={String(overview.paidBills)}
+                sub="Settled supplier bills"
+                tone={overview.paidBills > 0 ? "success" : "default"}
+              />
+              <MetricCard
                 label="Local"
                 value={String(overview.localSuppliers)}
                 sub="Local suppliers"
@@ -835,18 +1006,18 @@ export default function SuppliersPanel({
                 label="Abroad"
                 value={String(overview.abroadSuppliers)}
                 sub="Foreign suppliers"
-                tone={overview.abroadSuppliers > 0 ? "info" : "default"}
+                tone={overview.abroadSuppliers > 0 ? "warn" : "default"}
               />
               <MetricCard
-                label="Bills"
-                value={String(overview.billsCount)}
-                sub="Loaded bills"
+                label={`Bill value (${defaultCurrency})`}
+                value={toMoney(overview.totalBillValue)}
+                sub="Total bill exposure"
               />
               <MetricCard
                 label={`Outstanding (${defaultCurrency})`}
                 value={toMoney(overview.outstandingBalance)}
                 sub="Current unpaid balance"
-                tone={overview.outstandingBalance > 0 ? "warn" : "default"}
+                tone={overview.outstandingBalance > 0 ? "warn" : "success"}
               />
             </div>
           </Surface>
@@ -874,7 +1045,7 @@ export default function SuppliersPanel({
                   ))}
               </Select>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
                 <MetricCard
                   label="Bills"
                   value={
@@ -892,6 +1063,20 @@ export default function SuppliersPanel({
                       : toMoney(supplierSummary?.totalAmount ?? 0)
                   }
                   sub="Loaded summary"
+                />
+                <MetricCard
+                  label={`Paid (${defaultCurrency})`}
+                  value={
+                    supSummaryLoading
+                      ? "…"
+                      : toMoney(supplierSummary?.paidAmount ?? 0)
+                  }
+                  sub="Amount already settled"
+                  tone={
+                    toInt(supplierSummary?.paidAmount ?? 0) > 0
+                      ? "success"
+                      : "default"
+                  }
                 />
                 <MetricCard
                   label={`Balance (${defaultCurrency})`}
@@ -912,7 +1097,7 @@ export default function SuppliersPanel({
                         0,
                     ) > 0
                       ? "warn"
-                      : "default"
+                      : "success"
                   }
                 />
               </div>
@@ -1216,6 +1401,13 @@ export default function SuppliersPanel({
                   <div className="grid gap-3">
                     {visibleBills.map((b) => {
                       const st = String(b?.status || "—").toUpperCase();
+                      const canPayThisBill =
+                        caps.canRecordBillPayment &&
+                        hasBillPaymentEndpoint &&
+                        toInt(b?.balance ?? 0) > 0 &&
+                        st !== "PAID" &&
+                        st !== "VOID" &&
+                        st !== "CANCELLED";
 
                       return (
                         <Surface key={b?.id}>
@@ -1226,6 +1418,11 @@ export default function SuppliersPanel({
                                   Bill #{b?.id ?? "—"}
                                 </div>
                                 <Pill tone={statusTone(st)}>{st}</Pill>
+                                {toInt(b?.balance ?? 0) <= 0 ? (
+                                  <Pill tone="success">Settled</Pill>
+                                ) : (
+                                  <Pill tone="warn">Needs payment</Pill>
+                                )}
                               </div>
 
                               <div className="mt-2 text-xs text-[var(--muted)]">
@@ -1302,11 +1499,34 @@ export default function SuppliersPanel({
                             </div>
                           ) : null}
 
-                          {!caps.canRecordBillPayment ? (
-                            <div className="mt-3 text-[11px] text-[var(--muted)]">
-                              Payments are handled by Owner or Admin.
+                          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-[11px] text-[var(--muted)]">
+                              {caps.canRecordBillPayment
+                                ? hasBillPaymentEndpoint
+                                  ? "Admin can record supplier payments directly from this bill."
+                                  : "Payment authority is enabled for this role, but the payment endpoint is not wired yet."
+                                : "Payments are restricted for this role."}
                             </div>
-                          ) : null}
+
+                            <div className="flex flex-wrap gap-2">
+                              {caps.canRecordBillPayment ? (
+                                <AsyncButton
+                                  variant="primary"
+                                  size="sm"
+                                  state="idle"
+                                  text={
+                                    toInt(b?.paidAmount ?? 0) > 0
+                                      ? "Record more payment"
+                                      : "Record payment"
+                                  }
+                                  loadingText="Opening…"
+                                  successText="Done"
+                                  disabled={!canPayThisBill}
+                                  onClick={() => openBillPaymentModal(b)}
+                                />
+                              ) : null}
+                            </div>
+                          </div>
                         </Surface>
                       );
                     })}
@@ -1477,7 +1697,7 @@ export default function SuppliersPanel({
       {caps.canCreateBill && billCreateOpen ? (
         <ModalShell
           title="New supplier bill"
-          subtitle="Bills are payable or credit; payments may be restricted by role."
+          subtitle="Bills are payable liabilities. Admin should be able to follow them through to payment."
           onClose={() => {
             setBillCreateOpen(false);
             setBillCreateState("idle");
@@ -1611,6 +1831,149 @@ export default function SuppliersPanel({
                 text="Create bill"
                 loadingText="Creating…"
                 successText="Created"
+              />
+            </div>
+          </form>
+        </ModalShell>
+      ) : null}
+
+      {caps.canRecordBillPayment && paymentOpen ? (
+        <ModalShell
+          title="Record supplier payment"
+          subtitle="Finish the liability, keep the money trail clean, and tie the payment to the bill."
+          onClose={() => {
+            setPaymentOpen(false);
+            setPaymentState("idle");
+            setPaymentTargetBill(null);
+          }}
+        >
+          <form className="grid gap-3" onSubmit={submitBillPayment}>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <InfoTile
+                label="Bill"
+                value={`#${paymentTargetBill?.id ?? "—"} • ${toStr(paymentTargetBill?.billNo) || "—"}`}
+              />
+              <InfoTile
+                label="Supplier"
+                value={toStr(paymentTargetBill?.supplierName) || "—"}
+              />
+              <InfoTile
+                label="Balance"
+                value={`${toMoney(paymentTargetBill?.balance ?? 0)} ${toStr(paymentTargetBill?.currency) || defaultCurrency}`}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                  Amount *
+                </div>
+                <Input
+                  value={paymentForm.amount}
+                  onChange={(e) =>
+                    setPaymentForm((p) => ({ ...p, amount: e.target.value }))
+                  }
+                  placeholder="Example: 150000"
+                />
+              </div>
+
+              <div>
+                <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                  Method *
+                </div>
+                <Select
+                  value={paymentForm.method}
+                  onChange={(e) =>
+                    setPaymentForm((p) => ({ ...p, method: e.target.value }))
+                  }
+                >
+                  {PAYMENT_METHOD_OPTIONS.map((method) => (
+                    <option key={method} value={method}>
+                      {method}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                  Reference
+                </div>
+                <Input
+                  value={paymentForm.reference}
+                  onChange={(e) =>
+                    setPaymentForm((p) => ({
+                      ...p,
+                      reference: e.target.value,
+                    }))
+                  }
+                  placeholder="Bank ref / momo ref / receipt no"
+                />
+              </div>
+
+              <div>
+                <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                  Paid date
+                </div>
+                <Input
+                  type="date"
+                  value={paymentForm.paidAt}
+                  onChange={(e) =>
+                    setPaymentForm((p) => ({ ...p, paidAt: e.target.value }))
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="rounded-[18px] border border-[var(--border)] bg-[var(--card-2)] p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Pill tone={paymentMethodTone(paymentForm.method)}>
+                  {toStr(paymentForm.method) || "METHOD"}
+                </Pill>
+                <span className="text-xs text-[var(--muted)]">
+                  This payment should reduce the supplier bill balance and keep
+                  a clear money-out trail.
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
+                Note
+              </div>
+              <TextArea
+                rows={4}
+                value={paymentForm.note}
+                onChange={(e) =>
+                  setPaymentForm((p) => ({ ...p, note: e.target.value }))
+                }
+                placeholder="Why this payment was made or any settlement note"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPaymentOpen(false);
+                  setPaymentState("idle");
+                  setPaymentTargetBill(null);
+                }}
+                className="rounded-[18px] border border-[var(--border)] px-4 py-2.5 text-sm font-bold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+                disabled={paymentState === "loading"}
+              >
+                Close
+              </button>
+
+              <AsyncButton
+                type="submit"
+                variant="primary"
+                state={paymentState}
+                text="Record payment"
+                loadingText="Saving…"
+                successText="Saved"
               />
             </div>
           </form>

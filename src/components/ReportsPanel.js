@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import AsyncButton from "./AsyncButton";
 
@@ -183,6 +183,41 @@ function MobileReportRow({ title, lines = [] }) {
 }
 
 function normalizeBreakdownBucketMap(bucketLike) {
+  if (!bucketLike) {
+    return {
+      CASH: { count: 0, total: 0 },
+      MOMO: { count: 0, total: 0 },
+      BANK: { count: 0, total: 0 },
+      CARD: { count: 0, total: 0 },
+      OTHER: { count: 0, total: 0 },
+    };
+  }
+
+  if (!Array.isArray(bucketLike)) {
+    return {
+      CASH: {
+        count: toNumber(bucketLike?.CASH?.count, 0),
+        total: toNumber(bucketLike?.CASH?.total, 0),
+      },
+      MOMO: {
+        count: toNumber(bucketLike?.MOMO?.count, 0),
+        total: toNumber(bucketLike?.MOMO?.total, 0),
+      },
+      BANK: {
+        count: toNumber(bucketLike?.BANK?.count, 0),
+        total: toNumber(bucketLike?.BANK?.total, 0),
+      },
+      CARD: {
+        count: toNumber(bucketLike?.CARD?.count, 0),
+        total: toNumber(bucketLike?.CARD?.total, 0),
+      },
+      OTHER: {
+        count: toNumber(bucketLike?.OTHER?.count, 0),
+        total: toNumber(bucketLike?.OTHER?.total, 0),
+      },
+    };
+  }
+
   const base = {
     CASH: { count: 0, total: 0 },
     MOMO: { count: 0, total: 0 },
@@ -191,44 +226,12 @@ function normalizeBreakdownBucketMap(bucketLike) {
     OTHER: { count: 0, total: 0 },
   };
 
-  if (!bucketLike) return base;
-
-  if (!Array.isArray(bucketLike) && typeof bucketLike === "object") {
-    return {
-      CASH: {
-        count: toNumber(bucketLike?.CASH?.count, 0),
-        total: toNumber(bucketLike?.CASH?.total ?? bucketLike?.CASH?.amount, 0),
-      },
-      MOMO: {
-        count: toNumber(bucketLike?.MOMO?.count, 0),
-        total: toNumber(bucketLike?.MOMO?.total ?? bucketLike?.MOMO?.amount, 0),
-      },
-      BANK: {
-        count: toNumber(bucketLike?.BANK?.count, 0),
-        total: toNumber(bucketLike?.BANK?.total ?? bucketLike?.BANK?.amount, 0),
-      },
-      CARD: {
-        count: toNumber(bucketLike?.CARD?.count, 0),
-        total: toNumber(bucketLike?.CARD?.total ?? bucketLike?.CARD?.amount, 0),
-      },
-      OTHER: {
-        count: toNumber(bucketLike?.OTHER?.count, 0),
-        total: toNumber(
-          bucketLike?.OTHER?.total ?? bucketLike?.OTHER?.amount,
-          0,
-        ),
-      },
-    };
-  }
-
   for (const row of bucketLike) {
     const method = String(row?.method || row?.paymentMethod || "OTHER")
       .trim()
       .toUpperCase();
 
-    const key = Object.prototype.hasOwnProperty.call(base, method)
-      ? method
-      : "OTHER";
+    const key = base[method] ? method : "OTHER";
 
     base[key] = {
       count: base[key].count + toNumber(row?.count, 0),
@@ -242,10 +245,10 @@ function normalizeBreakdownBucketMap(bucketLike) {
 }
 
 function PaymentBreakdownCard({ title, buckets, tone = "neutral" }) {
-  const total = Object.values(buckets || {}).reduce(
-    (sum, row) => sum + toNumber(row?.total, 0),
-    0,
-  );
+  const order = ["CASH", "MOMO", "BANK", "CARD", "OTHER"];
+  const total = order.reduce((sum, key) => {
+    return sum + toNumber(buckets?.[key]?.total, 0);
+  }, 0);
 
   const barTone =
     tone === "success"
@@ -274,7 +277,7 @@ function PaymentBreakdownCard({ title, buckets, tone = "neutral" }) {
       </div>
 
       <div className="mt-4 grid gap-2">
-        {["CASH", "MOMO", "BANK", "CARD", "OTHER"].map((key) => (
+        {order.map((key) => (
           <div
             key={key}
             className="flex items-center justify-between rounded-[14px] bg-slate-50 px-3 py-2 text-sm dark:bg-slate-900"
@@ -282,7 +285,6 @@ function PaymentBreakdownCard({ title, buckets, tone = "neutral" }) {
             <div className="font-semibold text-slate-900 dark:text-slate-100">
               {key}
             </div>
-
             <div className="text-right">
               <div className="font-black text-slate-950 dark:text-slate-50">
                 {fmtMoney(buckets?.[key]?.total || 0)}
@@ -295,21 +297,6 @@ function PaymentBreakdownCard({ title, buckets, tone = "neutral" }) {
         ))}
       </div>
     </div>
-  );
-}
-
-function ExpenseSummaryCard({ title, count, total, tone = "danger" }) {
-  return (
-    <KpiCard
-      title={title}
-      value={
-        <span className="text-[19px] font-semibold tracking-tight">
-          {fmtMoney(total)} RWF
-        </span>
-      }
-      sub={`${toNumber(count, 0).toLocaleString()} expense record(s)`}
-      tone={tone}
-    />
   );
 }
 
@@ -349,11 +336,9 @@ export default function ReportsPanel({
   const [range, setRange] = useState("30");
   const [lowStockThreshold, setLowStockThreshold] = useState("5");
   const [refreshState, setRefreshState] = useState("idle");
-  const [rangeAnchor, setRangeAnchor] = useState(() => Date.now());
 
-  useEffect(() => {
-    setRangeAnchor(Date.now());
-  }, [range]);
+  // Pure initialization. No setState in an effect.
+  const [rangeAnchor, setRangeAnchor] = useState(() => Date.now());
 
   const loading =
     !!salesLoading ||
@@ -484,21 +469,11 @@ export default function ReportsPanel({
 
   const normalizedBreakdown = useMemo(() => {
     return {
-      today: normalizeBreakdownBucketMap(
-        paymentsBreakdown?.today ||
-          paymentsBreakdown?.todayTotals ||
-          paymentsBreakdown?.todayByMethod,
-      ),
-      yesterday: normalizeBreakdownBucketMap(
-        paymentsBreakdown?.yesterday ||
-          paymentsBreakdown?.yesterdayTotals ||
-          paymentsBreakdown?.yesterdayByMethod,
-      ),
+      today: normalizeBreakdownBucketMap(paymentsBreakdown?.today),
+      yesterday: normalizeBreakdownBucketMap(paymentsBreakdown?.yesterday),
       allTime: normalizeBreakdownBucketMap(
         paymentsBreakdown?.allTime ||
           paymentsBreakdown?.all ||
-          paymentsBreakdown?.allTotals ||
-          paymentsBreakdown?.allTimeByMethod ||
           paymentsBreakdown,
       ),
     };
@@ -509,26 +484,10 @@ export default function ReportsPanel({
   const paymentAllCount = toNumber(paymentsSummary?.allTime?.count, 0);
   const paymentAllTotal = toNumber(paymentsSummary?.allTime?.total, 0);
 
-  const expenseTodayCount = toNumber(
-    expensesSummary?.today?.count ?? expensesSummary?.todayCount,
-    0,
-  );
-  const expenseTodayTotal = toNumber(
-    expensesSummary?.today?.total ?? expensesSummary?.todayTotal,
-    0,
-  );
-  const expenseAllCount = toNumber(
-    expensesSummary?.allTime?.count ??
-      expensesSummary?.count ??
-      expensesSummary?.allCount,
-    0,
-  );
-  const expenseAllTotal = toNumber(
-    expensesSummary?.allTime?.total ??
-      expensesSummary?.total ??
-      expensesSummary?.allTotal,
-    0,
-  );
+  const expenseTodayCount = toNumber(expensesSummary?.today?.count, 0);
+  const expenseTodayTotal = toNumber(expensesSummary?.today?.total, 0);
+  const expenseAllCount = toNumber(expensesSummary?.allTime?.count, 0);
+  const expenseAllTotal = toNumber(expensesSummary?.allTime?.total, 0);
 
   const netCashMovement = paymentAllTotal - expenseAllTotal;
 
@@ -574,8 +533,8 @@ export default function ReportsPanel({
               {title}
             </div>
             <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-              Owner-grade admin reporting across sales, collections, expenses,
-              inventory pressure, and operating health.
+              Revenue, collection mix, expenses, inventory pressure, and
+              operating visibility in one admin reports workspace.
             </div>
           </div>
 
@@ -687,10 +646,14 @@ export default function ReportsPanel({
               tone="info"
             />
 
-            <ExpenseSummaryCard
+            <KpiCard
               title="Expenses all time"
-              count={expenseAllCount}
-              total={expenseAllTotal}
+              value={
+                <span className="text-[19px] font-semibold tracking-tight">
+                  {fmtMoney(expenseAllTotal)} RWF
+                </span>
+              }
+              sub={`${expenseAllCount.toLocaleString()} expense record(s)`}
               tone="danger"
             />
 
@@ -724,23 +687,20 @@ export default function ReportsPanel({
                   sub={`${paymentTodayCount.toLocaleString()} payment(s)`}
                   tone="success"
                 />
-
-                <ExpenseSummaryCard
+                <KpiCard
                   title="Expenses today"
-                  count={expenseTodayCount}
-                  total={expenseTodayTotal}
+                  value={`${fmtMoney(expenseTodayTotal)} RWF`}
+                  sub={`${expenseTodayCount.toLocaleString()} expense(s)`}
                   tone="danger"
                 />
-
                 <KpiCard
                   title="Pending inventory requests"
                   value={toNumber(invReqPendingCount, 0).toLocaleString()}
-                  sub="Awaiting decision"
+                  sub="Need decision"
                   tone={
                     toNumber(invReqPendingCount, 0) > 0 ? "warn" : "neutral"
                   }
                 />
-
                 <KpiCard
                   title="Inventory value"
                   value={`${fmtMoney(inventoryTotals.totalInventoryValue)} RWF`}
@@ -995,10 +955,7 @@ export default function ReportsPanel({
                       <MobileReportRow
                         key={e?.id}
                         title={
-                          e?.categoryName ||
-                          e?.category ||
-                          e?.type ||
-                          `Expense #${e?.id ?? "—"}`
+                          e?.category || e?.type || `Expense #${e?.id ?? "—"}`
                         }
                         lines={[
                           {
@@ -1050,8 +1007,7 @@ export default function ReportsPanel({
                             className="border-b border-slate-100 dark:border-slate-900"
                           >
                             <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">
-                              {e?.categoryName ||
-                                e?.category ||
+                              {e?.category ||
                                 e?.type ||
                                 `Expense #${e?.id ?? "—"}`}
                             </td>

@@ -28,6 +28,11 @@ function money(n) {
   return Number.isFinite(x) ? Math.round(x).toLocaleString() : "0";
 }
 
+function num(n) {
+  const x = Number(n || 0);
+  return Number.isFinite(x) ? x : 0;
+}
+
 function safeDate(v) {
   if (!v) return "—";
   try {
@@ -146,11 +151,14 @@ function Banner({ kind = "info", children }) {
   );
 }
 
-function SectionTable({ title, children }) {
+function SectionTable({ title, right = null, children }) {
   return (
     <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
-      <div className="border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100">
-        {title}
+      <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+        <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
+          {title}
+        </div>
+        {right}
       </div>
       <div>{children}</div>
     </div>
@@ -173,6 +181,39 @@ function MobileMetricRow({ label, value, sub }) {
       ) : null}
     </div>
   );
+}
+
+function TonePill({ children, tone = "neutral" }) {
+  const cls =
+    tone === "success"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300"
+      : tone === "danger"
+        ? "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300"
+        : tone === "warn"
+          ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
+          : tone === "info"
+            ? "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300"
+            : "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300";
+
+  return (
+    <span
+      className={cx(
+        "inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.08em]",
+        cls,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function methodOrder(method) {
+  const m = String(method || "").toUpperCase();
+  if (m === "CASH") return 0;
+  if (m === "MOMO") return 1;
+  if (m === "BANK") return 2;
+  if (m === "CARD") return 3;
+  return 4;
 }
 
 export default function CashReportsPanel({ title = "Cash Reports" }) {
@@ -289,22 +330,70 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
     }
   }, [qs]);
 
-  async function refreshAll() {
+  const refreshAll = useCallback(async () => {
     await Promise.all([
       loadSummary(),
       loadSessions(),
       loadLedger(),
       loadRefunds(),
     ]);
-  }
+  }, [loadSummary, loadSessions, loadLedger, loadRefunds]);
 
   useEffect(() => {
     refreshAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qs]);
+  }, [refreshAll]);
 
   const byType = Array.isArray(summary?.byType) ? summary.byType : [];
   const byMethod = Array.isArray(summary?.byMethod) ? summary.byMethod : [];
+
+  const net = num(summary?.net);
+  const inTotal = num(summary?.inTotal);
+  const outTotal = num(summary?.outTotal);
+  const refundTotal = refunds.reduce((sum, row) => sum + num(row?.amount), 0);
+  const refundsCount = refunds.length;
+
+  const orderedByMethod = useMemo(() => {
+    return byMethod.slice().sort((a, b) => {
+      const aMethod = methodOrder(a?.method);
+      const bMethod = methodOrder(b?.method);
+      if (aMethod !== bMethod) return aMethod - bMethod;
+      return num(b?.total) - num(a?.total);
+    });
+  }, [byMethod]);
+
+  const moneyInRows = useMemo(() => {
+    return ledger.filter(
+      (row) => String(row?.direction || "").toUpperCase() === "IN",
+    );
+  }, [ledger]);
+
+  const moneyOutRows = useMemo(() => {
+    return ledger.filter(
+      (row) => String(row?.direction || "").toUpperCase() === "OUT",
+    );
+  }, [ledger]);
+
+  const topOutTypes = useMemo(() => {
+    const map = new Map();
+
+    for (const row of moneyOutRows) {
+      const key = String(row?.type || "OTHER").toUpperCase();
+      const prev = map.get(key) || { type: key, count: 0, total: 0 };
+      prev.count += 1;
+      prev.total += num(row?.amount);
+      map.set(key, prev);
+    }
+
+    return Array.from(map.values())
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5);
+  }, [moneyOutRows]);
+
+  const openSessionsCount = useMemo(() => {
+    return sessions.filter(
+      (s) => String(s?.status || "").toUpperCase() === "OPEN",
+    ).length;
+  }, [sessions]);
 
   return (
     <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
@@ -315,8 +404,8 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
               {title}
             </div>
             <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-              Review cash flow, sessions, ledger activity, and refunds with a
-              clean operational view.
+              Owner-grade money control for cash movement, payment methods,
+              sessions, ledger truth, and refunds.
             </div>
           </div>
 
@@ -359,6 +448,7 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
 
             <div className="xl:pb-[1px]">
               <button
+                type="button"
                 onClick={refreshAll}
                 className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-slate-200"
               >
@@ -399,25 +489,63 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
       <div className="p-4 sm:p-5">
         {tab === "overview" ? (
           <div className="grid gap-4">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
               <StatCard
-                label="Cash in"
-                value={summaryLoading ? "…" : money(summary?.inTotal || 0)}
-                sub="Money coming in"
+                label="Money in"
+                value={summaryLoading ? "…" : money(inTotal)}
+                sub="All incoming cash movement"
                 tone="success"
               />
               <StatCard
-                label="Cash out"
-                value={summaryLoading ? "…" : money(summary?.outTotal || 0)}
-                sub="Money going out"
+                label="Money out"
+                value={summaryLoading ? "…" : money(outTotal)}
+                sub="All outgoing cash movement"
                 tone="danger"
               />
               <StatCard
-                label="Net"
-                value={summaryLoading ? "…" : money(summary?.net || 0)}
-                sub="IN − OUT"
-                tone="info"
+                label="Net cash"
+                value={summaryLoading ? "…" : money(net)}
+                sub="IN minus OUT"
+                tone={net >= 0 ? "info" : "danger"}
               />
+              <StatCard
+                label="Refunds"
+                value={refundsLoading ? "…" : money(refundTotal)}
+                sub={`${refundsCount} refund row(s)`}
+                tone="warn"
+              />
+              <StatCard
+                label="Open sessions"
+                value={sessionsLoading ? "…" : String(openSessionsCount)}
+                sub={`${sessions.length} session row(s)`}
+                tone={openSessionsCount > 0 ? "warn" : "neutral"}
+              />
+            </div>
+
+            <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex flex-wrap items-center gap-2">
+                <TonePill tone="success">
+                  Money in {money(inTotal)} RWF
+                </TonePill>
+                <TonePill tone="danger">
+                  Money out {money(outTotal)} RWF
+                </TonePill>
+                <TonePill tone={net >= 0 ? "success" : "danger"}>
+                  Net {money(net)} RWF
+                </TonePill>
+                <TonePill tone="info">
+                  Methods {orderedByMethod.length || 0}
+                </TonePill>
+              </div>
+
+              <div className="mt-3 text-sm leading-6 text-slate-700 dark:text-slate-300">
+                This surface should answer one owner-grade question fast:
+                <span className="font-bold text-slate-950 dark:text-slate-50">
+                  {" "}
+                  where did money come from, where did it go, and which method
+                  or type is creating pressure?
+                </span>
+              </div>
             </div>
 
             <div className="grid gap-4 xl:grid-cols-2">
@@ -442,7 +570,7 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
                       ))}
                     </div>
 
-                    <div className="hidden md:block overflow-x-auto">
+                    <div className="hidden overflow-x-auto md:block">
                       <table className="w-full text-sm">
                         <thead className="text-slate-600 dark:text-slate-400">
                           <tr className="border-b border-slate-200 dark:border-slate-800">
@@ -450,7 +578,7 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
                               Type
                             </th>
                             <th className="p-3 text-left text-xs font-semibold">
-                              Dir
+                              Direction
                             </th>
                             <th className="p-3 text-right text-xs font-semibold">
                               Count
@@ -466,14 +594,14 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
                               key={idx}
                               className="border-b border-slate-100 dark:border-slate-900"
                             >
-                              <td className="p-3 text-slate-900 dark:text-slate-100">
-                                {r.type}
+                              <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">
+                                {r.type || "—"}
                               </td>
                               <td className="p-3 text-slate-700 dark:text-slate-300">
-                                {r.direction}
+                                {r.direction || "—"}
                               </td>
                               <td className="p-3 text-right text-slate-700 dark:text-slate-300">
-                                {r.count}
+                                {r.count || 0}
                               </td>
                               <td className="p-3 text-right font-semibold text-slate-900 dark:text-slate-100">
                                 {money(r.total)}
@@ -487,18 +615,18 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
                 )}
               </SectionTable>
 
-              <SectionTable title="By method">
-                {byMethod.length === 0 ? (
+              <SectionTable title="By payment method">
+                {orderedByMethod.length === 0 ? (
                   <div className="p-4">
                     <EmptyState
                       title="No methods to show"
-                      hint="Try a date where payments happened."
+                      hint="Try a date where payments or money movement happened."
                     />
                   </div>
                 ) : (
                   <>
                     <div className="grid gap-3 p-4 md:hidden">
-                      {byMethod.map((r, idx) => (
+                      {orderedByMethod.map((r, idx) => (
                         <MobileMetricRow
                           key={idx}
                           label={r.method || "Method"}
@@ -508,7 +636,7 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
                       ))}
                     </div>
 
-                    <div className="hidden md:block overflow-x-auto">
+                    <div className="hidden overflow-x-auto md:block">
                       <table className="w-full text-sm">
                         <thead className="text-slate-600 dark:text-slate-400">
                           <tr className="border-b border-slate-200 dark:border-slate-800">
@@ -516,7 +644,7 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
                               Method
                             </th>
                             <th className="p-3 text-left text-xs font-semibold">
-                              Dir
+                              Direction
                             </th>
                             <th className="p-3 text-right text-xs font-semibold">
                               Count
@@ -527,19 +655,19 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
                           </tr>
                         </thead>
                         <tbody>
-                          {byMethod.map((r, idx) => (
+                          {orderedByMethod.map((r, idx) => (
                             <tr
                               key={idx}
                               className="border-b border-slate-100 dark:border-slate-900"
                             >
-                              <td className="p-3 text-slate-900 dark:text-slate-100">
-                                {r.method}
+                              <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">
+                                {r.method || "—"}
                               </td>
                               <td className="p-3 text-slate-700 dark:text-slate-300">
-                                {r.direction}
+                                {r.direction || "—"}
                               </td>
                               <td className="p-3 text-right text-slate-700 dark:text-slate-300">
-                                {r.count}
+                                {r.count || 0}
                               </td>
                               <td className="p-3 text-right font-semibold text-slate-900 dark:text-slate-100">
                                 {money(r.total)}
@@ -551,6 +679,74 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
                     </div>
                   </>
                 )}
+              </SectionTable>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-2">
+              <SectionTable title="Largest money-out pressure">
+                {topOutTypes.length === 0 ? (
+                  <div className="p-4">
+                    <EmptyState
+                      title="No outgoing pressure"
+                      hint="No OUT rows were found in the ledger for this range."
+                    />
+                  </div>
+                ) : (
+                  <div className="grid gap-3 p-4">
+                    {topOutTypes.map((row, idx) => (
+                      <div
+                        key={`${row.type}-${idx}`}
+                        className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900"
+                      >
+                        <div>
+                          <div className="text-sm font-bold text-slate-950 dark:text-slate-50">
+                            {row.type}
+                          </div>
+                          <div className="text-xs text-slate-600 dark:text-slate-400">
+                            {row.count} row(s)
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-black text-slate-950 dark:text-slate-50">
+                            {money(row.total)}
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            RWF
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </SectionTable>
+
+              <SectionTable title="Control reading">
+                <div className="grid gap-3 p-4">
+                  <MobileMetricRow
+                    label="Money-in rows"
+                    value={String(moneyInRows.length)}
+                    sub="Incoming ledger activity"
+                  />
+                  <MobileMetricRow
+                    label="Money-out rows"
+                    value={String(moneyOutRows.length)}
+                    sub="Outgoing ledger activity"
+                  />
+                  <MobileMetricRow
+                    label="Refund rows"
+                    value={String(refundsCount)}
+                    sub="Reverse-money signals"
+                  />
+                  <MobileMetricRow
+                    label="Session pressure"
+                    value={
+                      openSessionsCount > 0
+                        ? `${openSessionsCount} open`
+                        : "All closed"
+                    }
+                    sub="Cash session operating state"
+                  />
+                </div>
               </SectionTable>
             </div>
           </div>
@@ -565,49 +761,63 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
             ) : sessions.length === 0 ? (
               <EmptyState title="No sessions" hint="Try a wider date range." />
             ) : (
-              sessions.map((s) => (
-                <div
-                  key={s?.id}
-                  className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950"
-                >
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0">
-                      <div className="text-sm font-black text-slate-950 dark:text-slate-50">
-                        Session #{s?.id}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                        Cashier: <b>{s?.cashierId ?? "—"}</b> • Status:{" "}
-                        <b>{s?.status ?? "—"}</b>
-                      </div>
-                      <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                        Opened: {safeDate(s?.openedAt)} • Closed:{" "}
-                        {safeDate(s?.closedAt)}
-                      </div>
-                    </div>
+              sessions.map((s) => {
+                const status = String(s?.status || "").toUpperCase();
+                const openingBalance = num(s?.openingBalance);
+                const closingBalance =
+                  s?.closingBalance == null ? null : num(s?.closingBalance);
 
-                    <div className="grid grid-cols-2 gap-3 sm:min-w-[220px]">
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900">
-                        <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
-                          Opening
+                return (
+                  <div
+                    key={s?.id}
+                    className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950"
+                  >
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-sm font-black text-slate-950 dark:text-slate-50">
+                            Session #{s?.id}
+                          </div>
+                          <TonePill
+                            tone={status === "OPEN" ? "warn" : "success"}
+                          >
+                            {status || "—"}
+                          </TonePill>
                         </div>
-                        <div className="mt-1 text-sm font-black text-slate-950 dark:text-slate-50">
-                          {money(s?.openingBalance)}
+
+                        <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                          Cashier: <b>{s?.cashierId ?? "—"}</b>
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                          Opened: {safeDate(s?.openedAt)} • Closed:{" "}
+                          {safeDate(s?.closedAt)}
                         </div>
                       </div>
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900">
-                        <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
-                          Closing
+
+                      <div className="grid grid-cols-2 gap-3 sm:min-w-[240px]">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900">
+                          <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
+                            Opening
+                          </div>
+                          <div className="mt-1 text-sm font-black text-slate-950 dark:text-slate-50">
+                            {money(openingBalance)}
+                          </div>
                         </div>
-                        <div className="mt-1 text-sm font-black text-slate-950 dark:text-slate-50">
-                          {s?.closingBalance == null
-                            ? "—"
-                            : money(s?.closingBalance)}
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900">
+                          <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
+                            Closing
+                          </div>
+                          <div className="mt-1 text-sm font-black text-slate-950 dark:text-slate-50">
+                            {closingBalance == null
+                              ? "—"
+                              : money(closingBalance)}
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         ) : null}
@@ -624,46 +834,62 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
                 hint="Pick a date where cash activity happened."
               />
             ) : (
-              ledger.map((r) => (
-                <div
-                  key={r?.id}
-                  className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950"
-                >
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0">
-                      <div className="text-sm font-black text-slate-950 dark:text-slate-50">
-                        Ledger #{r?.id}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                        Type: <b>{r?.type ?? "—"}</b> • Dir:{" "}
-                        <b>{r?.direction ?? "—"}</b> • Method:{" "}
-                        <b>{r?.method || "CASH"}</b>
-                      </div>
-                      <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                        Sale: <b>{r?.saleId ?? "—"}</b> • Payment:{" "}
-                        <b>{r?.paymentId ?? "—"}</b>
-                      </div>
-                      <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                        Time: {safeDate(r?.createdAt)}
-                      </div>
-                      {r?.note ? (
-                        <div className="mt-2 text-xs text-slate-600 dark:text-slate-400">
-                          Note: {r.note}
-                        </div>
-                      ) : null}
-                    </div>
+              ledger.map((r) => {
+                const direction = String(r?.direction || "").toUpperCase();
+                const tone =
+                  direction === "IN"
+                    ? "success"
+                    : direction === "OUT"
+                      ? "danger"
+                      : "neutral";
 
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-right dark:border-slate-800 dark:bg-slate-900">
-                      <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
-                        Amount
+                return (
+                  <div
+                    key={r?.id}
+                    className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950"
+                  >
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-sm font-black text-slate-950 dark:text-slate-50">
+                            Ledger #{r?.id}
+                          </div>
+                          <TonePill tone={tone}>{direction || "—"}</TonePill>
+                          <TonePill tone="info">{r?.method || "CASH"}</TonePill>
+                        </div>
+
+                        <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                          Type: <b>{r?.type ?? "—"}</b>
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                          Sale: <b>{r?.saleId ?? "—"}</b> • Payment:{" "}
+                          <b>{r?.paymentId ?? "—"}</b>
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                          Time: {safeDate(r?.createdAt)}
+                        </div>
+                        {r?.note ? (
+                          <div className="mt-2 text-xs text-slate-600 dark:text-slate-400">
+                            Note: {r.note}
+                          </div>
+                        ) : null}
                       </div>
-                      <div className="mt-1 text-lg font-black text-slate-950 dark:text-slate-50">
-                        {money(r?.amount)}
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-right dark:border-slate-800 dark:bg-slate-900">
+                        <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
+                          Amount
+                        </div>
+                        <div className="mt-1 text-lg font-black text-slate-950 dark:text-slate-50">
+                          {money(r?.amount)}
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          RWF
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         ) : null}
@@ -687,9 +913,13 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
                 >
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
-                      <div className="text-sm font-black text-slate-950 dark:text-slate-50">
-                        Refund #{r?.id}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-sm font-black text-slate-950 dark:text-slate-50">
+                          Refund #{r?.id}
+                        </div>
+                        <TonePill tone="warn">Refund</TonePill>
                       </div>
+
                       <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                         Sale: <b>{r?.saleId ?? "—"}</b> • By:{" "}
                         <b>{r?.createdByUserId ?? "—"}</b>
@@ -708,6 +938,9 @@ export default function CashReportsPanel({ title = "Cash Reports" }) {
                       </div>
                       <div className="mt-1 text-lg font-black text-slate-950 dark:text-slate-50">
                         {money(r?.amount)}
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                        RWF
                       </div>
                     </div>
                   </div>

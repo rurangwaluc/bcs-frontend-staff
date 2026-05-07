@@ -59,6 +59,7 @@ export default function AdminPage() {
           <div className="flex flex-wrap items-center gap-2">
             <div className="hidden items-center gap-2 md:flex">
               <span className="text-xs font-semibold app-muted">Act as</span>
+
               <AdminSelect
                 value={admin.actAs}
                 onChange={(e) => admin.setActAs(e.target.value)}
@@ -170,13 +171,18 @@ export default function AdminPage() {
         ) : null}
 
         {admin.section === "suppliers" ? (
-          <SuppliersPanel {...admin.suppliersPanelProps} />
+          <AdminSectionCard
+            title="Suppliers"
+            hint="Owner-grade supplier finance control: create suppliers, create bills, record supplier payments, and monitor supplier exposure, payable pressure, and cash-out accountability."
+          >
+            <SuppliersPanel {...admin.suppliersPanelProps} />
+          </AdminSectionCard>
         ) : null}
 
         {admin.section === "cash" ? (
           <AdminSectionCard
             title="Cash reports"
-            hint="Cash summary, expenses, and location-level money oversight."
+            hint="Owner-grade money control for this location: money in, money out, expenses, cash pressure, and payment-method visibility across operations."
           >
             <CashReportsPanel
               key={`cash-${admin.refreshNonce}`}
@@ -215,7 +221,7 @@ export default function AdminPage() {
         {admin.section === "reports" ? (
           <AdminSectionCard
             title="Reports"
-            hint="Operational reports, payment trends, supplier exposure, and financial oversight."
+            hint="Owner-grade operational and financial oversight: sales performance, payment trends, expense pressure, supplier exposure, inventory risk, and overall money movement."
           >
             <ReportsPanel
               key={`reports-${admin.refreshNonce}`}
