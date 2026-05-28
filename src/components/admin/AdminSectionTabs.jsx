@@ -12,6 +12,7 @@ const SECTIONS = [
   { key: "inv_requests", label: "Inventory requests" },
   { key: "suppliers", label: "Suppliers" },
   { key: "cash", label: "Cash reports" },
+  { key: "expenses", label: "Expenses" },
   { key: "credits", label: "Credits" },
   { key: "users", label: "Staff" },
   { key: "reports", label: "Reports" },
@@ -70,8 +71,12 @@ function TopTabButton({ active, label, badge, tone = "neutral", onClick }) {
 export default function AdminSectionTabs({
   section,
   setSection,
+  sections,
   badgeMap = {},
 }) {
+  const visibleSections =
+    Array.isArray(sections) && sections.length ? sections : SECTIONS;
+
   return (
     <div className="grid gap-3">
       <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
@@ -91,7 +96,7 @@ export default function AdminSectionTabs({
               value={section}
               onChange={(e) => setSection?.(e.target.value)}
             >
-              {SECTIONS.map((item) => {
+              {visibleSections.map((item) => {
                 const badge = badgeMap?.[item.key];
                 const suffix = badge ? ` (${badge})` : "";
                 return (
@@ -106,7 +111,7 @@ export default function AdminSectionTabs({
 
           <div className="hidden lg:block">
             <div className="flex flex-wrap gap-2">
-              {SECTIONS.map((item) => (
+              {visibleSections.map((item) => (
                 <TopTabButton
                   key={item.key}
                   active={section === item.key}

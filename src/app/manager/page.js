@@ -35,6 +35,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import AuditLogsPanel from "../../components/AuditLogsPanel";
 import CashReportsPanel from "../../components/CashReportsPanel";
+import ExpensesPanel from "../../components/ExpensesPanel";
 import InventoryAdjustRequestsPanel from "../../components/InventoryAdjustRequestsPanel";
 import ManagerArchiveRestoreProductModal from "../../components/staff/manager/ManagerArchiveRestoreProductModal";
 import ManagerArrivalsSection from "../../components/staff/manager/ManagerArrivalsSection";
@@ -1315,6 +1316,22 @@ export default function ManagerPage() {
                 <CashReportsPanel
                   key={`cash-${refreshNonce}`}
                   title="Manager Cash Reports"
+                />
+              </SectionCard>
+            ) : null}
+
+            {section === "expenses" ? (
+              <SectionCard
+                title="Operating expenses"
+                hint="Manager expense control for branch operating costs, money-out visibility, and controlled voiding."
+              >
+                <ExpensesPanel
+                  key={`expenses-${refreshNonce}`}
+                  title="Manager expenses"
+                  subtitle="Create and review operating expenses separately from the cashier session screen."
+                  defaultLocationId={me?.locationId || ""}
+                  canCreateExpense
+                  canVoidExpense
                 />
               </SectionCard>
             ) : null}

@@ -9,7 +9,18 @@ import {
   TinyPill,
 } from "./cashier-ui";
 
-import AsyncButton from "../../../components/AsyncButton";
+import AsyncButton from "../../AsyncButton";
+
+function toText(value, fallback = "") {
+  if (value === undefined || value === null) return fallback;
+  const text = String(value).trim();
+  return text || fallback;
+}
+
+function toNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
 
 function statusTone(status) {
   const value = String(status || "")
@@ -41,6 +52,42 @@ function methodLabel(method) {
   return raw || "Cash";
 }
 
+function sessionIdOf(session) {
+  return session?.id ?? session?.sessionId ?? session?.cashSessionId ?? null;
+}
+
+function expenseSessionId(expense) {
+  return (
+    expense?.cashSessionId ??
+    expense?.cash_session_id ??
+    expense?.sessionId ??
+    expense?.session_id ??
+    null
+  );
+}
+
+function expenseDateValue(expense) {
+  return (
+    expense?.expenseDate ||
+    expense?.expense_date ||
+    expense?.createdAt ||
+    expense?.created_at ||
+    null
+  );
+}
+
+function isSameSessionExpense(expense, openSessionId) {
+  if (!openSessionId) return false;
+  return String(expenseSessionId(expense) || "") === String(openSessionId);
+}
+
+function moneyOutTotal(rows) {
+  return rows.reduce((sum, row) => {
+    if (String(row?.status || "").toUpperCase() === "VOID") return sum;
+    return sum + toNumber(row?.amount ?? 0, 0);
+  }, 0);
+}
+
 export default function CashierExpensesSection({
   currentOpenSession,
   expenses,
@@ -66,12 +113,18 @@ export default function CashierExpensesSection({
   onCreateExpense,
 }) {
   const rows = Array.isArray(expenses) ? expenses : [];
-  const isLocked = !currentOpenSession?.id;
+  const openSessionId = sessionIdOf(currentOpenSession);
+  const isLocked = !openSessionId;
 
-  const filteredRows = rows.filter((expense) => {
+  const currentSessionRows = rows.filter((expense) =>
+    isSameSessionExpense(expense, openSessionId),
+  );
+
+  const filteredRows = currentSessionRows.filter((expense) => {
     const q = String(expenseQ || "")
       .trim()
       .toLowerCase();
+
     if (!q) return true;
 
     const hay = [
@@ -94,11 +147,21 @@ export default function CashierExpensesSection({
     return hay.includes(q);
   });
 
+  const postedCount = currentSessionRows.filter(
+    (expense) => String(expense?.status || "").toUpperCase() !== "VOID",
+  ).length;
+
+  const voidCount = currentSessionRows.filter(
+    (expense) => String(expense?.status || "").toUpperCase() === "VOID",
+  ).length;
+
+  const totalMoneyOut = moneyOutTotal(currentSessionRows);
+
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.92fr_1.08fr]">
       <SectionCard
         title="Money spent"
-        hint="Use this only when cash leaves the drawer for a real day-to-day business cost."
+        hint="Cashier expenses must stay tied to the current open cashier day."
       >
         {isLocked ? (
           <Banner kind="warn" className="mb-4">
@@ -106,11 +169,49 @@ export default function CashierExpensesSection({
           </Banner>
         ) : (
           <Banner kind="info" className="mb-4">
-            Use this for real cash spending like transport, lunch, airtime,
-            repairs, or other daily business costs. Do not use this for stock
-            buying or supplier purchasing.
+            Use this only for real day-to-day business costs paid during this
+            cashier day. Do not use this for stock buying, supplier purchasing,
+            loans, or owner spending.
           </Banner>
         )}
+
+        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4 dark:bg-slate-900">
+            <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
+              Current cashier day
+            </div>
+            <div className="mt-2 text-lg font-extrabold text-[var(--app-fg)]">
+              {openSessionId ? `#${openSessionId}` : "Not open"}
+            </div>
+            <div className="mt-1 text-xs app-muted">
+              Only this day can receive cashier expenses.
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4 dark:bg-slate-900">
+            <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
+              Saved expenses
+            </div>
+            <div className="mt-2 text-lg font-extrabold text-[var(--app-fg)]">
+              {postedCount}
+            </div>
+            <div className="mt-1 text-xs app-muted">
+              Active money-out records for this day.
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4 dark:bg-slate-900">
+            <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
+              Money out total
+            </div>
+            <div className="mt-2 text-lg font-extrabold text-[var(--app-fg)]">
+              {money?.(totalMoneyOut)}
+            </div>
+            <div className="mt-1 text-xs app-muted">
+              Voided records are not included.
+            </div>
+          </div>
+        </div>
 
         <div
           className={[
@@ -123,12 +224,14 @@ export default function CashierExpensesSection({
               <div className="text-base font-black text-[var(--app-fg)]">
                 Save money spent
               </div>
-              {currentOpenSession?.id ? (
+
+              {openSessionId ? (
                 <>
                   <TinyPill tone="success">
-                    Day #{currentOpenSession.id} is open
+                    Day #{openSessionId} is open
                   </TinyPill>
-                  <TinyPill tone="warn">Cash only</TinyPill>
+                  <TinyPill tone="warn">Session-bound</TinyPill>
+                  <TinyPill tone="warn">Cashier use only</TinyPill>
                 </>
               ) : (
                 <TinyPill tone="warn">Day not open</TinyPill>
@@ -136,8 +239,8 @@ export default function CashierExpensesSection({
             </div>
 
             <div className="mt-2 text-sm app-muted">
-              Write how much money left the drawer, what it was used for, and
-              who received it if needed.
+              Record what money left the drawer during this cashier day, why it
+              left, and who received it if needed.
             </div>
 
             <form onSubmit={onCreateExpense} className="mt-4 grid gap-3">
@@ -146,6 +249,7 @@ export default function CashierExpensesSection({
                 value={expenseAmount}
                 onChange={(e) => setExpenseAmount?.(e.target.value)}
                 disabled={isLocked}
+                inputMode="numeric"
               />
 
               <Input
@@ -188,6 +292,12 @@ export default function CashierExpensesSection({
                 disabled={isLocked}
               />
 
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 text-xs app-muted dark:bg-slate-950">
+                This form is for normal operating costs only. Stock purchases,
+                supplier bills, owner loans, and other non-cashier flows must
+                not be recorded here.
+              </div>
+
               <div className="flex flex-wrap gap-2">
                 <AsyncButton
                   type="submit"
@@ -205,8 +315,8 @@ export default function CashierExpensesSection({
       </SectionCard>
 
       <SectionCard
-        title="Money spent history"
-        hint="Latest records of cash that left the drawer for daily business costs."
+        title="Current cashier day expense history"
+        hint="Only expenses tied to the open cashier day appear here."
         right={
           <RefreshButton
             loading={expensesLoading}
@@ -222,7 +332,11 @@ export default function CashierExpensesSection({
             onChange={(e) => setExpenseQ?.(e.target.value)}
           />
 
-          {expensesLoading ? (
+          {isLocked ? (
+            <div className="rounded-3xl border border-dashed border-[var(--border-strong)] bg-[var(--card)] p-6 text-sm app-muted dark:bg-slate-900">
+              Open a cashier day first to view and manage that day’s expenses.
+            </div>
+          ) : expensesLoading ? (
             <div className="grid gap-3">
               <Skeleton className="h-24 w-full" />
               <Skeleton className="h-24 w-full" />
@@ -230,7 +344,7 @@ export default function CashierExpensesSection({
             </div>
           ) : filteredRows.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-[var(--border-strong)] bg-[var(--card)] p-6 text-sm app-muted dark:bg-slate-900">
-              No money spent records found.
+              No money spent records found for cashier day #{openSessionId}.
             </div>
           ) : (
             <div className="grid gap-3">
@@ -253,7 +367,7 @@ export default function CashierExpensesSection({
                         </TinyPill>
 
                         <TinyPill tone={statusTone(expense?.status)}>
-                          {String(expense?.status || "POSTED")}
+                          {toText(expense?.status, "POSTED")}
                         </TinyPill>
 
                         <TinyPill tone="neutral">
@@ -274,12 +388,8 @@ export default function CashierExpensesSection({
                       <div className="mt-1 text-xs app-muted">
                         When it happened:{" "}
                         <b>
-                          {safeDate?.(
-                            expense?.expenseDate ||
-                              expense?.expense_date ||
-                              expense?.createdAt ||
-                              expense?.created_at,
-                          )}
+                          {safeDate?.(expenseDateValue(expense)) ||
+                            safeDate(expenseDateValue(expense))}
                         </b>
                       </div>
 
@@ -288,7 +398,8 @@ export default function CashierExpensesSection({
                         <b>
                           {safeDate?.(
                             expense?.createdAt || expense?.created_at,
-                          )}
+                          ) ||
+                            safeDate(expense?.createdAt || expense?.created_at)}
                         </b>
                       </div>
 
@@ -334,6 +445,13 @@ export default function CashierExpensesSection({
                   </div>
                 </div>
               ))}
+
+              {voidCount > 0 ? (
+                <div className="text-xs app-muted">
+                  This cashier day has {voidCount} voided expense
+                  {voidCount === 1 ? "" : "s"} kept for record truth.
+                </div>
+              ) : null}
 
               {filteredRows.length > 60 ? (
                 <div className="text-xs app-muted">

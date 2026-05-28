@@ -455,6 +455,15 @@ export default function CashierPage() {
     }
   }, []);
 
+  const loadSessionBoundExpenses = useCallback(async () => {
+    await Promise.all([
+      loadSessions(),
+      loadExpenses(),
+      loadLedger(),
+      loadLedgerToday(),
+    ]);
+  }, [loadSessions, loadExpenses, loadLedger, loadLedgerToday]);
+
   const loadReconciles = useCallback(async () => {
     setReconcilesLoading(true);
     try {
@@ -847,7 +856,8 @@ export default function CashierPage() {
       toast("success", "Cash session opened.");
       setOpeningBalance("");
       setOpeningVarianceReason("");
-      await loadSessions();
+
+      await loadSessionBoundExpenses();
       await loadUnread();
 
       setOpenBtnState("success");
@@ -891,10 +901,9 @@ export default function CashierPage() {
       setCloseNote("");
       setCountedClosingCash("");
       setClosingVarianceReason("");
-      await loadSessions();
+
+      await loadSessionBoundExpenses();
       await loadUnread();
-      await loadLedger();
-      await loadLedgerToday();
 
       setCloseBtnState("success");
       setTimeout(() => setCloseBtnState("idle"), 900);
@@ -961,9 +970,7 @@ export default function CashierPage() {
       setDepositNote("");
 
       await loadDeposits();
-      await loadSessions();
-      await loadLedger();
-      await loadLedgerToday();
+      await loadSessionBoundExpenses();
 
       setDepositBtnState("success");
       setTimeout(() => setDepositBtnState("idle"), 900);
@@ -980,7 +987,8 @@ export default function CashierPage() {
     e.preventDefault();
     if (expenseBtnState === "loading") return;
 
-    if (!currentOpenSession?.id) {
+    const activeSessionId = Number(currentOpenSession?.id || 0);
+    if (!Number.isInteger(activeSessionId) || activeSessionId <= 0) {
       return toast("warn", "Open a cash session first.");
     }
 
@@ -1011,7 +1019,7 @@ export default function CashierPage() {
       await apiFetch(ENDPOINTS.EXPENSE_CREATE, {
         method: "POST",
         body: {
-          cashSessionId: Number(currentOpenSession.id),
+          cashSessionId: activeSessionId,
           amount: requested,
           category: String(expenseCategory || "GENERAL")
             .trim()
@@ -1039,10 +1047,7 @@ export default function CashierPage() {
       setExpenseRef("");
       setExpenseNote("");
 
-      await loadExpenses();
-      await loadSessions();
-      await loadLedger();
-      await loadLedgerToday();
+      await loadSessionBoundExpenses();
 
       setExpenseBtnState("success");
       setTimeout(() => setExpenseBtnState("idle"), 900);
@@ -1185,8 +1190,7 @@ export default function CashierPage() {
       loadDeposits();
       loadSessions();
     } else if (section === "expenses") {
-      loadExpenses();
-      loadSessions();
+      loadSessionBoundExpenses();
     } else if (section === "reconcile") {
       loadReconciles();
       loadSessions();
@@ -1206,6 +1210,7 @@ export default function CashierPage() {
     loadPayments,
     loadDeposits,
     loadExpenses,
+    loadSessionBoundExpenses,
     loadReconciles,
     loadRefunds,
     loadLedger,
@@ -1531,8 +1536,8 @@ export default function CashierPage() {
             {section === "expenses" ? (
               <CashierExpensesSection
                 currentOpenSession={currentOpenSession}
-                expenses={expenses}
-                expensesLoading={expensesLoading}
+                expenses={sessionExpenses}
+                expensesLoading={expensesLoading || sessionsLoading}
                 expenseQ={expenseQ}
                 setExpenseQ={setExpenseQ}
                 expenseAmount={expenseAmount}
@@ -1548,7 +1553,7 @@ export default function CashierPage() {
                 expenseNote={expenseNote}
                 setExpenseNote={setExpenseNote}
                 expenseBtnState={expenseBtnState}
-                loadExpenses={loadExpenses}
+                loadExpenses={loadSessionBoundExpenses}
                 loadSessions={loadSessions}
                 money={money}
                 safeDate={safeDate}

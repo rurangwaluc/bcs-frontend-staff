@@ -23,6 +23,10 @@ export const ENDPOINTS = {
   SUPPLIER_SUMMARY: "/supplier/summary",
   SUPPLIER_CREATE: "/suppliers",
   SUPPLIER_BILL_CREATE: "/supplier-bills",
+
+  EXPENSES_LIST: "/cash/expenses",
+  EXPENSE_CREATE: "/cash/expenses",
+  EXPENSE_VOID: (id) => `/cash/expenses/${id}/void`,
 };
 
 export const SECTIONS = [
@@ -35,6 +39,7 @@ export const SECTIONS = [
   { key: "arrivals", label: "Stock arrivals" },
   { key: "suppliers", label: "Suppliers" },
   { key: "cash_reports", label: "Cash reports" },
+  { key: "expenses", label: "Expenses" },
   { key: "credits", label: "Credits" },
   { key: "staff", label: "Staff" },
 ];

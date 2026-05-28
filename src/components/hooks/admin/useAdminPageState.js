@@ -534,6 +534,7 @@ export function useAdminPageState({ router }) {
         "pricing",
         "inv_requests",
         "suppliers",
+        "expenses",
         "credits",
         "users",
       ]);

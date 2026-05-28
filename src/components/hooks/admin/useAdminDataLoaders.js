@@ -70,6 +70,7 @@ export const SECTIONS = [
   { key: "inv_requests", label: "Inventory requests" },
   { key: "suppliers", label: "Suppliers" },
   { key: "cash", label: "Cash reports" },
+  { key: "expenses", label: "Expenses" },
   { key: "credits", label: "Credits" },
   { key: "users", label: "Staff" },
   { key: "reports", label: "Reports" },

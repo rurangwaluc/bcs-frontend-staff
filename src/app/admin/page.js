@@ -30,6 +30,7 @@ import AdminUsersPanel from "../../components/AdminUsersPanel";
 import AuditLogsPanel from "../../components/AuditLogsPanel";
 import CashReportsPanel from "../../components/CashReportsPanel";
 import CreditsPanel from "../../components/CreditsPanel";
+import ExpensesPanel from "../../components/ExpensesPanel";
 import NotificationsBell from "../../components/NotificationsBell";
 import ReportsPanel from "../../components/ReportsPanel";
 import RoleBar from "../../components/RoleBar";
@@ -187,6 +188,22 @@ export default function AdminPage() {
             <CashReportsPanel
               key={`cash-${admin.refreshNonce}`}
               title="Admin Cash Oversight"
+            />
+          </AdminSectionCard>
+        ) : null}
+
+        {admin.section === "expenses" ? (
+          <AdminSectionCard
+            title="Operating expenses"
+            hint="Admin expense control for operating costs, cross-staff visibility, money-out tracking, and controlled voiding."
+          >
+            <ExpensesPanel
+              key={`expenses-${admin.refreshNonce}`}
+              title="Admin expenses"
+              subtitle="Create and review operating expenses without using the cashier-only session screen."
+              defaultLocationId={admin.me?.locationId || ""}
+              canCreateExpense
+              canVoidExpense
             />
           </AdminSectionCard>
         ) : null}
