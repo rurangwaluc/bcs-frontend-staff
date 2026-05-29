@@ -195,6 +195,33 @@ function CoverageOperatorStrip({ coverage }) {
   );
 }
 
+function normalizePaymentRecordStatus(payment) {
+  const amount = Number(payment?.amount ?? 0) || 0;
+  const rawStatus = toStr(payment?.status).toUpperCase();
+
+  if (amount > 0) return "RECORDED";
+
+  if (["VOID", "CANCELLED", "FAILED"].includes(rawStatus)) return rawStatus;
+
+  return "NEEDS REVIEW";
+}
+
+function normalizeLinkedSaleState(payment) {
+  const saleStatus = toStr(payment?.saleStatus ?? payment?.sale_status)
+    .trim()
+    .toUpperCase();
+
+  if (!saleStatus) return "Sale linked";
+
+  if (saleStatus === "COMPLETED") return "Sale completed";
+  if (saleStatus === "AWAITING_PAYMENT_RECORD") return "Payment was recorded";
+  if (saleStatus === "PENDING") return "Payment was recorded";
+  if (saleStatus === "FULFILLED") return "Payment was recorded";
+  if (saleStatus === "CANCELLED") return "Sale cancelled";
+
+  return saleStatus.replaceAll("_", " ");
+}
+
 function PaymentCard({ payment, coverageActive = false }) {
   const paymentId = payment?.id ?? "—";
   const saleId = payment?.saleId ?? payment?.sale_id ?? "—";
@@ -213,13 +240,8 @@ function PaymentCard({ payment, coverageActive = false }) {
   const customerPhone =
     toStr(payment?.customerPhone ?? payment?.customer_phone) || null;
 
-  const linkedSaleStatus =
-    toStr(payment?.saleStatus ?? payment?.sale_status).toUpperCase() || "";
-
-  const status =
-    toStr(payment?.status).toUpperCase() ||
-    (amount > 0 ? "RECORDED" : "PENDING");
-
+  const paymentStatus = normalizePaymentRecordStatus(payment);
+  const linkedSaleState = normalizeLinkedSaleState(payment);
   const salePreview = payment?.salePreview || null;
 
   return (
@@ -230,11 +252,15 @@ function PaymentCard({ payment, coverageActive = false }) {
             <div className="text-sm font-black text-[var(--app-fg)] sm:text-base">
               Payment #{paymentId}
             </div>
+
             <PaymentMetaPill tone="info">{method}</PaymentMetaPill>
-            <StatusBadge status={status} />
-            {linkedSaleStatus ? (
-              <StatusBadge status={linkedSaleStatus} />
-            ) : null}
+
+            <PaymentMetaPill
+              tone={paymentStatus === "RECORDED" ? "success" : "warn"}
+            >
+              {paymentStatus}
+            </PaymentMetaPill>
+
             {coverageActive ? (
               <PaymentMetaPill tone="warn">Cashier coverage</PaymentMetaPill>
             ) : null}
@@ -276,21 +302,23 @@ function PaymentCard({ payment, coverageActive = false }) {
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <BoughtBlock saleId={saleId} salePreview={salePreview} />
+
           <InfoBlock
-            label="Linked sale state"
-            value={linkedSaleStatus || "Unknown"}
-            sub="Directly returned from backend payment list"
+            label="Sale link"
+            value={linkedSaleState}
+            sub="Money has already been recorded"
           />
         </div>
 
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-4 py-3">
+        <div className="rounded-2xl border border-[var(--success-border)] bg-[var(--success-bg)] px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-[0.08em] app-muted">
                 Traceability
               </div>
               <div className="mt-1 text-sm text-[var(--app-fg)]">
-                Linked to sale <span className="font-bold">#{saleId}</span>
+                Payment is saved and linked to sale{" "}
+                <span className="font-bold">#{saleId}</span>
               </div>
             </div>
 
