@@ -17,6 +17,62 @@ import AsyncButton from "../AsyncButton";
 
 const PAGE_SIZE = 10;
 
+function getSaleItems(sale) {
+  const items =
+    sale?.items ||
+    sale?.saleItems ||
+    sale?.sale_items ||
+    sale?.lines ||
+    sale?.products ||
+    [];
+
+  return Array.isArray(items) ? items : [];
+}
+
+function itemName(item) {
+  return (
+    toStr(
+      item?.productName ??
+        item?.product_name ??
+        item?.name ??
+        item?.product?.name ??
+        item?.sku,
+    ) || "Item"
+  );
+}
+
+function itemQty(item) {
+  const qty = Number(item?.qty ?? item?.quantity ?? item?.soldQty ?? 0);
+  return Number.isFinite(qty) && qty > 0 ? qty : 1;
+}
+
+function buildItemsText(sale) {
+  const items = getSaleItems(sale);
+
+  if (!items.length) {
+    return toStr(
+      sale?.itemsSummary ??
+        sale?.items_summary ??
+        sale?.productsSummary ??
+        sale?.products_summary,
+    );
+  }
+
+  return items
+    .slice(0, 4)
+    .map((item) => `${itemName(item)} ×${itemQty(item)}`)
+    .join(", ");
+}
+
+function itemsCount(sale) {
+  const items = getSaleItems(sale);
+  if (items.length) {
+    return items.reduce((sum, item) => sum + itemQty(item), 0);
+  }
+
+  return Number(sale?.itemsCount ?? sale?.items_count ?? 0) || 0;
+}
+
 function StatTile({ label, value, sub, tone = "neutral" }) {
   const toneCls =
     tone === "success"
@@ -30,13 +86,7 @@ function StatTile({ label, value, sub, tone = "neutral" }) {
             : "border-[var(--border)] bg-[var(--card-2)]";
 
   return (
-    <div
-      className={cx(
-        "rounded-3xl border p-4 sm:p-5 transition",
-        "shadow-[0_1px_2px_rgba(0,0,0,0.04)]",
-        toneCls,
-      )}
-    >
+    <div className={cx("rounded-3xl border p-4 sm:p-5", toneCls)}>
       <div className="text-[10px] font-semibold uppercase tracking-[0.1em] app-muted sm:text-[11px]">
         {label}
       </div>
@@ -44,9 +94,7 @@ function StatTile({ label, value, sub, tone = "neutral" }) {
         {value}
       </div>
       {sub ? (
-        <div className="mt-1.5 text-xs leading-5 app-muted sm:text-sm">
-          {sub}
-        </div>
+        <div className="mt-1.5 text-xs leading-5 app-muted">{sub}</div>
       ) : null}
     </div>
   );
@@ -90,7 +138,7 @@ function SalesToolbar({
             Search
           </div>
           <Input
-            placeholder="Customer, phone, sale id, seller, cashier, status…"
+            placeholder="Customer, phone, sale id, item, seller, cashier, status…"
             value={salesQ}
             onChange={(e) => setSalesQ?.(e.target.value)}
           />
@@ -202,18 +250,44 @@ function SalesSummary({
   );
 }
 
+function ItemsSoldBlock({ sale, compact = false }) {
+  const text = buildItemsText(sale);
+  const count = itemsCount(sale);
+
+  return (
+    <div
+      className={
+        compact
+          ? ""
+          : "rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3.5"
+      }
+    >
+      <div className="text-[10px] font-semibold uppercase tracking-[0.08em] app-muted">
+        Items sold
+      </div>
+      <div className="mt-1.5 line-clamp-2 break-words text-sm font-bold leading-5 text-[var(--app-fg)]">
+        {text || "No item details loaded"}
+      </div>
+      <div className="mt-1 text-xs app-muted">
+        {count > 0 ? `${count} item(s)` : "Open proof/details to inspect"}
+      </div>
+    </div>
+  );
+}
+
 function DesktopSalesTable({ rows, onOpenCancel, onOpenProof }) {
   return (
     <div className="hidden xl:block">
       <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-        <div className="grid grid-cols-[104px_178px_132px_132px_minmax(220px,1.25fr)_130px_168px] gap-0 border-b border-[var(--border)] bg-[var(--card-2)] px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
-          <div className="pr-5">Sale</div>
-          <div className="px-4">Status</div>
+        <div className="grid grid-cols-[90px_150px_120px_120px_minmax(230px,1.2fr)_minmax(260px,1.4fr)_120px_148px] border-b border-[var(--border)] bg-[var(--card-2)] px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
+          <div className="pr-4">Sale</div>
+          <div className="px-3">Status</div>
           <div className="px-3 text-right">Total</div>
           <div className="border-l border-[var(--border)] px-3 text-right">
             Paid
           </div>
           <div className="border-l border-[var(--border)] px-4">Customer</div>
+          <div className="border-l border-[var(--border)] px-4">Items sold</div>
           <div className="border-l border-[var(--border)] px-3">Staff</div>
           <div className="border-l border-[var(--border)] pl-3 text-right">
             Actions
@@ -224,11 +298,9 @@ function DesktopSalesTable({ rows, onOpenCancel, onOpenProof }) {
           {rows.map((s) => {
             const total = Number(s?.totalAmount ?? s?.total ?? 0) || 0;
             const paid = Number(s?.amountPaid ?? s?.amount_paid ?? 0) || 0;
-
             const customerName =
               toStr(s?.customerName ?? s?.customer_name) || "Walk-in customer";
             const customerPhone = toStr(s?.customerPhone ?? s?.customer_phone);
-
             const staffName =
               toStr(s?.sellerName ?? s?.seller_name) ||
               toStr(s?.cashierName ?? s?.cashier_name) ||
@@ -237,13 +309,13 @@ function DesktopSalesTable({ rows, onOpenCancel, onOpenProof }) {
             return (
               <div
                 key={String(s?.id)}
-                className="grid grid-cols-[104px_178px_132px_132px_minmax(220px,1.25fr)_130px_168px] gap-0 border-b border-[var(--border)] px-5 py-4 text-sm last:border-b-0 hover:bg-[var(--hover)]"
+                className="grid grid-cols-[90px_150px_120px_120px_minmax(230px,1.2fr)_minmax(260px,1.4fr)_120px_148px] border-b border-[var(--border)] px-5 py-4 text-sm last:border-b-0 hover:bg-[var(--hover)]"
               >
-                <div className="pr-5 font-black text-[var(--app-fg)]">
+                <div className="pr-4 font-black text-[var(--app-fg)]">
                   #{s?.id ?? "—"}
                 </div>
 
-                <div className="min-w-0 px-4">
+                <div className="min-w-0 px-3">
                   <StatusBadge status={s?.status} />
                 </div>
 
@@ -262,6 +334,10 @@ function DesktopSalesTable({ rows, onOpenCancel, onOpenProof }) {
                   <div className="mt-0.5 truncate text-xs app-muted">
                     {customerPhone || "—"}
                   </div>
+                </div>
+
+                <div className="min-w-0 border-l border-[var(--border)] px-4">
+                  <ItemsSoldBlock sale={s} compact />
                 </div>
 
                 <div className="truncate border-l border-[var(--border)] px-3 text-sm app-muted">
@@ -299,11 +375,9 @@ function MobileSalesCards({ rows, onOpenCancel, onOpenProof }) {
       {rows.map((s) => {
         const total = Number(s?.totalAmount ?? s?.total ?? 0) || 0;
         const paid = Number(s?.amountPaid ?? s?.amount_paid ?? 0) || 0;
-
         const customerName =
           toStr(s?.customerName ?? s?.customer_name) || "Walk-in customer";
         const customerPhone = toStr(s?.customerPhone ?? s?.customer_phone);
-
         const staffName =
           toStr(s?.sellerName ?? s?.seller_name) ||
           toStr(s?.cashierName ?? s?.cashier_name) ||
@@ -359,6 +433,10 @@ function MobileSalesCards({ rows, onOpenCancel, onOpenProof }) {
                   Paid {money(paid)}
                 </div>
                 <div className="mt-1 text-xs app-muted">Staff: {staffName}</div>
+              </div>
+
+              <div className="sm:col-span-2">
+                <ItemsSoldBlock sale={s} />
               </div>
             </div>
 
@@ -444,7 +522,7 @@ export default function AdminSalesSection({
   return (
     <SectionCard
       title="Sales command center"
-      hint="Search, filter, investigate, and cancel sales without losing context."
+      hint="Search, filter, investigate, see items sold, and cancel sales without losing context."
       right={
         <AsyncButton
           variant="secondary"
