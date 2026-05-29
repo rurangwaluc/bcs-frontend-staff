@@ -20,6 +20,8 @@ const PAGE_SIZE = 10;
 function getSaleItems(sale) {
   const items =
     sale?.items ||
+    sale?.itemsPreview ||
+    sale?.items_preview ||
     sale?.saleItems ||
     sale?.sale_items ||
     sale?.lines ||
@@ -59,17 +61,14 @@ function buildItemsText(sale) {
   }
 
   return items
-    .slice(0, 4)
+    .slice(0, 5)
     .map((item) => `${itemName(item)} ×${itemQty(item)}`)
     .join(", ");
 }
 
 function itemsCount(sale) {
   const items = getSaleItems(sale);
-  if (items.length) {
-    return items.reduce((sum, item) => sum + itemQty(item), 0);
-  }
-
+  if (items.length) return items.reduce((sum, item) => sum + itemQty(item), 0);
   return Number(sale?.itemsCount ?? sale?.items_count ?? 0) || 0;
 }
 
@@ -90,50 +89,50 @@ function StatTile({ label, value, sub, tone = "neutral" }) {
       <div className="text-[10px] font-semibold uppercase tracking-[0.1em] app-muted sm:text-[11px]">
         {label}
       </div>
-      <div className="mt-1.5 text-lg font-black leading-tight text-[var(--app-fg)] sm:text-2xl">
+      <div className="mt-1.5 break-words text-lg font-black leading-tight text-[var(--app-fg)] sm:text-xl 2xl:text-2xl">
         {value}
       </div>
-      {sub ? (
-        <div className="mt-1.5 text-xs leading-5 app-muted">{sub}</div>
-      ) : null}
+      {sub ? <div className="mt-1.5 text-xs leading-5 app-muted">{sub}</div> : null}
     </div>
   );
 }
 
-function SalesToolbar({
-  salesQ,
-  setSalesQ,
-  salesStatusFilter,
-  setSalesStatusFilter,
-  salesFrom,
-  setSalesFrom,
-  salesTo,
-  setSalesTo,
-  onClear,
-}) {
+function SalesToolbar(props) {
+  const {
+    salesQ,
+    setSalesQ,
+    salesStatusFilter,
+    setSalesStatusFilter,
+    salesFrom,
+    setSalesFrom,
+    salesTo,
+    setSalesTo,
+    onClear,
+  } = props;
+
   return (
     <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4 sm:p-5">
-      <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="text-sm font-black text-[var(--app-fg)]">
             Sales filters
           </div>
           <div className="text-xs app-muted sm:text-sm">
-            Narrow the list fast without losing context.
+            Search sales, customers, staff, and sold items.
           </div>
         </div>
 
         <button
           type="button"
           onClick={onClear}
-          className="app-focus inline-flex h-11 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+          className="app-focus inline-flex h-11 w-full items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)] sm:w-auto"
         >
           Clear filters
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-12">
-        <div className="xl:col-span-4">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
+        <div className="lg:col-span-5">
           <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
             Search
           </div>
@@ -144,7 +143,7 @@ function SalesToolbar({
           />
         </div>
 
-        <div className="xl:col-span-3">
+        <div className="lg:col-span-3">
           <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
             Filter
           </div>
@@ -160,7 +159,7 @@ function SalesToolbar({
           </Select>
         </div>
 
-        <div className="xl:col-span-2">
+        <div className="lg:col-span-2">
           <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
             From
           </div>
@@ -171,7 +170,7 @@ function SalesToolbar({
           />
         </div>
 
-        <div className="xl:col-span-2">
+        <div className="lg:col-span-2">
           <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
             To
           </div>
@@ -180,12 +179,6 @@ function SalesToolbar({
             value={salesTo}
             onChange={(e) => setSalesTo?.(e.target.value)}
           />
-        </div>
-
-        <div className="xl:col-span-1 flex items-end">
-          <div className="w-full rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-center text-xs font-semibold app-muted">
-            Live
-          </div>
         </div>
       </div>
     </div>
@@ -208,7 +201,7 @@ function SalesSummary({
 
   return (
     <div className="grid gap-3">
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile
           label="Filtered sales"
           value={String(totalCount)}
@@ -229,9 +222,7 @@ function SalesSummary({
         <StatTile
           label="Showing now"
           value={String(visibleCount)}
-          sub={
-            canLoadMoreSales ? `More available (${remaining})` : "All loaded"
-          }
+          sub={canLoadMoreSales ? `More available (${remaining})` : "All loaded"}
           tone={canLoadMoreSales ? "warn" : "neutral"}
         />
       </div>
@@ -250,216 +241,110 @@ function SalesSummary({
   );
 }
 
-function ItemsSoldBlock({ sale, compact = false }) {
+function InfoBlock({ label, children, className = "" }) {
+  return (
+    <div
+      className={cx(
+        "min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3.5",
+        className,
+      )}
+    >
+      <div className="text-[10px] font-semibold uppercase tracking-[0.08em] app-muted">
+        {label}
+      </div>
+      <div className="mt-1.5 min-w-0 text-sm font-bold leading-5 text-[var(--app-fg)]">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ItemsSoldBlock({ sale }) {
   const text = buildItemsText(sale);
   const count = itemsCount(sale);
 
   return (
-    <div
-      className={
-        compact
-          ? ""
-          : "rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3.5"
-      }
-    >
-      <div className="text-[10px] font-semibold uppercase tracking-[0.08em] app-muted">
-        Items sold
-      </div>
-      <div className="mt-1.5 line-clamp-2 break-words text-sm font-bold leading-5 text-[var(--app-fg)]">
-        {text || "No item details loaded"}
-      </div>
-      <div className="mt-1 text-xs app-muted">
+    <InfoBlock label="Items sold">
+      <div className="line-clamp-2 break-words">{text || "No item details loaded"}</div>
+      <div className="mt-1 text-xs font-medium app-muted">
         {count > 0 ? `${count} item(s)` : "Open proof/details to inspect"}
       </div>
-    </div>
+    </InfoBlock>
   );
 }
 
-function DesktopSalesTable({ rows, onOpenCancel, onOpenProof }) {
+function SaleCard({ sale, onOpenCancel, onOpenProof }) {
+  const total = Number(sale?.totalAmount ?? sale?.total ?? 0) || 0;
+  const paid = Number(sale?.amountPaid ?? sale?.amount_paid ?? 0) || 0;
+
+  const customerName =
+    toStr(sale?.customerName ?? sale?.customer_name) || "Walk-in customer";
+  const customerPhone = toStr(sale?.customerPhone ?? sale?.customer_phone);
+
+  const staffName =
+    toStr(sale?.sellerName ?? sale?.seller_name) ||
+    toStr(sale?.cashierName ?? sale?.cashier_name) ||
+    "—";
+
   return (
-    <div className="hidden xl:block">
-      <div className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-        <div className="grid grid-cols-[90px_150px_120px_120px_minmax(230px,1.2fr)_minmax(260px,1.4fr)_120px_148px] border-b border-[var(--border)] bg-[var(--card-2)] px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] app-muted">
-          <div className="pr-4">Sale</div>
-          <div className="px-3">Status</div>
-          <div className="px-3 text-right">Total</div>
-          <div className="border-l border-[var(--border)] px-3 text-right">
-            Paid
+    <article className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] sm:p-5">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-base font-black text-[var(--app-fg)]">
+              Sale #{sale?.id ?? "—"}
+            </div>
+            <StatusBadge status={sale?.status} />
           </div>
-          <div className="border-l border-[var(--border)] px-4">Customer</div>
-          <div className="border-l border-[var(--border)] px-4">Items sold</div>
-          <div className="border-l border-[var(--border)] px-3">Staff</div>
-          <div className="border-l border-[var(--border)] pl-3 text-right">
-            Actions
+          <div className="mt-1 text-xs app-muted">
+            {fmt(sale?.createdAt || sale?.created_at)}
           </div>
         </div>
 
-        <div className="grid">
-          {rows.map((s) => {
-            const total = Number(s?.totalAmount ?? s?.total ?? 0) || 0;
-            const paid = Number(s?.amountPaid ?? s?.amount_paid ?? 0) || 0;
-            const customerName =
-              toStr(s?.customerName ?? s?.customer_name) || "Walk-in customer";
-            const customerPhone = toStr(s?.customerPhone ?? s?.customer_phone);
-            const staffName =
-              toStr(s?.sellerName ?? s?.seller_name) ||
-              toStr(s?.cashierName ?? s?.cashier_name) ||
-              "—";
-
-            return (
-              <div
-                key={String(s?.id)}
-                className="grid grid-cols-[90px_150px_120px_120px_minmax(230px,1.2fr)_minmax(260px,1.4fr)_120px_148px] border-b border-[var(--border)] px-5 py-4 text-sm last:border-b-0 hover:bg-[var(--hover)]"
-              >
-                <div className="pr-4 font-black text-[var(--app-fg)]">
-                  #{s?.id ?? "—"}
-                </div>
-
-                <div className="min-w-0 px-3">
-                  <StatusBadge status={s?.status} />
-                </div>
-
-                <div className="px-3 text-right font-black text-[var(--app-fg)] tabular-nums">
-                  {money(total)}
-                </div>
-
-                <div className="border-l border-[var(--border)] px-3 text-right font-medium tabular-nums app-muted">
-                  {money(paid)}
-                </div>
-
-                <div className="min-w-0 border-l border-[var(--border)] px-4">
-                  <div className="truncate font-semibold text-[var(--app-fg)]">
-                    {customerName}
-                  </div>
-                  <div className="mt-0.5 truncate text-xs app-muted">
-                    {customerPhone || "—"}
-                  </div>
-                </div>
-
-                <div className="min-w-0 border-l border-[var(--border)] px-4">
-                  <ItemsSoldBlock sale={s} compact />
-                </div>
-
-                <div className="truncate border-l border-[var(--border)] px-3 text-sm app-muted">
-                  {staffName}
-                </div>
-
-                <div className="flex items-center justify-end gap-2 border-l border-[var(--border)] pl-3">
-                  <button
-                    type="button"
-                    className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs font-semibold text-[var(--app-fg)] hover:bg-[var(--hover)]"
-                    onClick={() => onOpenProof?.(s?.id)}
-                  >
-                    Proof
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-2 text-xs font-semibold text-[var(--danger-fg)] hover:opacity-90"
-                    onClick={() => onOpenCancel?.(s?.id)}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+        <div className="grid grid-cols-2 gap-2 sm:min-w-[280px]">
+          <InfoBlock label="Total">
+            <span className="tabular-nums">{money(total)}</span>
+          </InfoBlock>
+          <InfoBlock label="Paid">
+            <span className="tabular-nums">{money(paid)}</span>
+          </InfoBlock>
         </div>
       </div>
-    </div>
-  );
-}
 
-function MobileSalesCards({ rows, onOpenCancel, onOpenProof }) {
-  return (
-    <div className="grid gap-3 xl:hidden">
-      {rows.map((s) => {
-        const total = Number(s?.totalAmount ?? s?.total ?? 0) || 0;
-        const paid = Number(s?.amountPaid ?? s?.amount_paid ?? 0) || 0;
-        const customerName =
-          toStr(s?.customerName ?? s?.customer_name) || "Walk-in customer";
-        const customerPhone = toStr(s?.customerPhone ?? s?.customer_phone);
-        const staffName =
-          toStr(s?.sellerName ?? s?.seller_name) ||
-          toStr(s?.cashierName ?? s?.cashier_name) ||
-          "—";
-
-        return (
-          <div
-            key={String(s?.id)}
-            className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] sm:p-5"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="text-sm font-black text-[var(--app-fg)] sm:text-base">
-                    Sale #{s?.id ?? "—"}
-                  </div>
-                  <StatusBadge status={s?.status} />
-                </div>
-
-                <div className="mt-1 text-xs app-muted">
-                  {fmt(s?.createdAt || s?.created_at)}
-                </div>
-              </div>
-
-              <div className="text-right">
-                <div className="text-[11px] uppercase tracking-[0.08em] app-muted">
-                  Total
-                </div>
-                <div className="text-lg font-black leading-tight text-[var(--app-fg)] sm:text-xl">
-                  {money(total)}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3.5">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.08em] app-muted">
-                  Customer
-                </div>
-                <div className="mt-1.5 text-sm font-bold text-[var(--app-fg)]">
-                  {customerName}
-                </div>
-                <div className="mt-1 text-xs app-muted">
-                  {customerPhone || "—"}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3.5">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.08em] app-muted">
-                  Payment
-                </div>
-                <div className="mt-1.5 text-sm font-bold text-[var(--app-fg)]">
-                  Paid {money(paid)}
-                </div>
-                <div className="mt-1 text-xs app-muted">Staff: {staffName}</div>
-              </div>
-
-              <div className="sm:col-span-2">
-                <ItemsSoldBlock sale={s} />
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                className="min-h-11 rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] hover:bg-[var(--hover)]"
-                onClick={() => onOpenProof?.(s?.id)}
-              >
-                Proof
-              </button>
-              <button
-                type="button"
-                className="min-h-11 rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-2.5 text-sm font-semibold text-[var(--danger-fg)] hover:opacity-90"
-                onClick={() => onOpenCancel?.(s?.id)}
-              >
-                Cancel
-              </button>
-            </div>
+      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-4">
+        <InfoBlock label="Customer">
+          <div className="truncate">{customerName}</div>
+          <div className="mt-1 text-xs font-medium app-muted">
+            {customerPhone || "—"}
           </div>
-        );
-      })}
-    </div>
+        </InfoBlock>
+
+        <div className="lg:col-span-2">
+          <ItemsSoldBlock sale={sale} />
+        </div>
+
+        <InfoBlock label="Staff">
+          <div className="truncate">{staffName}</div>
+        </InfoBlock>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <button
+          type="button"
+          className="min-h-11 rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)]"
+          onClick={() => onOpenProof?.(sale?.id)}
+        >
+          Proof / details
+        </button>
+        <button
+          type="button"
+          className="min-h-11 rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-2.5 text-sm font-semibold text-[var(--danger-fg)] transition hover:opacity-90"
+          onClick={() => onOpenCancel?.(sale?.id)}
+        >
+          Cancel sale
+        </button>
+      </div>
+    </article>
   );
 }
 
@@ -473,8 +358,9 @@ function SalesLoadingState() {
         >
           <Skeleton className="h-5 w-40" />
           <Skeleton className="mt-2 h-4 w-56 max-w-full" />
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-4">
             <Skeleton className="h-20 w-full rounded-2xl" />
+            <Skeleton className="h-20 w-full rounded-2xl lg:col-span-2" />
             <Skeleton className="h-20 w-full rounded-2xl" />
           </div>
           <Skeleton className="mt-4 h-11 w-full rounded-2xl" />
@@ -567,24 +453,23 @@ export default function AdminSalesSection({
           <SalesEmptyState />
         ) : (
           <>
-            <DesktopSalesTable
-              rows={filteredSales}
-              onOpenCancel={onOpenCancel}
-              onOpenProof={onOpenProof}
-            />
-
-            <MobileSalesCards
-              rows={filteredSales}
-              onOpenCancel={onOpenCancel}
-              onOpenProof={onOpenProof}
-            />
+            <div className="grid gap-3">
+              {filteredSales.map((sale) => (
+                <SaleCard
+                  key={String(sale?.id)}
+                  sale={sale}
+                  onOpenCancel={onOpenCancel}
+                  onOpenProof={onOpenProof}
+                />
+              ))}
+            </div>
 
             {canLoadMoreSales ? (
               <div className="flex justify-center pt-1">
                 <button
                   type="button"
                   onClick={() => setSalesPage?.((p) => Number(p || 1) + 1)}
-                  className="min-h-11 rounded-2xl border border-[var(--border)] bg-[var(--card)] px-5 py-3 text-sm font-semibold text-[var(--app-fg)] shadow-sm hover:bg-[var(--hover)]"
+                  className="min-h-11 rounded-2xl border border-[var(--border)] bg-[var(--card)] px-5 py-3 text-sm font-semibold text-[var(--app-fg)] shadow-sm transition hover:bg-[var(--hover)]"
                 >
                   Load more (+{PAGE_SIZE})
                 </button>
