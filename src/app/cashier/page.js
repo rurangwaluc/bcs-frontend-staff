@@ -455,15 +455,6 @@ export default function CashierPage() {
     }
   }, []);
 
-  const loadSessionBoundExpenses = useCallback(async () => {
-    await Promise.all([
-      loadSessions(),
-      loadExpenses(),
-      loadLedger(),
-      loadLedgerToday(),
-    ]);
-  }, [loadSessions, loadExpenses, loadLedger, loadLedgerToday]);
-
   const loadReconciles = useCallback(async () => {
     setReconcilesLoading(true);
     try {
@@ -554,6 +545,15 @@ export default function CashierPage() {
       setLedgerTodayLoading(false);
     }
   }, []);
+
+  const loadSessionBoundExpenses = useCallback(async () => {
+    await Promise.all([
+      loadSessions(),
+      loadExpenses(),
+      loadLedger(),
+      loadLedgerToday(),
+    ]);
+  }, [loadSessions, loadExpenses, loadLedger, loadLedgerToday]);
 
   const loadUnread = useCallback(async () => {
     try {
