@@ -205,6 +205,7 @@ export default function SellerSalesSection({
   markSalePaid,
   openCreditModal,
   openSaleItems,
+  openEditSale,
   openProforma,
   openDeliveryNote,
   openInvoice,
@@ -409,6 +410,15 @@ export default function SellerSalesSection({
                       </div>
 
                       <div className="flex shrink-0 flex-wrap items-center gap-2">
+                        {st === "DRAFT" ? (
+                          <DocumentButton
+                            tone="warn"
+                            onClick={() => openEditSale?.(id)}
+                          >
+                            Edit sale
+                          </DocumentButton>
+                        ) : null}
+
                         <DocumentButton onClick={() => openSaleItems(id)}>
                           View items
                         </DocumentButton>

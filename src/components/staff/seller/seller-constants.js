@@ -5,6 +5,7 @@ export const ENDPOINTS = {
   SALES_LIST: "/sales",
   SALES_CREATE: "/sales",
   SALE_GET: (id) => `/sales/${id}`,
+  SALE_UPDATE: (id) => `/sales/${id}`,
   SALE_MARK: (id) => `/sales/${id}/mark`,
   CUSTOMERS_SEARCH: (q) => `/customers/search?q=${encodeURIComponent(q)}`,
   CUSTOMERS_CREATE: "/customers",
