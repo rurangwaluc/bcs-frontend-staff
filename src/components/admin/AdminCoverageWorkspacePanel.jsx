@@ -6,46 +6,46 @@ const CONFIG = {
   store_keeper: {
     title: "Store keeper coverage",
     summary:
-      "Focus on stock intake, inventory review, low-stock checks, and request handling.",
+      "Cover stock release, inventory review, stock arrivals, and correction requests while the store keeper is unavailable.",
     actions: [
-      { key: "inventory", label: "Open inventory" },
-      { key: "arrivals", label: "Open arrivals" },
-      { key: "inv_requests", label: "Open inventory requests" },
-      { key: "sales", label: "Open sales" },
-      // { key: "evidence", label: "Open proof & history" },
+      { key: "sales", label: "Release stock" },
+      { key: "inventory", label: "Review inventory" },
+      { key: "arrivals", label: "Record stock arrivals" },
+      { key: "inv_requests", label: "Correction requests" },
     ],
   },
+
   cashier: {
     title: "Cashier coverage",
     summary:
-      "Focus on payment recording, cash visibility, and payment-side transaction flow.",
+      "Cover payment recording, cash visibility, cashier sessions, and payment-side transaction flow.",
     actions: [
-      { key: "payments", label: "Open payments" },
-      { key: "cash", label: "Open cash reports" },
-      { key: "sales", label: "Open sales" },
-      // { key: "evidence", label: "Open proof & history" },
+      { key: "payments", label: "Record payments" },
+      { key: "cash", label: "Cash reports" },
+      { key: "sales", label: "Review sales" },
     ],
   },
+
   seller: {
     title: "Seller coverage",
     summary:
-      "Focus on sales flow, customer transactions, and unresolved sales operations.",
+      "Cover sales flow, customer transactions, product lookup, and unresolved seller operations.",
     actions: [
-      { key: "sales", label: "Open sales" },
-      { key: "payments", label: "Open payments" },
-      { key: "dashboard", label: "Open dashboard" },
-      // { key: "evidence", label: "Open proof & history" },
+      { key: "sales", label: "Seller sales" },
+      { key: "payments", label: "Payment status" },
+      { key: "dashboard", label: "Dashboard" },
     ],
   },
+
   manager: {
     title: "Manager coverage",
     summary:
-      "Focus on oversight, approvals, exceptions, credits, and operational visibility.",
+      "Cover oversight, approvals, exceptions, credits, reports, and operational visibility.",
     actions: [
-      { key: "dashboard", label: "Open dashboard" },
-      { key: "inv_requests", label: "Open inventory requests" },
-      { key: "credits", label: "Open credits" },
-      { key: "reports", label: "Open reports" },
+      { key: "dashboard", label: "Dashboard" },
+      { key: "inv_requests", label: "Inventory requests" },
+      { key: "credits", label: "Credits" },
+      { key: "reports", label: "Reports" },
     ],
   },
 };
@@ -67,6 +67,7 @@ export default function AdminCoverageWorkspacePanel({
   const role = String(coverage?.actingAsRole || "")
     .trim()
     .toLowerCase();
+
   const cfg = CONFIG[role];
 
   if (!coverage?.active || !cfg) return null;
@@ -79,6 +80,7 @@ export default function AdminCoverageWorkspacePanel({
             <div className="text-sm font-black text-[var(--app-fg)] sm:text-base">
               {cfg.title}
             </div>
+
             <Pill tone="info">{prettyRole(role)}</Pill>
           </div>
 
@@ -87,13 +89,15 @@ export default function AdminCoverageWorkspacePanel({
           </div>
 
           <div className="mt-3 text-xs leading-6 app-muted">
-            All actions remain recorded as admin actions with coverage context.
+            Admin keeps full oversight. Coverage actions are recorded with
+            coverage context for audit safety.
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:w-[420px]">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:w-[460px]">
           {cfg.actions.map((action) => {
             const active = section === action.key;
+
             return (
               <button
                 key={action.key}
