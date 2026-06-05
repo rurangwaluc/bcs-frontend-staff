@@ -223,11 +223,6 @@ export default function LoginContent() {
   const emailRef = useRef(null);
 
   useEffect(() => {
-    setMsg("");
-    setMsgKind("danger");
-    setBtnState("idle");
-    setCapsOn(false);
-
     const timer = setTimeout(() => {
       try {
         emailRef.current?.focus?.();

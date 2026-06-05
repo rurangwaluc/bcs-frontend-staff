@@ -105,12 +105,15 @@ function methodTone(method) {
   if (value === "BANK") {
     return "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/40 dark:bg-sky-950/20 dark:text-sky-300";
   }
+
   if (value === "MOMO") {
     return "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20 dark:text-fuchsia-300";
   }
+
   if (value === "CARD") {
     return "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900/40 dark:bg-indigo-950/20 dark:text-indigo-300";
   }
+
   if (value === "CASH") {
     return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300";
   }
@@ -124,15 +127,19 @@ function categoryTone(category) {
   if (value.includes("TRANSPORT")) {
     return "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/40 dark:bg-sky-950/20 dark:text-sky-300";
   }
+
   if (value.includes("UTILITY") || value.includes("BILL")) {
     return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300";
   }
+
   if (value.includes("SALARY") || value.includes("PAYROLL")) {
     return "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/40 dark:bg-violet-950/20 dark:text-violet-300";
   }
+
   if (value.includes("MARKETING")) {
     return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300";
   }
+
   if (value.includes("REPAIR")) {
     return "border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-900/40 dark:bg-orange-950/20 dark:text-orange-300";
   }
@@ -737,6 +744,18 @@ export default function ExpensesPanel({
 
   const [createOpen, setCreateOpen] = useState(false);
   const [voidOpen, setVoidOpen] = useState(false);
+
+  const safeLocations = useMemo(() => {
+    const rows = Array.isArray(locations) ? locations : [];
+    if (rows.length > 0) return rows;
+
+    const id = Number(defaultLocationId);
+    if (Number.isInteger(id) && id > 0) {
+      return [{ id, name: `Branch #${id}`, code: "" }];
+    }
+
+    return [];
+  }, [locations, defaultLocationId]);
 
   const selectedExpense =
     selectedExpenseId == null

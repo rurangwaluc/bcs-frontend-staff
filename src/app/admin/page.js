@@ -50,6 +50,11 @@ export default function AdminPage() {
     return <div className="min-h-screen bg-[var(--app-bg)]" />;
   }
 
+  const adminRole = String(admin.me?.role || "")
+    .trim()
+    .toLowerCase();
+  const canCreateExpenseDirectly = adminRole === "owner";
+
   return (
     <div className="min-h-screen bg-[var(--app-bg)]">
       <RoleBar
@@ -200,9 +205,9 @@ export default function AdminPage() {
             <ExpensesPanel
               key={`expenses-${admin.refreshNonce}`}
               title="Admin expenses"
-              subtitle="Create and review operating expenses without using the cashier-only session screen."
+              subtitle="Review operating expenses, inspect money-out records, and void incorrect entries with a clear reason."
               defaultLocationId={admin.me?.locationId || ""}
-              canCreateExpense
+              canCreateExpense={canCreateExpenseDirectly}
               canVoidExpense
             />
           </AdminSectionCard>
