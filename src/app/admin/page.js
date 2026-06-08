@@ -53,7 +53,8 @@ export default function AdminPage() {
   const adminRole = String(admin.me?.role || "")
     .trim()
     .toLowerCase();
-  const canCreateExpenseDirectly = adminRole === "owner";
+  const canCreateExpenseDirectly =
+    adminRole === "owner" || adminRole === "admin";
 
   return (
     <div className="min-h-screen bg-[var(--app-bg)]">
