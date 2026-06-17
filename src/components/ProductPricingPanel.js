@@ -7,6 +7,7 @@ import { apiFetch } from "../lib/api";
 
 const ENDPOINTS = {
   PRODUCTS_LIST: "/products",
+  PRODUCT_UPDATE: (id) => `/products/${id}`,
   PRODUCT_PRICING_UPDATE: (id) => `/products/${id}/pricing`,
 };
 
@@ -23,11 +24,6 @@ function normalizeNumberInput(v) {
 function toNumberOrNull(v) {
   const n = Number(normalizeNumberInput(v));
   return Number.isFinite(n) ? n : null;
-}
-
-function toFiniteNumber(v, fallback = 0) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
 }
 
 function fmtMoney(v) {
@@ -47,25 +43,19 @@ function cx(...classes) {
 }
 
 function normalizeProduct(row) {
-  if (!row || typeof row !== "object") {
-    return null;
-  }
+  if (!row || typeof row !== "object") return null;
 
   return {
     ...row,
-
     id: row.id ?? null,
     name: row.name ?? row.productName ?? "",
     sku: row.sku ?? "",
-
+    category: row.category ?? "GENERAL",
+    notes: row.notes ?? "",
     purchasePrice: row.purchasePrice ?? row.costPrice ?? row.cost_price ?? 0,
-
     costPrice: row.costPrice ?? row.purchasePrice ?? row.cost_price ?? 0,
-
     sellingPrice: row.sellingPrice ?? row.selling_price ?? row.price ?? 0,
-
     maxDiscountPercent: row.maxDiscountPercent ?? row.max_discount_percent ?? 0,
-
     maxDiscountAmount:
       row.maxDiscountAmount ??
       row.max_discount_amount ??
@@ -95,6 +85,20 @@ function Banner({ kind = "info", children }) {
 function Input(props) {
   return (
     <input
+      {...props}
+      className={cx(
+        "w-full rounded-2xl border border-slate-300 bg-white px-3.5 py-3 text-sm text-slate-900 outline-none transition",
+        "placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-200",
+        "dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-500 dark:focus:ring-slate-800",
+        props.className || "",
+      )}
+    />
+  );
+}
+
+function TextArea(props) {
+  return (
+    <textarea
       {...props}
       className={cx(
         "w-full rounded-2xl border border-slate-300 bg-white px-3.5 py-3 text-sm text-slate-900 outline-none transition",
@@ -301,6 +305,7 @@ function ProductRow({ product, onEdit }) {
   const name = product?.name || product?.productName || "—";
   const sku = product?.sku || "—";
   const id = product?.id ?? "—";
+  const category = product?.category || "GENERAL";
 
   const pp =
     product?.purchasePrice ?? product?.costPrice ?? product?.cost_price;
@@ -316,6 +321,7 @@ function ProductRow({ product, onEdit }) {
             <div className="break-words text-sm font-black text-slate-950 dark:text-slate-50">
               {name}
             </div>
+            <Pill tone="info">{category}</Pill>
             {Number(sp) > 0 ? (
               <Pill
                 tone={
@@ -350,7 +356,7 @@ function ProductRow({ product, onEdit }) {
           className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 sm:w-auto dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
           onClick={() => onEdit(product)}
         >
-          Edit
+          Edit product
         </button>
       </div>
 
@@ -362,6 +368,14 @@ function ProductRow({ product, onEdit }) {
 function ProductEditModal({
   open,
   active,
+  productName,
+  setProductName,
+  sku,
+  setSku,
+  category,
+  setCategory,
+  notes,
+  setNotes,
   purchasePrice,
   setPurchasePrice,
   sellingPrice,
@@ -376,9 +390,6 @@ function ProductEditModal({
 }) {
   if (!open || !active) return null;
 
-  const activeName = active?.name || active?.productName || "Product";
-  const activeSku = active?.sku ? String(active.sku) : "";
-
   const pp = toNumberOrNull(purchasePrice);
   const sp = toNumberOrNull(sellingPrice);
   const md = toNumberOrNull(maxDiscountPercent);
@@ -387,15 +398,12 @@ function ProductEditModal({
   const profitPreview = pp != null && sp != null ? sp - pp : null;
   const marginPercent =
     pp != null && sp != null && pp > 0 ? ((sp - pp) / pp) * 100 : null;
-
   const maxDiscountValueByPercent =
     sp != null && md != null ? (sp * md) / 100 : null;
-
   const discountedPriceByPercent =
     sp != null && maxDiscountValueByPercent != null
       ? sp - maxDiscountValueByPercent
       : null;
-
   const discountedPriceByAmount =
     sp != null && mda != null ? Math.max(0, sp - mda) : null;
 
@@ -410,64 +418,118 @@ function ProductEditModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4">
-      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-[28px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+      <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-[28px] border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950">
         <div className="border-b border-slate-200 px-4 py-4 dark:border-slate-800 sm:px-5">
           <div className="text-lg font-black text-slate-950 dark:text-slate-50">
-            Edit pricing
+            Edit product
           </div>
           <div className="mt-1 break-words text-sm text-slate-600 dark:text-slate-400">
-            {activeName}
-            {activeSku ? ` • SKU ${activeSku}` : ""}
+            Update product identity and pricing in one controlled action.
           </div>
         </div>
 
-        <div className="grid gap-4 px-4 py-5 sm:px-5">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label>Purchase price</Label>
-              <Input
-                inputMode="numeric"
-                placeholder="Example: 900"
-                value={purchasePrice}
-                onChange={(e) => setPurchasePrice(e.target.value)}
-              />
+        <div className="grid gap-5 px-4 py-5 sm:px-5">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
+            <div className="mb-3 text-sm font-black text-slate-950 dark:text-slate-50">
+              Product details
             </div>
 
-            <div>
-              <Label>Selling price</Label>
-              <Input
-                inputMode="numeric"
-                placeholder="Example: 1500"
-                value={sellingPrice}
-                onChange={(e) => setSellingPrice(e.target.value)}
-              />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label>Product name</Label>
+                <Input
+                  value={productName}
+                  onChange={(e) => setProductName(e.target.value)}
+                  placeholder="Product name"
+                />
+              </div>
+
+              <div>
+                <Label>SKU</Label>
+                <Input
+                  value={sku}
+                  onChange={(e) => setSku(e.target.value)}
+                  placeholder="SKU"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <Label>Category</Label>
+                <Input
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value.toUpperCase())}
+                  placeholder="GENERAL"
+                />
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Keep category uppercase and valid according to your product
+                  catalog.
+                </div>
+              </div>
+
+              <div className="sm:col-span-2">
+                <Label>Notes</Label>
+                <TextArea
+                  rows={3}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Internal product notes"
+                />
+              </div>
             </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label>Max discount (%)</Label>
-              <Input
-                inputMode="numeric"
-                placeholder="Example: 10"
-                value={maxDiscountPercent}
-                onChange={(e) => setMaxDiscountPercent(e.target.value)}
-              />
-              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Use 0 if percentage discount should not be allowed.
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+            <div className="mb-3 text-sm font-black text-slate-950 dark:text-slate-50">
+              Pricing
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label>Purchase price</Label>
+                <Input
+                  inputMode="numeric"
+                  placeholder="Example: 900"
+                  value={purchasePrice}
+                  onChange={(e) => setPurchasePrice(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <Label>Selling price</Label>
+                <Input
+                  inputMode="numeric"
+                  placeholder="Example: 1500"
+                  value={sellingPrice}
+                  onChange={(e) => setSellingPrice(e.target.value)}
+                />
               </div>
             </div>
 
-            <div>
-              <Label>Max discount amount (RWF)</Label>
-              <Input
-                inputMode="numeric"
-                placeholder="Example: 500"
-                value={maxDiscountAmount}
-                onChange={(e) => setMaxDiscountAmount(e.target.value)}
-              />
-              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Use 0 if fixed amount discount should not be allowed.
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label>Max discount (%)</Label>
+                <Input
+                  inputMode="numeric"
+                  placeholder="Example: 10"
+                  value={maxDiscountPercent}
+                  onChange={(e) => setMaxDiscountPercent(e.target.value)}
+                />
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Use 0 if percentage discount should not be allowed.
+                </div>
+              </div>
+
+              <div>
+                <Label>Max discount amount (RWF)</Label>
+                <Input
+                  inputMode="numeric"
+                  placeholder="Example: 500"
+                  value={maxDiscountAmount}
+                  onChange={(e) => setMaxDiscountAmount(e.target.value)}
+                />
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Use 0 if fixed amount discount should not be allowed.
+                </div>
               </div>
             </div>
           </div>
@@ -561,7 +623,7 @@ function ProductEditModal({
 
           <AsyncButton
             state={saveState}
-            text="Save pricing"
+            text="Save product"
             loadingText="Saving…"
             successText="Saved"
             onClick={onSave}
@@ -584,6 +646,11 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
 
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(null);
+
+  const [productName, setProductName] = useState("");
+  const [sku, setSku] = useState("");
+  const [category, setCategory] = useState("");
+  const [notes, setNotes] = useState("");
 
   const [purchasePrice, setPurchasePrice] = useState("");
   const [sellingPrice, setSellingPrice] = useState("");
@@ -629,9 +696,15 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
 
     return list.filter((p) => {
       const name = safe(p?.name || p?.productName || "").toLowerCase();
-      const sku = safe(p?.sku || "").toLowerCase();
+      const skuText = safe(p?.sku || "").toLowerCase();
       const id = safe(p?.id).toLowerCase();
-      return name.includes(qq) || sku.includes(qq) || id.includes(qq);
+      const categoryText = safe(p?.category || "").toLowerCase();
+      return (
+        name.includes(qq) ||
+        skuText.includes(qq) ||
+        id.includes(qq) ||
+        categoryText.includes(qq)
+      );
     });
   }, [products, q]);
 
@@ -655,12 +728,7 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
       }
     }
 
-    return {
-      shown: list.length,
-      unpriced,
-      risky,
-      healthy,
-    };
+    return { shown: list.length, unpriced, risky, healthy };
   }, [filtered]);
 
   function openEdit(p) {
@@ -672,17 +740,19 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
       normalized?.costPrice ??
       normalized?.cost_price ??
       null;
-
     const sp =
       normalized?.sellingPrice ??
       normalized?.selling_price ??
       normalized?.price ??
       null;
-
     const md =
       normalized?.maxDiscountPercent ?? normalized?.max_discount_percent ?? 0;
-
     const mda = getProductMaxDiscountAmount(normalized);
+
+    setProductName(normalized?.name || "");
+    setSku(normalized?.sku || "");
+    setCategory(normalized?.category || "GENERAL");
+    setNotes(normalized?.notes || "");
 
     setPurchasePrice(pp == null ? "" : String(pp));
     setSellingPrice(sp == null ? "" : String(sp));
@@ -697,6 +767,10 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
   function closeEdit() {
     setOpen(false);
     setActive(null);
+    setProductName("");
+    setSku("");
+    setCategory("");
+    setNotes("");
     setPurchasePrice("");
     setSellingPrice("");
     setMaxDiscountPercent("0");
@@ -716,6 +790,26 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
 
     setSaveState("loading");
     setMsg("");
+
+    const cleanName = safe(productName);
+    const cleanSku = safe(sku);
+    const cleanCategory = safe(category).toUpperCase();
+    const cleanNotes = safe(notes);
+
+    if (cleanName.length < 2) {
+      setSaveState("idle");
+      return toast("danger", "Product name must be at least 2 characters.");
+    }
+
+    if (cleanSku && cleanSku.length > 80) {
+      setSaveState("idle");
+      return toast("danger", "SKU is too long.");
+    }
+
+    if (!cleanCategory) {
+      setSaveState("idle");
+      return toast("danger", "Category is required.");
+    }
 
     const ppRaw = normalizeNumberInput(purchasePrice);
     const spRaw = normalizeNumberInput(sellingPrice);
@@ -787,7 +881,20 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
     }
 
     try {
-      const response = await apiFetch(
+      const productResponse = await apiFetch(
+        ENDPOINTS.PRODUCT_UPDATE(active.id),
+        {
+          method: "PATCH",
+          body: {
+            name: cleanName,
+            sku: cleanSku || undefined,
+            category: cleanCategory,
+            notes: cleanNotes || undefined,
+          },
+        },
+      );
+
+      const pricingResponse = await apiFetch(
         ENDPOINTS.PRODUCT_PRICING_UPDATE(active.id),
         {
           method: "PATCH",
@@ -800,30 +907,30 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
         },
       );
 
-      const updatedProduct = normalizeProduct(
-        response?.product ?? response?.data ?? response,
-      );
+      const updatedProduct = normalizeProduct({
+        ...(productResponse?.product ??
+          productResponse?.data ??
+          productResponse ??
+          {}),
+        ...(pricingResponse?.product ??
+          pricingResponse?.data ??
+          pricingResponse ??
+          {}),
+      });
 
       if (updatedProduct?.id != null) {
         setProducts((prev) =>
           (Array.isArray(prev) ? prev : []).map((row) =>
             String(row?.id) === String(updatedProduct.id)
-              ? normalizeProduct({
-                  ...row,
-                  ...updatedProduct,
-                })
+              ? normalizeProduct({ ...row, ...updatedProduct })
               : row,
           ),
         );
       }
 
       setSaveState("success");
-      toast("success", "Pricing saved.");
+      toast("success", "Product saved.");
       closeEdit();
-
-      // IMPORTANT:
-      // do NOT immediately call load() here,
-      // because it can overwrite the fresh saved value with stale list data.
     } catch (e) {
       setSaveState("idle");
       toast("danger", e?.data?.error || e?.message || "Update failed.");
@@ -833,7 +940,7 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
   return (
     <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
       {msg ? (
-        <div className="border-b border-slate-200 px-4 pt-4 pb-0 dark:border-slate-800 sm:px-5">
+        <div className="border-b border-slate-200 px-4 pb-0 pt-4 dark:border-slate-800 sm:px-5">
           <Banner kind={msgKind}>{msg}</Banner>
         </div>
       ) : null}
@@ -842,7 +949,7 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0 flex-1">
             <Input
-              placeholder="Search by product name, SKU, or ID"
+              placeholder="Search by product name, SKU, category, or ID"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
@@ -909,6 +1016,14 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
       <ProductEditModal
         open={open}
         active={active}
+        productName={productName}
+        setProductName={setProductName}
+        sku={sku}
+        setSku={setSku}
+        category={category}
+        setCategory={setCategory}
+        notes={notes}
+        setNotes={setNotes}
         purchasePrice={purchasePrice}
         setPurchasePrice={setPurchasePrice}
         sellingPrice={sellingPrice}

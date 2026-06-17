@@ -412,7 +412,9 @@ function CreateExpenseModal({
     const locationId = Number(form.locationId);
     const amount = Number(form.amount);
 
-    if (!Number.isInteger(locationId) || locationId <= 0) {
+    const hasExplicitBranch = Number.isInteger(locationId) && locationId > 0;
+
+    if (safeLocations.length > 0 && !hasExplicitBranch) {
       setErrorText("Choose the branch first.");
       return;
     }
@@ -425,18 +427,23 @@ function CreateExpenseModal({
     try {
       setSubmitState("loading");
 
+      const body = {
+        category: safe(form.category, "GENERAL").toUpperCase(),
+        amount,
+        expenseDate: safe(form.expenseDate) || undefined,
+        method: safe(form.method, "BANK").toUpperCase(),
+        payeeName: safe(form.payeeName) || undefined,
+        reference: safe(form.reference) || undefined,
+        note: safe(form.note) || undefined,
+      };
+
+      if (hasExplicitBranch) {
+        body.locationId = locationId;
+      }
+
       const result = await apiFetch("/cash/expenses", {
         method: "POST",
-        body: {
-          locationId,
-          category: safe(form.category, "GENERAL").toUpperCase(),
-          amount,
-          expenseDate: safe(form.expenseDate) || undefined,
-          method: safe(form.method, "BANK").toUpperCase(),
-          payeeName: safe(form.payeeName) || undefined,
-          reference: safe(form.reference) || undefined,
-          note: safe(form.note) || undefined,
-        },
+        body,
       });
 
       setForm(makeCreateForm(defaultLocationId));
@@ -466,22 +473,32 @@ function CreateExpenseModal({
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <div className="mb-1 text-xs font-black uppercase tracking-[0.12em] text-[var(--muted)]">
-              Branch *
+              Branch {safeLocations.length > 0 ? "*" : ""}
             </div>
-            <Select
-              value={form.locationId}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, locationId: e.target.value }))
-              }
-            >
-              <option value="">Choose branch</option>
-              {safeLocations.map((row) => (
-                <option key={row?.id} value={String(row?.id)}>
-                  {safe(row?.name)}
-                  {safe(row?.code) ? ` (${safe(row.code)})` : ""}
-                </option>
-              ))}
-            </Select>
+
+            {safeLocations.length > 0 ? (
+              <Select
+                value={form.locationId}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    locationId: e.target.value,
+                  }))
+                }
+              >
+                <option value="">Choose branch</option>
+                {safeLocations.map((row) => (
+                  <option key={row?.id} value={String(row?.id)}>
+                    {safe(row?.name)}
+                    {safe(row?.code) ? ` (${safe(row.code)})` : ""}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <div className="rounded-[18px] border border-[var(--border)] bg-[var(--card-2)] px-4 py-3 text-sm text-[var(--muted)]">
+                Branch will be taken from the admin session.
+              </div>
+            )}
           </div>
 
           <div>
@@ -593,8 +610,9 @@ function CreateExpenseModal({
         </div>
 
         <div className="rounded-[18px] border border-[var(--border)] bg-[var(--card-2)] p-3 text-xs text-[var(--muted)]">
-          Use this for operating expenses only. Stock buying and supplier
-          purchasing must stay in supplier and inventory flows.
+          Admin creates expenses directly. Use this for operating expenses only.
+          Stock buying and supplier purchasing must stay in supplier and
+          inventory flows.
         </div>
 
         <div className="flex justify-end gap-2 pt-2">
