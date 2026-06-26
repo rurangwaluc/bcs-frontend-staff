@@ -113,7 +113,7 @@ function SellerCreditSetupModalInner({ sale, onClose, onConfirm, loading }) {
     setLocalError("");
 
     if (!Number.isFinite(total) || total <= 0) {
-      setLocalError("Sale total is invalid.");
+      setLocalError("Original sale amount is invalid.");
       return;
     }
 
@@ -194,7 +194,7 @@ function SellerCreditSetupModalInner({ sale, onClose, onConfirm, loading }) {
               Request credit • Sale #{saleId ?? "—"}
             </div>
             <div className="mt-1 text-sm app-muted">
-              Sale total:{" "}
+              Original sale amount:{" "}
               <b className="text-[var(--app-fg)]">{money(total)} RWF</b>
             </div>
           </div>
@@ -212,7 +212,7 @@ function SellerCreditSetupModalInner({ sale, onClose, onConfirm, loading }) {
         <div className="thin-scrollbar max-h-[calc(90vh-88px)] overflow-y-auto p-5">
           <div className="rounded-3xl border border-[var(--info-border)] bg-[var(--info-bg)] p-4 text-sm text-[var(--info-fg)]">
             <b>Seller step:</b> choose the credit structure, optionally record
-            any amount paid immediately, then submit the remaining balance for
+            any amount paid immediately, then submit only the unpaid balance for
             approval.
           </div>
 
@@ -333,8 +333,8 @@ function SellerCreditSetupModalInner({ sale, onClose, onConfirm, loading }) {
                 Upfront payment now
               </div>
               <div className="mt-1 text-sm app-muted">
-                Record any amount the customer pays immediately. The rest
-                becomes the credit principal.
+                Record only money the customer pays immediately. The rest
+                becomes the remaining credit balance.
               </div>
 
               <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -435,7 +435,7 @@ function SellerCreditSetupModalInner({ sale, onClose, onConfirm, loading }) {
 
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
-                    Sale total
+                    Original sale amount
                   </div>
                   <div className="mt-1 text-sm font-bold text-[var(--app-fg)]">
                     {money(total)} RWF
@@ -453,7 +453,7 @@ function SellerCreditSetupModalInner({ sale, onClose, onConfirm, loading }) {
 
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
-                    Credit principal
+                    Remaining credit balance
                   </div>
                   <div className="mt-1 text-sm font-bold text-[var(--app-fg)]">
                     {money(remainingPrincipal)} RWF

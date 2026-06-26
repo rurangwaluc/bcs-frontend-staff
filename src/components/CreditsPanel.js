@@ -33,7 +33,28 @@ function toStr(v) {
 
 function money(n) {
   const x = Number(n || 0);
-  return Number.isFinite(x) ? Math.round(x).toLocaleString() : "0";
+  if (!Number.isFinite(x)) return "0";
+  return Math.max(0, Math.round(x)).toLocaleString();
+}
+
+function nonNegativeNumber(value, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.round(n));
+}
+
+function paymentStateLabel({ originalAmount, paidAmount, remainingAmount }) {
+  const original = nonNegativeNumber(originalAmount, 0);
+  const paid = nonNegativeNumber(paidAmount, 0);
+  const remaining = nonNegativeNumber(
+    remainingAmount,
+    Math.max(0, original - paid),
+  );
+
+  if (original <= 0) return "No credit balance";
+  if (remaining <= 0) return "Fully paid";
+  if (paid > 0) return "Partially paid";
+  return "Unpaid";
 }
 
 function formatDate(value) {
@@ -367,52 +388,79 @@ function PaymentsList({ payments }) {
   const rows = Array.isArray(payments) ? payments : [];
   if (!rows.length) {
     return (
-      <div className="text-sm app-muted">No credit payments recorded yet.</div>
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4 text-sm app-muted">
+        No credit payment recorded yet.
+      </div>
     );
   }
 
   return (
-    <div className="grid gap-2">
+    <div className="grid gap-3">
       {rows.map((p, idx) => {
-        const amt = Number(p?.amount ?? 0) || 0;
+        const amt = nonNegativeNumber(p?.amount ?? 0);
         const method = toStr(p?.method) || "—";
         const at = p?.createdAt || p?.created_at || null;
-        const installmentLabel =
-          p?.installmentSequenceNo != null
-            ? `Installment #${p.installmentSequenceNo}`
-            : null;
+        const saleId = p?.saleId ?? p?.sale_id ?? null;
+        const receiver =
+          toStr(p?.receivedByName) ||
+          toStr(p?.received_by_name) ||
+          toStr(p?.receiverName) ||
+          toStr(p?.cashierName) ||
+          (p?.receivedBy ? `User #${p.receivedBy}` : "—");
+        const installmentNo =
+          p?.installmentNo ??
+          p?.installment_no ??
+          p?.installmentSequenceNo ??
+          p?.sequenceNo ??
+          null;
 
         return (
           <div
             key={p?.id || idx}
-            className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3"
+            className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4"
           >
-            <div className="min-w-0">
-              <div className="text-sm font-extrabold text-[var(--app-fg)]">
-                {money(amt)} RWF
-              </div>
-              <div className="mt-1 text-xs app-muted">
-                Method: <b>{method}</b>
-              </div>
-              <div className="mt-1 text-xs app-muted">
-                Date: <b>{formatDate(at)}</b>
-              </div>
-              {installmentLabel ? (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <div className="text-sm font-extrabold text-[var(--app-fg)]">
+                  {money(amt)} RWF received
+                </div>
                 <div className="mt-1 text-xs app-muted">
-                  Schedule: <b>{installmentLabel}</b>
+                  Sale: <b>#{saleId || "—"}</b>
+                  {installmentNo ? (
+                    <>
+                      {" "}
+                      • Installment: <b>#{installmentNo}</b>
+                    </>
+                  ) : null}
                 </div>
-              ) : null}
-              {p?.reference ? (
-                <div className="mt-1 break-words text-xs app-muted">
-                  Ref: {toStr(p.reference)}
-                </div>
-              ) : null}
-              {p?.note ? (
-                <div className="mt-1 break-words text-xs app-muted">
-                  Note: {toStr(p.note)}
-                </div>
-              ) : null}
+              </div>
+
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs font-bold text-[var(--app-fg)]">
+                {method}
+              </div>
             </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <MiniStat label="Date and time" value={formatDate(at)} />
+              <MiniStat label="Recorded by" value={receiver} />
+            </div>
+
+            {p?.reference || p?.note ? (
+              <div className="mt-3 grid gap-2">
+                {p?.reference ? (
+                  <div className="break-words text-xs app-muted">
+                    Reference:{" "}
+                    <b className="text-[var(--app-fg)]">{toStr(p.reference)}</b>
+                  </div>
+                ) : null}
+                {p?.note ? (
+                  <div className="break-words text-xs app-muted">
+                    Note:{" "}
+                    <b className="text-[var(--app-fg)]">{toStr(p.note)}</b>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         );
       })}
@@ -476,11 +524,11 @@ function InstallmentsList({ installments }) {
                 value={`${money(it?.amount ?? 0)} RWF`}
               />
               <MiniStat
-                label="Paid"
+                label="Paid so far"
                 value={`${money(it?.paidAmount ?? 0)} RWF`}
               />
               <MiniStat
-                label="Remaining"
+                label="Still to pay"
                 value={`${money(it?.remainingAmount ?? 0)} RWF`}
               />
             </div>
@@ -510,6 +558,7 @@ export default function CreditsPanel({
     canDecide: false,
     canSettle: false,
   },
+  currentOpenSession = null,
 }) {
   const [rows, setRows] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
@@ -643,7 +692,9 @@ export default function CreditsPanel({
         method: "CASH",
         note: "",
         reference: "",
-        cashSessionId: "",
+        cashSessionId: currentOpenSession?.id
+          ? String(currentOpenSession.id)
+          : "",
         installmentId: nextInstallment?.id ? String(nextInstallment.id) : "",
       });
       setDecisionNote("");
@@ -694,8 +745,53 @@ export default function CreditsPanel({
 
     const amt = Number(paymentForm.amount);
     if (!Number.isFinite(amt) || amt <= 0) {
-      toast("warn", "Enter a valid amount.");
+      toast("warn", "Enter a payment amount greater than zero.");
       return;
+    }
+
+    const remainingNow = nonNegativeNumber(creditDetail?.remainingAmount ?? 0);
+    if (remainingNow <= 0) {
+      toast("warn", "This credit is already fully paid.");
+      return;
+    }
+
+    if (Math.round(amt) > remainingNow) {
+      toast(
+        "warn",
+        `Payment cannot be more than the remaining balance of ${money(remainingNow)} RWF.`,
+      );
+      return;
+    }
+
+    const selectedMethod = toStr(paymentForm.method).toUpperCase();
+    if (!["CASH", "MOMO", "CARD", "BANK", "OTHER"].includes(selectedMethod)) {
+      toast(
+        "warn",
+        "Choose where the customer paid: Cash, MoMo, Bank, Card, or Other.",
+      );
+      return;
+    }
+
+    if (paymentForm.installmentId) {
+      const installment = (creditDetail?.installments || []).find(
+        (x) => String(x?.id) === String(paymentForm.installmentId),
+      );
+      const installmentRemaining = nonNegativeNumber(
+        installment?.remainingAmount ??
+          Math.max(
+            0,
+            (Number(installment?.amount ?? 0) || 0) -
+              (Number(installment?.paidAmount ?? 0) || 0),
+          ),
+      );
+
+      if (installment && Math.round(amt) > installmentRemaining) {
+        toast(
+          "warn",
+          `Payment cannot be more than this installment balance of ${money(installmentRemaining)} RWF.`,
+        );
+        return;
+      }
     }
 
     setPaymentLoading(true);
@@ -703,7 +799,7 @@ export default function CreditsPanel({
     try {
       const body = {
         amount: Math.round(amt),
-        method: toStr(paymentForm.method || "CASH").toUpperCase(),
+        method: selectedMethod,
       };
 
       if (toStr(paymentForm.note)) body.note = toStr(paymentForm.note);
@@ -752,12 +848,21 @@ export default function CreditsPanel({
     ? detail.installments
     : [];
 
-  const principal = Number(detail?.principalAmount ?? detail?.amount ?? 0) || 0;
-  const paidSum =
-    Number(detail?.paidAmount ?? 0) ||
-    payments.reduce((sum, p) => sum + (Number(p?.amount || 0) || 0), 0);
-  const remaining =
-    Number(detail?.remainingAmount ?? Math.max(0, principal - paidSum)) || 0;
+  const principal = nonNegativeNumber(
+    detail?.principalAmount ?? detail?.amount ?? 0,
+  );
+  const paidSum = nonNegativeNumber(
+    detail?.paidAmount ??
+      payments.reduce((sum, p) => sum + nonNegativeNumber(p?.amount || 0), 0),
+  );
+  const remaining = nonNegativeNumber(
+    detail?.remainingAmount ?? Math.max(0, principal - paidSum),
+  );
+  const paymentState = paymentStateLabel({
+    originalAmount: principal,
+    paidAmount: paidSum,
+    remainingAmount: remaining,
+  });
 
   const detailStatus = String(detail?.status || "").toUpperCase();
   const creditMode = String(
@@ -770,6 +875,7 @@ export default function CreditsPanel({
   const hasInstallmentPlan = creditMode === "INSTALLMENT_PLAN";
   const canCollect =
     capabilities.canSettle &&
+    remaining > 0 &&
     ["APPROVED", "PARTIALLY_PAID"].includes(detailStatus);
 
   const detailStatusLabel = resolveStatusLabel(detail);
@@ -784,7 +890,7 @@ export default function CreditsPanel({
     <div className="grid gap-4">
       <SectionCard
         title={title}
-        hint="Credit request, approval, partial collection, and final settlement."
+        hint="Credit requests, customer payments, and remaining balances."
       >
         {msg ? <Banner kind={msgKind}>{msg}</Banner> : null}
       </SectionCard>
@@ -943,7 +1049,7 @@ export default function CreditsPanel({
 
         <SectionCard
           title="Credit detail"
-          hint="Items, schedule, collection history, and internal notes."
+          hint="Sale items, payment history, and remaining balance."
         >
           {detailLoading ? (
             <div className="grid gap-3">
@@ -979,12 +1085,15 @@ export default function CreditsPanel({
 
                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   <MiniStat
-                    label="Principal"
+                    label="Original sale amount"
                     value={`${money(principal)} RWF`}
                   />
-                  <MiniStat label="Paid" value={`${money(paidSum)} RWF`} />
                   <MiniStat
-                    label="Remaining"
+                    label="Paid so far"
+                    value={`${money(paidSum)} RWF`}
+                  />
+                  <MiniStat
+                    label="Still to pay"
                     value={`${money(remaining)} RWF`}
                   />
                   <MiniStat
@@ -995,13 +1104,14 @@ export default function CreditsPanel({
                     label="Due date"
                     value={detail.dueDate ? formatDate(detail.dueDate) : "—"}
                   />
-                  <MiniStat label="Mode" value={modeLabel} />
+                  <MiniStat label="Credit type" value={modeLabel} />
+                  <MiniStat label="Payment status" value={paymentState} />
                 </div>
 
                 <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3">
                     <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
-                      Collection scope
+                      What cashier can receive
                     </div>
                     <div className="mt-1 text-sm font-bold text-[var(--app-fg)]">
                       {collectionLabel}
@@ -1078,8 +1188,8 @@ export default function CreditsPanel({
                   </div>
                   <div className="mt-1 text-sm app-muted">
                     {hasInstallmentPlan
-                      ? "Record a collection for this approved installment plan."
-                      : "Record a partial or full collection against this approved open balance."}
+                      ? "Record money received from the customer for this installment plan."
+                      : "Record money received from the customer against this approved credit balance."}
                   </div>
 
                   <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1087,7 +1197,7 @@ export default function CreditsPanel({
                       type="number"
                       min="1"
                       max={String(remaining || 0)}
-                      placeholder="Amount"
+                      placeholder="Amount paid now"
                       value={paymentForm.amount}
                       onChange={(e) =>
                         setPaymentForm((p) => ({
@@ -1149,7 +1259,7 @@ export default function CreditsPanel({
                       </Select>
                     ) : (
                       <Input
-                        placeholder="Cash session id (optional)"
+                        placeholder="Cash session ID (optional)"
                         value={paymentForm.cashSessionId}
                         onChange={(e) =>
                           setPaymentForm((p) => ({
@@ -1175,7 +1285,7 @@ export default function CreditsPanel({
                   {hasInstallmentPlan ? (
                     <div className="mt-3">
                       <Input
-                        placeholder="Cash session id (optional)"
+                        placeholder="Cash session ID (optional)"
                         value={paymentForm.cashSessionId}
                         onChange={(e) =>
                           setPaymentForm((p) => ({
@@ -1208,7 +1318,7 @@ export default function CreditsPanel({
                       onClick={recordCreditPayment}
                       className="app-focus rounded-2xl bg-[var(--app-fg)] px-4 py-2.5 text-sm font-semibold text-[var(--app-bg)] transition hover:opacity-90 disabled:opacity-60"
                     >
-                      {paymentLoading ? "Saving…" : "Record payment"}
+                      {paymentLoading ? "Saving…" : "Receive payment"}
                     </button>
                   </div>
                 </div>
@@ -1252,7 +1362,7 @@ export default function CreditsPanel({
                   Payment history
                 </div>
                 <div className="mt-1 text-sm app-muted">
-                  Recorded collections for this credit.
+                  Every customer payment recorded for this credit.
                 </div>
                 <div className="mt-3">
                   <PaymentsList payments={payments} />

@@ -1,8 +1,41 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { apiFetch } from "../../../lib/api";
+import { money } from "./seller-utils";
+
+const PAYMENT_METHODS = [
+  { value: "CASH", label: "Cash" },
+  { value: "MOMO", label: "MoMo" },
+  { value: "CARD", label: "Card" },
+  { value: "BANK", label: "Bank" },
+  { value: "OTHER", label: "Other" },
+];
+
+function nonNegativeNumber(value, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.round(n));
+}
+
+function resolveCreditId(sale) {
+  return (
+    sale?.creditId ?? sale?.credit_id ?? sale?.credit?.id ?? sale?.id ?? null
+  );
+}
+
+function resolveRemaining(sale) {
+  const original = nonNegativeNumber(
+    sale?.principalAmount ?? sale?.totalAmount ?? sale?.total ?? 0,
+  );
+  const paid = nonNegativeNumber(
+    sale?.paidAmount ?? sale?.creditPaidAmount ?? 0,
+  );
+  return nonNegativeNumber(
+    sale?.remainingAmount ?? Math.max(0, original - paid),
+  );
+}
 
 export default function SellerCreditPaymentModal({
   open,
@@ -12,90 +45,209 @@ export default function SellerCreditPaymentModal({
   onPaymentSuccess = () => {},
 }) {
   const [amount, setAmount] = useState("");
+  const [method, setMethod] = useState("CASH");
+  const [reference, setReference] = useState("");
+  const [note, setNote] = useState("");
+  const [localError, setLocalError] = useState("");
   const [payLoading, setPayLoading] = useState(false);
 
+  const creditId = useMemo(() => resolveCreditId(sale), [sale]);
+  const remaining = useMemo(() => resolveRemaining(sale), [sale]);
+  const original = nonNegativeNumber(
+    sale?.principalAmount ?? sale?.totalAmount ?? sale?.total ?? 0,
+  );
+  const paid = nonNegativeNumber(
+    sale?.paidAmount ?? sale?.creditPaidAmount ?? 0,
+  );
+
   useEffect(() => {
-    if (sale) {
-      const pending =
-        Number(sale?.totalAmount ?? sale?.total ?? 0) -
-        Number(sale?.paidAmount ?? 0);
-      setAmount(pending > 0 ? pending : "");
-    }
-  }, [sale]);
+    if (!open || !sale) return;
+    setAmount(remaining > 0 ? String(remaining) : "");
+    setMethod("CASH");
+    setReference("");
+    setNote("");
+    setLocalError("");
+  }, [open, sale, remaining]);
 
   if (!open || !sale) return null;
 
-  const handleSubmit = async (e) => {
+  const busy = loading || payLoading;
+
+  async function handleSubmit(e) {
     e.preventDefault();
-    if (payLoading) return;
+    if (busy) return;
 
     const amt = Number(amount);
-    if (!amt || amt <= 0) return;
+    const cleanMethod = String(method || "")
+      .trim()
+      .toUpperCase();
+
+    setLocalError("");
+
+    if (!creditId) {
+      setLocalError("Credit record was not found for this sale.");
+      return;
+    }
+
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setLocalError("Enter a payment amount greater than zero.");
+      return;
+    }
+
+    if (Math.round(amt) > remaining) {
+      setLocalError(
+        `Payment cannot be more than the remaining balance of ${money(remaining)} RWF.`,
+      );
+      return;
+    }
+
+    if (!["CASH", "MOMO", "CARD", "BANK", "OTHER"].includes(cleanMethod)) {
+      setLocalError(
+        "Choose where the customer paid: Cash, MoMo, Bank, Card, or Other.",
+      );
+      return;
+    }
 
     setPayLoading(true);
     try {
-      await apiFetch("/credits/pay", {
-        method: "POST",
+      await apiFetch(`/credits/${creditId}/payment`, {
+        method: "PATCH",
         body: {
-          saleId: Number(sale.id),
-          amount: amt,
+          amount: Math.round(amt),
+          method: cleanMethod,
+          reference: reference.trim() || undefined,
+          note: note.trim() || undefined,
         },
       });
 
       onPaymentSuccess();
       onClose();
     } catch (err) {
-      console.error(err);
-      alert(err?.data?.error || err?.message || "Payment failed");
+      setLocalError(err?.data?.error || err?.message || "Payment failed");
     } finally {
       setPayLoading(false);
     }
-  };
-
-  const pending =
-    Number(sale?.totalAmount ?? sale?.total ?? 0) -
-    Number(sale?.paidAmount ?? 0);
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-xl p-6 w-full max-w-md">
-        <h2 className="text-lg font-bold mb-4">
-          Record Payment for Sale #{sale.id}
-        </h2>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <div
+        className="app-overlay absolute inset-0"
+        onClick={busy ? undefined : onClose}
+      />
 
-        <div className="mb-4 text-sm">
-          <div>Total: {sale.totalAmount}</div>
-          <div>Paid: {sale.paidAmount ?? 0}</div>
-          <div>Pending: {pending}</div>
+      <div className="app-card relative w-full max-w-xl overflow-hidden rounded-3xl">
+        <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
+          <div className="min-w-0">
+            <div className="text-base font-black text-[var(--app-fg)]">
+              Receive credit payment
+            </div>
+            <div className="mt-1 text-sm app-muted">
+              Linked sale:{" "}
+              <b className="text-[var(--app-fg)]">
+                #{sale?.saleId || sale?.id || "—"}
+              </b>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="app-focus rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)] disabled:opacity-60"
+            onClick={onClose}
+            disabled={busy}
+          >
+            Close
+          </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <input
-            type="number"
-            min="1"
-            max={pending}
-            step="1"
-            placeholder="Enter payment amount"
-            className="border rounded px-3 py-2"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-          />
+        <form onSubmit={handleSubmit} className="p-5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
+                Original sale amount
+              </div>
+              <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
+                {money(original)} RWF
+              </div>
+            </div>
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
+                Paid so far
+              </div>
+              <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
+                {money(paid)} RWF
+              </div>
+            </div>
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wide app-muted">
+                Still to pay
+              </div>
+              <div className="mt-1 text-sm font-black text-[var(--app-fg)]">
+                {money(remaining)} RWF
+              </div>
+            </div>
+          </div>
 
-          <div className="flex justify-end gap-2">
+          {localError ? (
+            <div className="mt-4 rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-3 text-sm text-[var(--danger-fg)]">
+              {localError}
+            </div>
+          ) : null}
+
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <input
+              type="number"
+              min="1"
+              max={String(remaining || 0)}
+              step="1"
+              placeholder="Amount paid now"
+              className="app-focus w-full rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-sm text-[var(--app-fg)] outline-none"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+
+            <select
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+              className="app-focus w-full rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-sm text-[var(--app-fg)] outline-none"
+            >
+              {PAYMENT_METHODS.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+
+            <input
+              placeholder="Reference (optional)"
+              className="app-focus w-full rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-sm text-[var(--app-fg)] outline-none"
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+            />
+
+            <input
+              placeholder="Note (optional)"
+              className="app-focus w-full rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-2.5 text-sm text-[var(--app-fg)] outline-none"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
+
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
             <button
               type="button"
-              className="px-4 py-2 rounded border bg-gray-200"
+              className="app-focus rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--app-fg)] transition hover:bg-[var(--hover)] disabled:opacity-60"
               onClick={onClose}
-              disabled={payLoading}
+              disabled={busy}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 rounded bg-green-500 text-white"
-              disabled={payLoading}
+              className="app-focus rounded-2xl bg-[var(--app-fg)] px-4 py-2.5 text-sm font-semibold text-[var(--app-bg)] transition hover:opacity-90 disabled:opacity-60"
+              disabled={busy || remaining <= 0}
             >
-              {payLoading ? "Saving..." : "Record Payment"}
+              {busy ? "Saving…" : "Receive payment"}
             </button>
           </div>
         </form>
