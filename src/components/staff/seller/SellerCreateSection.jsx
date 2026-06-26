@@ -161,9 +161,13 @@ function hasExtraCharge(item) {
   return (Number(item?.extraChargePerUnit ?? 0) || 0) > 0;
 }
 
-function normalizePriceAdjustmentReason(value) {
-  const s = String(value ?? "").trim();
+function limitPriceAdjustmentReason(value) {
+  const s = String(value ?? "");
   return s.slice(0, 200);
+}
+
+function normalizePriceAdjustmentReason(value) {
+  return limitPriceAdjustmentReason(value).trim();
 }
 
 function computeLinePreview({
@@ -295,7 +299,7 @@ function ExtraChargeBlock({
 }) {
   const extraChargePerUnit = clampExtraChargePerUnit(item?.extraChargePerUnit);
   const discountAmount = clampDiscountAmount(item?.discountAmount, maxAmount);
-  const priceAdjustmentReason = normalizePriceAdjustmentReason(
+  const priceAdjustmentReason = limitPriceAdjustmentReason(
     item?.priceAdjustmentReason,
   );
   const priceAdjustmentType = hasExtraCharge(item) ? "MANUAL_UPLIFT" : null;
@@ -394,6 +398,19 @@ function ExtraChargeBlock({
           placeholder="Why is the customer paying above the official system price?"
           value={priceAdjustmentReason}
           onChange={(e) =>
+            updateCart(item.productId, {
+              unitPrice: lockedSellingPrice,
+              discountPercent: clampDiscountPercent(
+                item.discountPercent,
+                maxPct,
+              ),
+              discountAmount,
+              extraChargePerUnit,
+              priceAdjustmentType,
+              priceAdjustmentReason: limitPriceAdjustmentReason(e.target.value),
+            })
+          }
+          onBlur={(e) =>
             updateCart(item.productId, {
               unitPrice: lockedSellingPrice,
               discountPercent: clampDiscountPercent(
