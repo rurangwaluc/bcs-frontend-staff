@@ -155,7 +155,7 @@ function QtyBadge({ qty }) {
         toneCls,
       )}
     >
-      {Math.round(n).toLocaleString()} in stock
+      {Number(n).toLocaleString(undefined, { maximumFractionDigits: 3 })} in stock
     </span>
   );
 }
@@ -308,6 +308,7 @@ export default function StoreKeeperInventorySection({
               <Input
                 type="number"
                 min="0"
+                step="0.001"
                 placeholder="0"
                 value={pInitialQty}
                 onChange={(e) => setPInitialQty?.(e.target.value)}
@@ -322,6 +323,7 @@ export default function StoreKeeperInventorySection({
               <Input
                 type="number"
                 min="0"
+                step="0.001"
                 placeholder="0"
                 value={pReorderLevel}
                 onChange={(e) => setPReorderLevel?.(e.target.value)}
@@ -556,7 +558,7 @@ export default function StoreKeeperInventorySection({
                         <MiniStat label="Unit" value={unit} />
                         <MiniStat
                           label="Reorder level"
-                          value={Math.round(reorder).toLocaleString()}
+                          value={Number(reorder).toLocaleString(undefined, { maximumFractionDigits: 3 })}
                         />
                       </div>
                     </div>

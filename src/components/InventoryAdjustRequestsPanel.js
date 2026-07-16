@@ -40,8 +40,8 @@ function safeDate(v) {
 function qtyLabel(v) {
   const n = Number(v || 0);
   if (!Number.isFinite(n)) return "0";
-  if (n > 0) return `+${Math.round(n).toLocaleString()}`;
-  return `${Math.round(n).toLocaleString()}`;
+  if (n > 0) return `+${Number(n).toLocaleString(undefined, { maximumFractionDigits: 3 })}`;
+  return `${Number(n).toLocaleString(undefined, { maximumFractionDigits: 3 })}`;
 }
 
 function statusMeta(status) {

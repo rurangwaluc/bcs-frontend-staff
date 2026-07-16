@@ -255,7 +255,7 @@ export function useAdminStoreKeeperCoverage({
             items: [
               {
                 productId: pid,
-                qtyReceived: Math.round(qty),
+                qtyReceived: Math.round(qty * 1000) / 1000,
                 bonusQty: 0,
                 unitCost: 0,
                 note: arrNotes?.trim()
@@ -317,7 +317,7 @@ export function useAdminStoreKeeperCoverage({
       }
 
       const signedQtyChange =
-        adjDirection === "REMOVE" ? -Math.round(qtyAbs) : Math.round(qtyAbs);
+        adjDirection === "REMOVE" ? -(Math.round(qtyAbs * 1000) / 1000) : Math.round(qtyAbs * 1000) / 1000;
 
       setAdjBtn("loading");
       try {
