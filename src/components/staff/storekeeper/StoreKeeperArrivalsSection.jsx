@@ -528,9 +528,11 @@ export default function StoreKeeperArrivalsSection({
                   </div>
                   <Input
                     type="number"
-                    min="1"
                     placeholder="Example: 20"
                     value={arrQty}
+                    step="0.001"
+                    min="0.001"
+                    inputMode="decimal"
                     onChange={(e) => setArrQty?.(e.target.value)}
                   />
                 </div>
