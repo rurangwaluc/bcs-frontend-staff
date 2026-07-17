@@ -310,7 +310,12 @@ export function useAdminSellerCoverage({
     }
   }, []);
 
-  useEffect(() => {\n    const t = setTimeout(() => searchCustomers(customerQ), 250);\n    return () => clearTimeout(t);\n  }, [customerQ, searchCustomers]);\n\n  const createCustomerFromInputs = useCallback(async () => {
+  useEffect(() => {
+    const t = setTimeout(() => searchCustomers(customerQ), 250);
+    return () => clearTimeout(t);
+  }, [customerQ, searchCustomers]);
+
+  const createCustomerFromInputs = useCallback(async () => {
     if (createCustomerBtn === "loading") return;
 
     const name = toStr(customerName);
