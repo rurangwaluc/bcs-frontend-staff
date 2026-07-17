@@ -10,7 +10,7 @@ import {
   toInt,
   toStr,
 } from "../../staff/seller/seller-utils";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { apiFetch } from "../../../lib/api";
 
@@ -274,7 +274,7 @@ export function useAdminSellerCoverage({
   }
 
   function previewLineTotal(it) {
-    const qty = Math.max(1, toInt(it.qty));
+    const qty = Math.max(0.001, Math.round((Number(it.qty) || 0) * 1000) / 1000);
     const unitPrice = Math.max(0, toInt(it.unitPrice));
     const base = qty * unitPrice;
 
@@ -310,7 +310,7 @@ export function useAdminSellerCoverage({
     }
   }, []);
 
-  const createCustomerFromInputs = useCallback(async () => {
+  useEffect(() => {\n    const t = setTimeout(() => searchCustomers(customerQ), 250);\n    return () => clearTimeout(t);\n  }, [customerQ, searchCustomers]);\n\n  const createCustomerFromInputs = useCallback(async () => {
     if (createCustomerBtn === "loading") return;
 
     const name = toStr(customerName);
@@ -405,7 +405,7 @@ export function useAdminSellerCoverage({
         customerPhone: typedPhone || null,
         note: toStr(note) ? toStr(note).slice(0, 200) : null,
         items: saleCart.map((it) => {
-          const out = { productId: Number(it.productId), qty: toInt(it.qty) };
+          const out = { productId: Number(it.productId), qty: Math.max(0.001, Math.round((Number(it.qty) || 0) * 1000) / 1000) };
 
           const up = Number(it.unitPrice);
           if (Number.isFinite(up)) out.unitPrice = up;

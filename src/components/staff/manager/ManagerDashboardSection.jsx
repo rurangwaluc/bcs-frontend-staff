@@ -24,7 +24,7 @@ function toStr(v) {
 function fallbackMoney(n) {
   const x = Number(n ?? 0);
   if (!Number.isFinite(x)) return "0";
-  return Math.round(x).toLocaleString();
+  return x.toLocaleString(undefined, { maximumFractionDigits: 3 });
 }
 
 function fallbackFmt(v) {
@@ -437,7 +437,7 @@ function LowStockCard({ item, productLabel }) {
           </div>
           <div className="mt-2 text-sm text-[var(--muted)]">
             Qty remaining:{" "}
-            <b className="text-[var(--app-fg)]">{qty.toLocaleString()}</b>
+            <b className="text-[var(--app-fg)]">{qty.toLocaleString(undefined, { maximumFractionDigits: 3 })}</b>
           </div>
         </div>
 
@@ -673,7 +673,7 @@ function StuckSaleCard({
             Qty
           </div>
           <div className="mt-2 text-sm font-bold text-[var(--app-fg)]">
-            {Number(topItem?.qty ?? 0)}
+            {Number(topItem?.qty ?? 0).toLocaleString(undefined, { maximumFractionDigits: 3 })}
           </div>
         </div>
 

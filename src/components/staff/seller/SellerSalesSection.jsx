@@ -504,7 +504,7 @@ export default function SellerSalesSection({
                               className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] px-3 py-2 text-sm text-[var(--app-fg)] shadow-sm"
                             >
                               <b>{toStr(it?.productName) || "Item"}</b> ×{" "}
-                              {Number(it?.qty ?? 0)}
+                              {Number(it?.qty ?? 0).toLocaleString(undefined, { maximumFractionDigits: 3 })}
                             </div>
                           ))}
 

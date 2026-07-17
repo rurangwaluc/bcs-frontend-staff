@@ -25,7 +25,7 @@ function valueOrDash(v) {
 function money(n) {
   const x = Number(n ?? 0);
   if (!Number.isFinite(x)) return "0";
-  return Math.round(x).toLocaleString();
+  return x.toLocaleString(undefined, { maximumFractionDigits: 3 });
 }
 
 function numOrNull(v) {

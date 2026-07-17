@@ -3,7 +3,7 @@
 import { Skeleton, StatusBadge } from "./seller-ui";
 
 import { money } from "./seller-utils";
-import { toInt } from "./seller-utils";
+
 
 export default function SellerItemsModal({ open, loading, sale, onClose }) {
   if (!open) return null;
@@ -72,7 +72,7 @@ export default function SellerItemsModal({ open, loading, sale, onClose }) {
                         Qty
                       </div>
                       <div className="text-xl font-black text-[var(--app-fg)]">
-                        {toInt(it?.qty ?? 0)}
+                        {Number(it?.qty ?? 0).toLocaleString(undefined, { maximumFractionDigits: 3 })}
                       </div>
                     </div>
                   </div>

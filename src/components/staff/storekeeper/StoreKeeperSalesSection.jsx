@@ -24,7 +24,7 @@ function safeDate(v) {
 
 function qtyText(v) {
   const n = Number(v ?? 0);
-  return Number.isFinite(n) ? Math.round(n).toLocaleString() : "0";
+  return Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 3 }) : "0";
 }
 
 function inputBase(className = "") {

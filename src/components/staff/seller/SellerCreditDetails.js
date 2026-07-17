@@ -1,6 +1,6 @@
 "use client";
 
-import { money, safeDate, toInt } from "./seller-utils";
+import { money, safeDate } from "./seller-utils";
 import { useEffect, useMemo, useState } from "react";
 
 import { apiFetch } from "../../../lib/api";
@@ -116,7 +116,7 @@ function ItemsBlock({ items }) {
             </div>
 
             <div className="grid grid-cols-3 gap-2">
-              <MiniCard label="Qty" value={String(toInt(it?.qty))} />
+              <MiniCard label="Qty" value={Number(it?.qty ?? 0).toLocaleString(undefined, { maximumFractionDigits: 3 })} />
               <MiniCard
                 label="Unit"
                 value={`${money(it?.unitPrice || 0)} RWF`}

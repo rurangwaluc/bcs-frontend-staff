@@ -13,7 +13,7 @@ import {
 function fallbackMoney(n) {
   const x = Number(n ?? 0);
   if (!Number.isFinite(x)) return "0";
-  return Math.round(x).toLocaleString();
+  return x.toLocaleString(undefined, { maximumFractionDigits: 3 });
 }
 
 function fallbackFmt(v) {
@@ -223,7 +223,7 @@ function PaymentRecordCard({
             {topItemName || "—"}
           </div>
           <div className="mt-1 text-xs text-[var(--muted)]">
-            Qty: <b className="text-[var(--app-fg)]">{topItemQty || 0}</b>
+            Qty: <b className="text-[var(--app-fg)]">{Number(topItemQty || 0).toLocaleString(undefined, { maximumFractionDigits: 3 })}</b>
           </div>
         </div>
 
