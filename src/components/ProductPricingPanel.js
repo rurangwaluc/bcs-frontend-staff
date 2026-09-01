@@ -384,6 +384,8 @@ function ProductEditModal({
   setMaxDiscountPercent,
   maxDiscountAmount,
   setMaxDiscountAmount,
+  correctionReason,
+  setCorrectionReason,
   saveState,
   onClose,
   onSave,
@@ -532,6 +534,19 @@ function ProductEditModal({
                 </div>
               </div>
             </div>
+
+            <div className="mt-4">
+              <Label>Correction reason</Label>
+              <TextArea
+                rows={3}
+                value={correctionReason}
+                onChange={(e) => setCorrectionReason(e.target.value)}
+                placeholder="Example: Wrong buying price entered"
+              />
+              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Write why this product information or price is being corrected.
+              </div>
+            </div>
           </div>
 
           <div
@@ -656,6 +671,7 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
   const [sellingPrice, setSellingPrice] = useState("");
   const [maxDiscountPercent, setMaxDiscountPercent] = useState("0");
   const [maxDiscountAmount, setMaxDiscountAmount] = useState("0");
+  const [correctionReason, setCorrectionReason] = useState("");
 
   const [saveState, setSaveState] = useState("idle");
 
@@ -758,6 +774,7 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
     setSellingPrice(sp == null ? "" : String(sp));
     setMaxDiscountPercent(String(md));
     setMaxDiscountAmount(String(mda));
+    setCorrectionReason("");
 
     setSaveState("idle");
     setMsg("");
@@ -775,6 +792,7 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
     setSellingPrice("");
     setMaxDiscountPercent("0");
     setMaxDiscountAmount("0");
+    setCorrectionReason("");
     setSaveState("idle");
   }
 
@@ -795,6 +813,7 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
     const cleanSku = safe(sku);
     const cleanCategory = safe(category).toUpperCase();
     const cleanNotes = safe(notes);
+    const cleanCorrectionReason = safe(correctionReason);
 
     if (cleanName.length < 2) {
       setSaveState("idle");
@@ -890,6 +909,7 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
             sku: cleanSku || undefined,
             category: cleanCategory,
             notes: cleanNotes || undefined,
+            correctionReason: cleanCorrectionReason || undefined,
           },
         },
       );
@@ -903,6 +923,7 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
             sellingPrice: sp,
             maxDiscountPercent: md,
             maxDiscountAmount: mda,
+            correctionReason: cleanCorrectionReason || undefined,
           },
         },
       );
@@ -1032,6 +1053,8 @@ export default function ProductPricingPanel({ title = "Pricing" }) {
         setMaxDiscountPercent={setMaxDiscountPercent}
         maxDiscountAmount={maxDiscountAmount}
         setMaxDiscountAmount={setMaxDiscountAmount}
+        correctionReason={correctionReason}
+        setCorrectionReason={setCorrectionReason}
         saveState={saveState}
         onClose={closeEdit}
         onSave={save}
