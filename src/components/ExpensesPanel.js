@@ -663,7 +663,7 @@ function VoidExpenseModal({ open, expense, onClose, onSaved }) {
       setSubmitState("loading");
 
       const result = await apiFetch(`/cash/expenses/${expense?.id}/void`, {
-        method: "POST",
+        method: "PATCH",
         body: { reason: safe(reason) },
       });
 
