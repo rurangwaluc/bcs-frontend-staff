@@ -1,6 +1,21 @@
 "use client";
 
+import { useState } from "react";
+
 import AsyncButton from "../../../components/AsyncButton";
+
+function storekeeperSaleTimeMs(row) {
+  return new Date(row?.createdAt || row?.created_at || row?.fulfilledAt || row?.fulfilled_at || row?.completedAt || row?.completed_at || 0).getTime() || 0;
+}
+
+function storekeeperSortByTime(rows, direction = "DESC") {
+  const multiplier = direction === "ASC" ? 1 : -1;
+  return (Array.isArray(rows) ? rows : []).slice().sort((a, b) => {
+    const diff = storekeeperSaleTimeMs(a) - storekeeperSaleTimeMs(b);
+    if (diff !== 0) return diff * multiplier;
+    return (Number(a?.id || 0) - Number(b?.id || 0)) * multiplier;
+  });
+}
 
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
@@ -41,6 +56,9 @@ function Input({ className = "", ...props }) {
 }
 
 function Skeleton({ className = "" }) {
+  const [salesTimeSort, setSalesTimeSort] = useState("DESC");
+  const visibleSales = storekeeperSortByTime(filteredSalesLastTen, salesTimeSort);
+
   return (
     <div
       className={cx(
@@ -469,6 +487,20 @@ export default function StoreKeeperSalesSection({
             />
           </div>
 
+          <div className="mt-3 max-w-[220px]">
+            <div className="mb-2 text-[11px] font-extrabold uppercase tracking-[0.08em] app-muted">
+              Time order
+            </div>
+            <select
+              value={salesTimeSort}
+              onChange={(e) => setSalesTimeSort(e.target.value)}
+              className={inputBase()}
+            >
+              <option value="DESC">Newest first</option>
+              <option value="ASC">Oldest first</option>
+            </select>
+          </div>
+
           <div className="mt-3 text-xs app-muted">
             Showing latest <b>10</b> results, most recent first.
           </div>
@@ -481,13 +513,13 @@ export default function StoreKeeperSalesSection({
             <SaleCardSkeleton />
           </div>
         ) : !Array.isArray(filteredSalesLastTen) ||
-          filteredSalesLastTen.length === 0 ? (
+          visibleSales.length === 0 ? (
           <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-6 text-sm app-muted">
             No sales found.
           </div>
         ) : (
           <div className="grid gap-4">
-            {filteredSalesLastTen.map((sale) => (
+            {visibleSales.map((sale) => (
               <SaleCard
                 key={String(sale?.id)}
                 sale={sale}
