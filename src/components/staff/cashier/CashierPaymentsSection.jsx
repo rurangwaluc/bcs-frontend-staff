@@ -14,6 +14,19 @@ import AsyncButton from "../../../components/AsyncButton";
 
 const PAGE_SIZE = 10;
 
+function cashierRecordTimeMs(row) {
+  return new Date(row?.createdAt || row?.created_at || row?.completedAt || row?.completed_at || row?.paidAt || row?.paid_at || row?.updatedAt || row?.updated_at || 0).getTime() || 0;
+}
+
+function cashierSortByTime(rows, direction = "DESC") {
+  const multiplier = direction === "ASC" ? 1 : -1;
+  return (Array.isArray(rows) ? rows : []).slice().sort((a, b) => {
+    const diff = cashierRecordTimeMs(a) - cashierRecordTimeMs(b);
+    if (diff !== 0) return diff * multiplier;
+    return (Number(a?.id || 0) - Number(b?.id || 0)) * multiplier;
+  });
+}
+
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
@@ -273,13 +286,14 @@ export default function CashierPaymentsSection({
 
   const [waitingLoadMoreCount, setWaitingLoadMoreCount] = useState(0);
   const [paymentsLoadMoreCount, setPaymentsLoadMoreCount] = useState(0);
+  const [timeSort, setTimeSort] = useState("DESC");
 
   const visibleWaitingCount = PAGE_SIZE + waitingLoadMoreCount * PAGE_SIZE;
   const visiblePaymentsCount = PAGE_SIZE + paymentsLoadMoreCount * PAGE_SIZE;
 
   const visibleWaitingSales = useMemo(() => {
-    return waitingSales.slice(0, visibleWaitingCount);
-  }, [waitingSales, visibleWaitingCount]);
+    return cashierSortByTime(waitingSales, timeSort).slice(0, visibleWaitingCount);
+  }, [waitingSales, timeSort, visibleWaitingCount]);
 
   const filteredPayments = useMemo(() => {
     const q = String(payQ || "")
@@ -297,8 +311,8 @@ export default function CashierPaymentsSection({
   }, [paymentRows, payQ]);
 
   const visiblePayments = useMemo(() => {
-    return filteredPayments.slice(0, visiblePaymentsCount);
-  }, [filteredPayments, visiblePaymentsCount]);
+    return cashierSortByTime(filteredPayments, timeSort).slice(0, visiblePaymentsCount);
+  }, [filteredPayments, timeSort, visiblePaymentsCount]);
 
   const waitingHasMore = visibleWaitingCount < waitingSales.length;
   const paymentsHasMore = visiblePaymentsCount < filteredPayments.length;
@@ -326,14 +340,34 @@ export default function CashierPaymentsSection({
           </Banner>
 
           <div className="grid gap-4">
-            <Input
-              placeholder="Search by sale ID, customer name or phone"
-              value={salesQ}
-              onChange={(e) => {
-                setWaitingLoadMoreCount(0);
-                setSalesQ?.(e.target.value);
-              }}
-            />
+            <div className="grid gap-3 sm:grid-cols-[1fr_220px] sm:items-end">
+              <Input
+                placeholder="Search by sale ID, customer name or phone"
+                value={salesQ}
+                onChange={(e) => {
+                  setWaitingLoadMoreCount(0);
+                  setSalesQ?.(e.target.value);
+                }}
+              />
+
+              <div>
+                <div className="mb-2 text-[11px] font-extrabold uppercase tracking-[0.08em] app-muted">
+                  Time order
+                </div>
+                <select
+                  value={timeSort}
+                  onChange={(e) => {
+                    setWaitingLoadMoreCount(0);
+                    setPaymentsLoadMoreCount(0);
+                    setTimeSort(e.target.value);
+                  }}
+                  className="app-focus w-full rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3.5 py-3 text-sm font-semibold text-[var(--app-fg)] outline-none transition hover:border-[var(--border-strong)]"
+                >
+                  <option value="DESC">Newest first</option>
+                  <option value="ASC">Oldest first</option>
+                </select>
+              </div>
+            </div>
 
             <div className="flex flex-wrap gap-2">
               <TinyPill tone={waitingSales.length > 0 ? "warn" : "neutral"}>
