@@ -11,6 +11,21 @@ import {
 import { money, safeDate, safeDateOnly, toStr } from "./seller-utils";
 
 import AsyncButton from "../../../components/AsyncButton";
+import { useState } from "react";
+
+function sellerRecordTimeMs(row) {
+  return new Date(row?.createdAt || row?.created_at || row?.completedAt || row?.completed_at || row?.paidAt || row?.paid_at || 0).getTime() || 0;
+}
+
+function sellerSortByTime(rows, direction = "DESC") {
+  const multiplier = direction === "ASC" ? 1 : -1;
+  return (Array.isArray(rows) ? rows : []).slice().sort((a, b) => {
+    const diff = sellerRecordTimeMs(a) - sellerRecordTimeMs(b);
+    if (diff !== 0) return diff * multiplier;
+    return (Number(a?.id || 0) - Number(b?.id || 0)) * multiplier;
+  });
+}
+
 
 function StatChip({ label, value, strong = false }) {
   return (
@@ -211,6 +226,9 @@ export default function SellerSalesSection({
   openInvoice,
   paymentMethods,
 }) {
+  const [salesTimeSort, setSalesTimeSort] = useState("DESC");
+  const visibleSales = sellerSortByTime(salesToShow, salesTimeSort);
+
   return (
     <SectionCard
       title="My sales"
@@ -239,11 +257,26 @@ export default function SellerSalesSection({
             "shadow-[0_4px_12px_rgba(15,23,42,0.04)] dark:shadow-none",
           ].join(" ")}
         >
-          <Input
-            placeholder="Search by sale ID, customer, phone, payment method or credit"
-            value={salesQ}
-            onChange={(e) => setSalesQ(e.target.value)}
-          />
+          <div className="grid gap-3 sm:grid-cols-[1fr_220px] sm:items-end">
+            <Input
+              placeholder="Search by sale ID, customer, phone, payment method or credit"
+              value={salesQ}
+              onChange={(e) => setSalesQ(e.target.value)}
+            />
+
+            <div>
+              <div className="mb-2 text-[11px] font-black uppercase tracking-[0.1em] text-[var(--muted)]">
+                Time order
+              </div>
+              <Select
+                value={salesTimeSort}
+                onChange={(e) => setSalesTimeSort(e.target.value)}
+              >
+                <option value="DESC">Newest first</option>
+                <option value="ASC">Oldest first</option>
+              </Select>
+            </div>
+          </div>
         </div>
 
         {salesLoading ? (
@@ -252,11 +285,11 @@ export default function SellerSalesSection({
             <SalesCardSkeleton />
             <SalesCardSkeleton />
           </div>
-        ) : salesToShow.length === 0 ? (
+        ) : visibleSales.length === 0 ? (
           <SurfaceNote>No sales found.</SurfaceNote>
         ) : (
           <div className="grid gap-4">
-            {salesToShow.map((s) => {
+            {visibleSales.map((s) => {
               const id = s?.id;
               const st = String(s?.status || "").toUpperCase();
 
