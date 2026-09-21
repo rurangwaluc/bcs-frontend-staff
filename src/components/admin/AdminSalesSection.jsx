@@ -14,8 +14,22 @@ import {
 } from "./adminShared";
 
 import AsyncButton from "../AsyncButton";
+import { useState } from "react";
 
 const PAGE_SIZE = 10;
+
+function recordTimeMs(row) {
+  return new Date(row?.createdAt || row?.created_at || row?.soldAt || row?.sold_at || row?.paidAt || row?.paid_at || 0).getTime() || 0;
+}
+
+function sortByTime(rows, direction = "DESC") {
+  const multiplier = direction === "ASC" ? 1 : -1;
+  return (Array.isArray(rows) ? rows : []).slice().sort((a, b) => {
+    const diff = recordTimeMs(a) - recordTimeMs(b);
+    if (diff !== 0) return diff * multiplier;
+    return (Number(a?.id || 0) - Number(b?.id || 0)) * multiplier;
+  });
+}
 
 function getSaleItems(sale) {
   const items =
@@ -242,6 +256,9 @@ function SalesSummary({
 }
 
 function InfoBlock({ label, children, className = "" }) {
+  const [salesTimeSort, setSalesTimeSort] = useState("DESC");
+  const visibleSales = sortByTime(filteredSales, salesTimeSort);
+
   return (
     <div
       className={cx(
@@ -439,6 +456,19 @@ export default function AdminSalesSection({
           }}
         />
 
+        <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4 sm:flex sm:items-center sm:justify-between sm:gap-4">
+          <div>
+            <div className="text-sm font-black text-[var(--app-fg)]">Time order</div>
+            <div className="mt-1 text-xs leading-5 app-muted">Choose how sales records are displayed. Newest first stays as the default.</div>
+          </div>
+          <div className="mt-3 sm:mt-0 sm:w-56">
+            <Select value={salesTimeSort} onChange={(e) => setSalesTimeSort(e.target.value)}>
+              <option value="DESC">Newest first</option>
+              <option value="ASC">Oldest first</option>
+            </Select>
+          </div>
+        </div>
+
         <SalesSummary
           salesFilteredTotals={salesFilteredTotals}
           salesStatusFilter={salesStatusFilter}
@@ -449,12 +479,12 @@ export default function AdminSalesSection({
 
         {salesLoading ? (
           <SalesLoadingState />
-        ) : !Array.isArray(filteredSales) || filteredSales.length === 0 ? (
+        ) : !Array.isArray(visibleSales) || visibleSales.length === 0 ? (
           <SalesEmptyState />
         ) : (
           <>
             <div className="grid gap-3">
-              {filteredSales.map((sale) => (
+              {visibleSales.map((sale) => (
                 <SaleCard
                   key={String(sale?.id)}
                   sale={sale}

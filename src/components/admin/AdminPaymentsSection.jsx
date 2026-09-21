@@ -3,6 +3,7 @@
 import {
   Pill,
   SectionCard,
+  Select,
   Skeleton,
   StatusBadge,
   cx,
@@ -12,8 +13,22 @@ import {
 } from "./adminShared";
 
 import AsyncButton from "../AsyncButton";
+import { useState } from "react";
 
 const PAGE_SIZE = 10;
+
+function recordTimeMs(row) {
+  return new Date(row?.createdAt || row?.created_at || row?.expenseDate || row?.expense_date || row?.paidAt || row?.paid_at || 0).getTime() || 0;
+}
+
+function sortByTime(rows, direction = "DESC") {
+  const multiplier = direction === "ASC" ? 1 : -1;
+  return (Array.isArray(rows) ? rows : []).slice().sort((a, b) => {
+    const diff = recordTimeMs(a) - recordTimeMs(b);
+    if (diff !== 0) return diff * multiplier;
+    return (Number(a?.id || 0) - Number(b?.id || 0)) * multiplier;
+  });
+}
 
 function prettyRole(role) {
   return String(role || "")
@@ -525,20 +540,13 @@ export default function AdminPaymentsSection({
       .trim()
       .toLowerCase() === "cashier";
 
+  const [moneyTimeSort, setMoneyTimeSort] = useState("DESC");
+
   const list = Array.isArray(payments) ? payments : [];
   const expenseList = Array.isArray(expenses) ? expenses : [];
 
-  const sortedPayments = list.slice().sort((a, b) => {
-    const ta = new Date(a?.createdAt || a?.created_at || 0).getTime() || 0;
-    const tb = new Date(b?.createdAt || b?.created_at || 0).getTime() || 0;
-    return tb - ta;
-  });
-
-  const sortedExpenses = expenseList.slice().sort((a, b) => {
-    const ta = new Date(a?.createdAt || a?.created_at || 0).getTime() || 0;
-    const tb = new Date(b?.createdAt || b?.created_at || 0).getTime() || 0;
-    return tb - ta;
-  });
+  const sortedPayments = sortByTime(list, moneyTimeSort);
+  const sortedExpenses = sortByTime(expenseList, moneyTimeSort);
 
   const visiblePayments = sortedPayments.slice(0, paymentsPage * PAGE_SIZE);
   const canLoadMorePayments = visiblePayments.length < sortedPayments.length;
@@ -596,6 +604,19 @@ export default function AdminPaymentsSection({
   return (
     <div className="grid gap-4">
       <CoverageOperatorStrip coverage={coverage} />
+
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-4 sm:flex sm:items-center sm:justify-between sm:gap-4">
+        <div>
+          <div className="text-sm font-black text-[var(--app-fg)]">Time order</div>
+          <div className="mt-1 text-xs leading-5 app-muted">Choose how payment and expense records are displayed. Newest first stays as the default.</div>
+        </div>
+        <div className="mt-3 sm:mt-0 sm:w-56">
+          <Select value={moneyTimeSort} onChange={(e) => setMoneyTimeSort(e.target.value)}>
+            <option value="DESC">Newest first</option>
+            <option value="ASC">Oldest first</option>
+          </Select>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.92fr_1.08fr] 2xl:grid-cols-[0.85fr_1.15fr]">
         <SectionCard
