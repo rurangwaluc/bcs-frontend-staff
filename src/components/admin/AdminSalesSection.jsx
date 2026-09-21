@@ -18,6 +18,7 @@ import { useState } from "react";
 
 const PAGE_SIZE = 10;
 
+
 function recordTimeMs(row) {
   return new Date(row?.createdAt || row?.created_at || row?.soldAt || row?.sold_at || row?.paidAt || row?.paid_at || 0).getTime() || 0;
 }
@@ -256,8 +257,6 @@ function SalesSummary({
 }
 
 function InfoBlock({ label, children, className = "" }) {
-  const [salesTimeSort, setSalesTimeSort] = useState("DESC");
-  const visibleSales = sortByTime(filteredSales, salesTimeSort);
 
   return (
     <div
@@ -422,6 +421,10 @@ export default function AdminSalesSection({
   onOpenCancel,
   onOpenProof,
 }) {
+  const [salesTimeSort, setSalesTimeSort] = useState("DESC");
+  const visibleSales = sortByTime(filteredSales, salesTimeSort);
+
+
   return (
     <SectionCard
       title="Sales command center"
