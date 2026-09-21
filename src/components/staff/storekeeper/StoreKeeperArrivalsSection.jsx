@@ -378,6 +378,19 @@ function ArrivalHistoryRow({ row }) {
   );
 }
 
+function arrivalRecordTimeMs(row) {
+  return new Date(row?.createdAt || row?.created_at || row?.receivedAt || row?.received_at || 0).getTime() || 0;
+}
+
+function arrivalSortByTime(rows, direction = "DESC") {
+  const multiplier = direction === "ASC" ? 1 : -1;
+  return (Array.isArray(rows) ? rows : []).slice().sort((a, b) => {
+    const diff = arrivalRecordTimeMs(a) - arrivalRecordTimeMs(b);
+    if (diff !== 0) return diff * multiplier;
+    return (Number(a?.id || 0) - Number(b?.id || 0)) * multiplier;
+  });
+}
+
 export default function StoreKeeperArrivalsSection({
   products = [],
   productsLoading = false,
@@ -403,6 +416,7 @@ export default function StoreKeeperArrivalsSection({
   loadArrivalHistory,
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [arrivalTimeSort, setArrivalTimeSort] = useState("DESC");
 
   const productRows = Array.isArray(products) ? products : [];
   const inventoryRows = Array.isArray(inventory) ? inventory : [];
@@ -440,6 +454,8 @@ export default function StoreKeeperArrivalsSection({
       d.getDate() === now.getDate()
     );
   }).length;
+
+  const visibleArrivalRows = arrivalSortByTime(arrivalRows, arrivalTimeSort);
 
   return (
     <>
@@ -789,6 +805,20 @@ export default function StoreKeeperArrivalsSection({
               />
             </div>
 
+            <div className="mt-4 max-w-[220px]">
+              <div className="mb-2 text-[11px] font-extrabold uppercase tracking-[0.08em] app-muted">
+                Time order
+              </div>
+              <select
+                value={arrivalTimeSort}
+                onChange={(e) => setArrivalTimeSort(e.target.value)}
+                className={inputBase()}
+              >
+                <option value="DESC">Newest first</option>
+                <option value="ASC">Oldest first</option>
+              </select>
+            </div>
+
             <div className="mt-4">
               {arrivalHistoryLoading ? (
                 <div className="grid gap-3">
@@ -802,13 +832,13 @@ export default function StoreKeeperArrivalsSection({
                   `arrivalHistoryLoading`, and `loadArrivalHistory` from the
                   page to show real history rows.
                 </div>
-              ) : arrivalRows.length === 0 ? (
+              ) : visibleArrivalRows.length === 0 ? (
                 <div className="rounded-3xl border border-[var(--border)] bg-[var(--card-2)] p-6 text-sm app-muted">
                   No arrival history yet.
                 </div>
               ) : (
                 <div className="grid gap-3">
-                  {arrivalRows.map((row, idx) => (
+                  {visibleArrivalRows.map((row, idx) => (
                     <ArrivalHistoryRow
                       key={String(
                         row?.id || `${row?.productId || "arrival"}-${idx}`,
