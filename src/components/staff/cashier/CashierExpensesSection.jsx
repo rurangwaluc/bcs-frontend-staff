@@ -10,6 +10,20 @@ import {
 } from "./cashier-ui";
 
 import AsyncButton from "../../AsyncButton";
+import { useState } from "react";
+
+function expenseRecordTimeMs(row) {
+  return new Date(row?.expenseDate || row?.expense_date || row?.createdAt || row?.created_at || 0).getTime() || 0;
+}
+
+function expenseSortByTime(rows, direction = "DESC") {
+  const multiplier = direction === "ASC" ? 1 : -1;
+  return (Array.isArray(rows) ? rows : []).slice().sort((a, b) => {
+    const diff = expenseRecordTimeMs(a) - expenseRecordTimeMs(b);
+    if (diff !== 0) return diff * multiplier;
+    return (Number(a?.id || 0) - Number(b?.id || 0)) * multiplier;
+  });
+}
 
 function toText(value, fallback = "") {
   if (value === undefined || value === null) return fallback;
@@ -112,6 +126,8 @@ export default function CashierExpensesSection({
   safeDate,
   onCreateExpense,
 }) {
+  const [expenseTimeSort, setExpenseTimeSort] = useState("DESC");
+
   const rows = Array.isArray(expenses) ? expenses : [];
   const openSessionId = sessionIdOf(currentOpenSession);
   const isLocked = !openSessionId;
@@ -146,6 +162,8 @@ export default function CashierExpensesSection({
 
     return hay.includes(q);
   });
+
+  const visibleExpenseRows = expenseSortByTime(filteredRows, expenseTimeSort);
 
   const postedCount = currentSessionRows.filter(
     (expense) => String(expense?.status || "").toUpperCase() !== "VOID",
@@ -326,11 +344,27 @@ export default function CashierExpensesSection({
         }
       >
         <div className="grid gap-4">
-          <Input
-            placeholder="Search by number, amount, purpose, person, receipt code, status or note"
-            value={expenseQ}
-            onChange={(e) => setExpenseQ?.(e.target.value)}
-          />
+          <div className="grid gap-3 sm:grid-cols-[1fr_220px] sm:items-end">
+            <Input
+              placeholder="Search by number, amount, purpose, person, receipt code, status or note"
+              value={expenseQ}
+              onChange={(e) => setExpenseQ?.(e.target.value)}
+            />
+
+            <div>
+              <div className="mb-2 text-[11px] font-extrabold uppercase tracking-[0.08em] app-muted">
+                Time order
+              </div>
+              <select
+                value={expenseTimeSort}
+                onChange={(e) => setExpenseTimeSort(e.target.value)}
+                className="app-focus w-full rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3.5 py-3 text-sm font-semibold text-[var(--app-fg)] outline-none transition hover:border-[var(--border-strong)]"
+              >
+                <option value="DESC">Newest first</option>
+                <option value="ASC">Oldest first</option>
+              </select>
+            </div>
+          </div>
 
           {isLocked ? (
             <div className="rounded-3xl border border-dashed border-[var(--border-strong)] bg-[var(--card)] p-6 text-sm app-muted dark:bg-slate-900">
@@ -342,13 +376,13 @@ export default function CashierExpensesSection({
               <Skeleton className="h-24 w-full" />
               <Skeleton className="h-24 w-full" />
             </div>
-          ) : filteredRows.length === 0 ? (
+          ) : visibleExpenseRows.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-[var(--border-strong)] bg-[var(--card)] p-6 text-sm app-muted dark:bg-slate-900">
               No money spent records found for cashier day #{openSessionId}.
             </div>
           ) : (
             <div className="grid gap-3">
-              {filteredRows.slice(0, 60).map((expense, idx) => (
+              {visibleExpenseRows.slice(0, 60).map((expense, idx) => (
                 <div
                   key={expense?.id || idx}
                   className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 dark:bg-slate-900"
