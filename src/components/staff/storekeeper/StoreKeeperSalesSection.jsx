@@ -56,9 +56,6 @@ function Input({ className = "", ...props }) {
 }
 
 function Skeleton({ className = "" }) {
-  const [salesTimeSort, setSalesTimeSort] = useState("DESC");
-  const visibleSales = storekeeperSortByTime(filteredSalesLastTen, salesTimeSort);
-
   return (
     <div
       className={cx(
@@ -439,6 +436,9 @@ export default function StoreKeeperSalesSection({
   openSaleDetails,
   openDeliveryNote,
 }) {
+  const [salesTimeSort, setSalesTimeSort] = useState("DESC");
+  const visibleSales = storekeeperSortByTime(filteredSalesLastTen, salesTimeSort);
+
   return (
     <SectionShell
       title="Release stock"
@@ -502,7 +502,7 @@ export default function StoreKeeperSalesSection({
           </div>
 
           <div className="mt-3 text-xs app-muted">
-            Showing latest <b>10</b> results, most recent first.
+            Showing <b>10</b> results. Use time order to choose newest first or oldest first.
           </div>
         </div>
 
