@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import {
   Banner,
   Card,
@@ -9,6 +11,19 @@ import {
   Skeleton,
   TinyPill,
 } from "./cashier-ui";
+
+function ledgerRecordTimeMs(row) {
+  return new Date(row?.createdAt || row?.created_at || row?.paidAt || row?.paid_at || 0).getTime() || 0;
+}
+
+function ledgerSortByTime(rows, direction = "DESC") {
+  const multiplier = direction === "ASC" ? 1 : -1;
+  return (Array.isArray(rows) ? rows : []).slice().sort((a, b) => {
+    const diff = ledgerRecordTimeMs(a) - ledgerRecordTimeMs(b);
+    if (diff !== 0) return diff * multiplier;
+    return (Number(a?.id || 0) - Number(b?.id || 0)) * multiplier;
+  });
+}
 
 function toDateInputValue(v) {
   if (!v) return "";
@@ -63,6 +78,8 @@ export default function CashierLedgerSection({
   money,
   safeDate,
 }) {
+  const [ledgerTimeSort, setLedgerTimeSort] = useState("DESC");
+
   const filteredLedger = (Array.isArray(ledger) ? ledger : []).filter((r) => {
     const q = String(ledgerQ || "")
       .trim()
@@ -93,6 +110,8 @@ export default function CashierLedgerSection({
 
     return matchesText && matchesDate;
   });
+
+  const visibleLedger = ledgerSortByTime(filteredLedger, ledgerTimeSort);
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -190,7 +209,7 @@ export default function CashierLedgerSection({
               onChange={(e) => setLedgerQ(e.target.value)}
             />
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <Input
                 type="date"
                 value={ledgerFromDate}
@@ -201,6 +220,19 @@ export default function CashierLedgerSection({
                 value={ledgerToDate}
                 onChange={(e) => setLedgerToDate(e.target.value)}
               />
+              <div>
+                <div className="mb-2 text-[11px] font-extrabold uppercase tracking-[0.08em] app-muted">
+                  Time order
+                </div>
+                <select
+                  value={ledgerTimeSort}
+                  onChange={(e) => setLedgerTimeSort(e.target.value)}
+                  className="app-focus w-full rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3.5 py-3 text-sm font-semibold text-[var(--app-fg)] outline-none transition hover:border-[var(--border-strong)]"
+                >
+                  <option value="DESC">Newest first</option>
+                  <option value="ASC">Oldest first</option>
+                </select>
+              </div>
             </div>
 
             {(ledgerFromDate || ledgerToDate) && !ledgerLoading ? (
@@ -232,7 +264,7 @@ export default function CashierLedgerSection({
               </div>
             ) : (
               <div className="grid gap-2">
-                {filteredLedger.slice(0, 80).map((r, idx) => {
+                {visibleLedger.slice(0, 80).map((r, idx) => {
                   const dir = String(r?.direction || "").toUpperCase();
                   const amt = Number(r?.amount ?? 0) || 0;
 
@@ -297,13 +329,13 @@ export default function CashierLedgerSection({
                   );
                 })}
 
-                {filteredLedger.length === 0 ? (
+                {visibleLedger.length === 0 ? (
                   <div className="text-sm app-muted">
                     No ledger entries found for the selected filters.
                   </div>
                 ) : null}
 
-                {filteredLedger.length > 80 ? (
+                {visibleLedger.length > 80 ? (
                   <div className="text-xs app-muted">
                     Showing first 80 matching records.
                   </div>
