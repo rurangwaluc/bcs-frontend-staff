@@ -66,6 +66,8 @@ export function useAdminSellerCoverage({
 
   const [createSaleBtn, setCreateSaleBtn] = useState("idle");
   const [createCustomerBtn, setCreateCustomerBtn] = useState("idle");
+  const [editingSaleId, setEditingSaleId] = useState(null);
+  const [editLoading, setEditLoading] = useState(false);
 
   const [markBtnState, setMarkBtnState] = useState({});
   const [salePayMethod, setSalePayMethod] = useState({});
@@ -83,6 +85,19 @@ export function useAdminSellerCoverage({
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [documentSale, setDocumentSale] = useState(null);
   const [documentLoading, setDocumentLoading] = useState(false);
+
+  function resetSaleForm() {
+    setEditingSaleId(null);
+    setSelectedCustomer(null);
+    setCustomerQ("");
+    setCustomerResults([]);
+    setCustomerName("");
+    setCustomerPhone("");
+    setCustomerTin("");
+    setCustomerAddress("");
+    setNote("");
+    setSaleCart([]);
+  }
 
   const filteredProducts = useMemo(() => {
     const list = Array.isArray(products) ? products : [];
@@ -208,6 +223,29 @@ export function useAdminSellerCoverage({
       discountAmount: 0,
       qtyOnHand,
       trackInventory,
+    };
+  }
+
+  function saleItemToCartItem(item, productLookup = new Map()) {
+    const productId = Number(item?.productId ?? item?.product_id);
+    const product = productLookup.get(productId) || null;
+    const sellingPrice = toInt(item?.baseUnitPrice ?? item?.base_unit_price ?? product?.sellingPrice ?? product?.selling_price ?? item?.sellingPrice ?? item?.unitPrice ?? item?.unit_price ?? 0);
+    const qty = Math.max(0.001, Math.round((Number(item?.qty ?? item?.quantity ?? 1) || 1) * 1000) / 1000);
+    const qtyOnHand = Math.max(qty, getAvailableQty(product), getAvailableQty(item));
+
+    return {
+      productId,
+      productName: item?.productName ?? item?.product_name ?? product?.name ?? item?.name ?? "Item",
+      sku: item?.sku || product?.sku || "-",
+      sellingPrice,
+      unitPrice: sellingPrice,
+      maxDiscountPercent: Number(product?.maxDiscountPercent ?? product?.max_discount_percent ?? item?.maxDiscountPercent ?? item?.max_discount_percent ?? 0),
+      maxDiscountAmount: Number(product?.maxDiscountAmount ?? product?.max_discount_amount ?? item?.maxDiscountAmount ?? item?.max_discount_amount ?? 0),
+      qty,
+      discountPercent: Number(item?.discountPercent ?? item?.discount_percent ?? 0),
+      discountAmount: Number(item?.discountAmount ?? item?.discount_amount ?? 0),
+      qtyOnHand,
+      trackInventory: isInventoryTracked(product || item),
     };
   }
 
@@ -427,28 +465,28 @@ export function useAdminSellerCoverage({
 
       setCreateSaleBtn("loading");
       try {
-        const data = await apiFetch(ENDPOINTS.SALES_CREATE, {
-          method: "POST",
-          body: payload,
-        });
+        const isEditing = Number(editingSaleId) > 0;
+        const data = await apiFetch(
+          isEditing ? `/sales/${Number(editingSaleId)}` : ENDPOINTS.SALES_CREATE,
+          {
+            method: isEditing ? "PUT" : "POST",
+            body: payload,
+          },
+        );
 
-        const newSaleId = data?.sale?.id || data?.id || null;
+        const newSaleId = data?.sale?.id || data?.id || editingSaleId || null;
         toast(
           "success",
           newSaleId
-            ? `Sale created (Draft) #${newSaleId}`
-            : "Sale created (Draft)",
+            ? isEditing
+              ? `Sale updated #${newSaleId}`
+              : `Sale created (Draft) #${newSaleId}`
+            : isEditing
+              ? "Sale updated"
+              : "Sale created (Draft)",
         );
 
-        setSelectedCustomer(null);
-        setCustomerQ("");
-        setCustomerResults([]);
-        setCustomerName("");
-        setCustomerPhone("");
-        setCustomerTin("");
-        setCustomerAddress("");
-        setNote("");
-        setSaleCart([]);
+        resetSaleForm();
         setSellerSection("sales");
 
         setCreateSaleBtn("success");
@@ -467,9 +505,80 @@ export function useAdminSellerCoverage({
       selectedCustomer,
       note,
       saleCart,
+      editingSaleId,
       toast,
       loadSales,
     ],
+  );
+
+  const openEditSale = useCallback(
+    async (saleId) => {
+      const sid = Number(saleId);
+      if (!sid || editLoading) return;
+
+      setEditLoading(true);
+      try {
+        const data = await apiFetch(ENDPOINTS.SALE_GET(sid), { method: "GET" });
+        const sale = data?.sale || data || null;
+
+        if (!sale?.id) {
+          toast("danger", "Sale not found.");
+          return;
+        }
+
+        const status = String(sale?.status || "").toUpperCase();
+        if (status !== "DRAFT") {
+          toast("warn", "Only draft sales can be edited before stock is released.");
+          return;
+        }
+
+        const items = Array.isArray(sale?.items)
+          ? sale.items
+          : Array.isArray(sale?.saleItems)
+            ? sale.saleItems
+            : Array.isArray(sale?.itemsPreview)
+              ? sale.itemsPreview
+              : [];
+
+        if (!items.length) {
+          toast("warn", "This draft sale has no item details to edit.");
+        }
+
+        await loadProducts?.();
+        const productsData = await apiFetch(ENDPOINTS.PRODUCTS_LIST, { method: "GET" });
+        const productsList = Array.isArray(productsData?.products) ? productsData.products : productsData?.items || productsData?.rows || [];
+        const productLookup = new Map((Array.isArray(productsList) ? productsList : []).map((product) => [Number(product?.id), product]));
+
+        const mappedCart = items
+          .map((item) => saleItemToCartItem(item, productLookup))
+          .filter((item) => Number(item?.productId) > 0);
+
+        const customerId = sale?.customerId ?? sale?.customer_id ?? null;
+        const name = sale?.customerName ?? sale?.customer_name ?? "";
+        const phone = sale?.customerPhone ?? sale?.customer_phone ?? "";
+        const tin = sale?.customerTin ?? sale?.customer_tin ?? "";
+        const address = sale?.customerAddress ?? sale?.customer_address ?? "";
+
+        setEditingSaleId(sid);
+        setSelectedCustomer(customerId ? { id: customerId, name, phone, tin, address } : null);
+        setCustomerName(name || "");
+        setCustomerPhone(phone || "");
+        setCustomerTin(tin || "");
+        setCustomerAddress(address || "");
+        setCustomerQ([name, phone].filter(Boolean).join(" "));
+        setCustomerResults([]);
+        setNote(sale?.note || "");
+        setSaleCart(mappedCart);
+        setSellerSection("create");
+
+        toast("success", `Sale #${sid} loaded for editing.`);
+      } catch (e) {
+        toast("danger", e?.data?.error || e?.message || "Cannot edit sale.");
+      } finally {
+        setEditLoading(false);
+      }
+    },
+    [editLoading, loadProducts, toast],
   );
 
   const openSaleItems = useCallback(
@@ -638,7 +747,7 @@ export function useAdminSellerCoverage({
 
   const createProps = useMemo(
     () => ({
-      productsLoading,
+      productsLoading: productsLoading || editLoading,
       loadProducts,
       prodQ,
       setProdQ,
@@ -669,9 +778,12 @@ export function useAdminSellerCoverage({
       previewLineTotal,
       createSale,
       createSaleBtn,
+      editingSaleId,
+      cancelEditSale: resetSaleForm,
     }),
     [
       productsLoading,
+      editLoading,
       loadProducts,
       prodQ,
       filteredProducts,
@@ -688,6 +800,7 @@ export function useAdminSellerCoverage({
       saleCart,
       cartSubtotal,
       createSaleBtn,
+      editingSaleId,
       createCustomerFromInputs,
       createSale,
     ],
@@ -696,7 +809,7 @@ export function useAdminSellerCoverage({
   const salesProps = useMemo(
     () => ({
       showAllSales,
-      salesLoading,
+      salesLoading: salesLoading || editLoading,
       loadSales,
       salesQ,
       setSalesQ,
@@ -707,6 +820,7 @@ export function useAdminSellerCoverage({
       markSalePaid,
       openCreditModal,
       openSaleItems,
+      openEditSale,
       openProforma: (id) => openSaleDocument(id, "proforma"),
       openDeliveryNote: (id) => openSaleDocument(id, "delivery"),
       paymentMethods: SELLER_PAYMENT_METHODS,
@@ -715,6 +829,7 @@ export function useAdminSellerCoverage({
     [
       showAllSales,
       salesLoading,
+      editLoading,
       loadSales,
       salesQ,
       salesToShow,
