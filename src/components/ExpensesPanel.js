@@ -74,6 +74,34 @@ function normalizeExpensesResponse(result) {
   return normalizeList(result, ["expenses"]);
 }
 
+function normalizeExpenseRequest(row) {
+  if (!row) return null;
+  return {
+    id: row.id ?? null,
+    locationId: row.locationId ?? row.location_id ?? null,
+    locationName: row.locationName ?? row.location_name ?? "",
+    locationCode: row.locationCode ?? row.location_code ?? "",
+    requestedByUserId: row.requestedByUserId ?? row.requested_by_user_id ?? null,
+    requestedByName: row.requestedByName ?? row.requested_by_name ?? row.requesterName ?? "",
+    requestedByEmail: row.requestedByEmail ?? row.requested_by_email ?? row.requesterEmail ?? "",
+    category: row.category ?? "GENERAL",
+    amount: Number(row.amount ?? 0),
+    expenseDate: row.expenseDate ?? row.expense_date ?? null,
+    method: row.method ?? "CASH",
+    status: row.status ?? "PENDING",
+    payeeName: row.payeeName ?? row.payee_name ?? "",
+    reference: row.reference ?? "",
+    note: row.note ?? "",
+    ownerDecisionNote: row.ownerDecisionNote ?? row.owner_decision_note ?? "",
+    postedExpenseId: row.postedExpenseId ?? row.posted_expense_id ?? null,
+    createdAt: row.createdAt ?? row.created_at ?? null,
+  };
+}
+
+function normalizeExpenseRequestsResponse(result) {
+  return normalizeList(result, ["expenseRequests"]);
+}
+
 function categoryLabel(value) {
   return safe(value, "GENERAL").replaceAll("_", " ");
 }
@@ -751,6 +779,9 @@ export default function ExpensesPanel({
   const [expenses, setExpenses] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
   const [selectedExpenseId, setSelectedExpenseId] = useState(null);
+  const [requestLoading, setRequestLoading] = useState(true);
+  const [expenseRequests, setExpenseRequests] = useState([]);
+  const [requestStatus, setRequestStatus] = useState("PENDING");
 
   const [q, setQ] = useState("");
   const [locationId, setLocationId] = useState(defaultLocationId || "");
@@ -812,6 +843,19 @@ export default function ExpensesPanel({
       branchCount: branches.size,
     };
   }, [expenses]);
+
+  const requestOverview = useMemo(() => {
+    const rows = Array.isArray(expenseRequests) ? expenseRequests : [];
+    return rows.reduce((acc, row) => {
+      const current = safe(row?.status).toUpperCase() || "PENDING";
+      acc.total += 1;
+      if (current === "PENDING") acc.pending += 1;
+      if (current === "APPROVED") acc.approved += 1;
+      if (current === "REJECTED") acc.rejected += 1;
+      acc.amount += Number(row?.amount || 0);
+      return acc;
+    }, { total: 0, pending: 0, approved: 0, rejected: 0, amount: 0 });
+  }, [expenseRequests]);
 
   const buildParams = useCallback(
     (extra = {}) => ({
@@ -915,11 +959,39 @@ export default function ExpensesPanel({
     }
   }, [nextCursor, loadingMore, buildParams]);
 
-  async function handleCreated() {
+  const loadExpenseRequests = useCallback(async () => {
+    setRequestLoading(true);
+
+    try {
+      const params = new URLSearchParams();
+      if (safe(requestStatus)) params.set("status", safe(requestStatus));
+      if (safe(locationId)) params.set("locationId", safe(locationId));
+      if (safe(q)) params.set("q", safe(q));
+      params.set("limit", "50");
+
+      const result = await apiFetch(`/cash/expense-requests?${params.toString()}`);
+      const rows = normalizeExpenseRequestsResponse(result)
+        .map(normalizeExpenseRequest)
+        .filter(Boolean);
+      setExpenseRequests(rows);
+    } catch (e) {
+      setExpenseRequests([]);
+      pushMessage("danger", e?.data?.error || e?.message || "Failed to load expense requests");
+    } finally {
+      setRequestLoading(false);
+    }
+  }, [q, locationId, requestStatus]);
+
+  useEffect(() => {
+    loadExpenseRequests();
+  }, [loadExpenseRequests]);
+
+  async function handleCreated(result) {
     setCreateOpen(false);
-    pushMessage("success", "Expense created.");
-    await loadFirstPage();
-    setTimeout(() => setMessage(""), 2200);
+    const needsApproval = result?.requiresOwnerApproval || result?.expenseRequest;
+    pushMessage("success", needsApproval ? "Expense request sent to owner for approval." : "Expense created.");
+    await Promise.all([loadFirstPage(), loadExpenseRequests()]);
+    setTimeout(() => setMessage(""), 2600);
   }
 
   async function handleVoided() {
@@ -958,6 +1030,59 @@ export default function ExpensesPanel({
   return (
     <div className="grid gap-4">
       {message ? <Banner kind={messageKind}>{message}</Banner> : null}
+
+      <SectionCard
+        title={'Expense requests'}
+        hint={'Track requests waiting for owner approval before money is posted as an expense.'}
+        right={
+          <Select value={requestStatus} onChange={(e) => setRequestStatus(e.target.value)} className={'max-w-[180px]'}>
+            <option value={'PENDING'}>Pending</option>
+            <option value={'APPROVED'}>Approved</option>
+            <option value={'REJECTED'}>Rejected</option>
+            <option value={''}>All requests</option>
+          </Select>
+        }
+      >
+        <div className={'grid grid-cols-1 gap-4 xl:grid-cols-[0.85fr_1.15fr]'}>
+          <Surface className={'bg-[var(--card-2)]'}>
+            <div className={'text-sm font-black text-[var(--app-fg)]'}>Request overview</div>
+            <div className={'mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2'}>
+              <MetricCard label={'Requests'} value={String(requestOverview.total)} sub={'Current view'} />
+              <MetricCard label={'Pending'} value={String(requestOverview.pending)} sub={'Waiting for owner'} tone={requestOverview.pending > 0 ? 'warn' : 'default'} />
+              <MetricCard label={'Approved'} value={String(requestOverview.approved)} sub={'Posted by owner'} />
+              <MetricCard label={'Requested value'} value={money(requestOverview.amount)} sub={'Visible requests'} tone={requestOverview.amount > 0 ? 'warn' : 'default'} />
+            </div>
+          </Surface>
+
+          <Surface className={'bg-[var(--card-2)]'}>
+            {requestLoading ? (
+              <div className={'rounded-[22px] border border-[var(--border)] bg-[var(--card)] px-4 py-6 text-sm text-[var(--muted)]'}>Loading expense requests...</div>
+            ) : expenseRequests.length === 0 ? (
+              <div className={'rounded-[22px] border border-dashed border-[var(--border-strong)] bg-[var(--card)] px-4 py-6 text-center text-sm text-[var(--muted)]'}>No expense requests match this view.</div>
+            ) : (
+              <div className={'grid gap-3'}>
+                {expenseRequests.map((row) => {
+                  const current = safe(row.status, 'PENDING').toUpperCase();
+                  return (
+                    <div key={row.id} className={'rounded-[24px] border border-[var(--border)] bg-[var(--card)] p-4'}>
+                      <div className={'flex flex-wrap items-start justify-between gap-3'}>
+                        <div>
+                          <div className={'text-[11px] font-black uppercase tracking-[0.12em] text-[var(--muted)]'}>Request #{row.id ?? '-'} / {safeDate(row.createdAt)}</div>
+                          <div className={'mt-1 text-lg font-black text-[var(--app-fg)]'}>{money(row.amount)}</div>
+                          <div className={'mt-1 text-sm text-[var(--muted)]'}>{categoryLabel(row.category)} / {methodLabel(row.method)} / {displayBranch(row)}</div>
+                        </div>
+                        <Pill className={current === 'APPROVED' ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300' : current === 'REJECTED' ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300' : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300'}>{current}</Pill>
+                      </div>
+                      <div className={'mt-3 rounded-[18px] border border-[var(--border)] bg-[var(--card-2)] p-3 text-sm text-[var(--app-fg)]'}>{safe(row.note, 'No note recorded')}</div>
+                      {safe(row.ownerDecisionNote) ? <div className={'mt-2 text-xs font-semibold text-[var(--muted)]'}>Owner note: {safe(row.ownerDecisionNote)}</div> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Surface>
+        </div>
+      </SectionCard>
 
       <SectionCard
         title={title}
